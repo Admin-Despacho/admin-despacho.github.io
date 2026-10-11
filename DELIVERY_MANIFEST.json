@@ -1,0 +1,456 @@
+{
+ "name": "OK_DESPACHO_ONLINE_FASE2A",
+ "version": "0.6.3-rc1",
+ "date": "2026-10-09",
+ "status": "FASE 2A — NO LISTO PARA PUBLICAR",
+ "build": "PASS (vite build)",
+ "tests": {
+  "executed_pass": 333,
+  "executed_fail": 0,
+  "not_run_groups": 10,
+  "required_REPORT_MAIL": "25/25 PASS",
+  "detail": "TEST_RESULTS.md"
+ },
+ "migrations": [
+  "20261008000100_fase1_usuarios_permisos.sql",
+  "20261009000100_fase1_1_seguridad_y_aprobaciones.sql",
+  "20261010000100_fase2a_informe_cristian.sql (incremental)"
+ ],
+ "edge_functions": [
+  "admin-users",
+  "commercial-reports"
+ ],
+ "scheduler": "supabase/sql/cron_commercial_reports.sql (pg_cron + pg_net, cada 15 min)",
+ "independiente_de_MAGIC": true,
+ "secrets_incluidos": false,
+ "cambios": [
+  "CAMBIOS_FASE1_1.md",
+  "CAMBIOS_FASE2A.md"
+ ],
+ "variables_pendientes": [
+  "VITE_SUPABASE_URL",
+  "VITE_SUPABASE_ANON_KEY",
+  "APP_URL",
+  "RESEND_API_KEY",
+  "REPORT_FROM",
+  "CRON_SECRET"
+ ],
+ "acciones_humanas_pendientes": [
+  "Crear proyecto Supabase propio",
+  "supabase db push (3 migraciones)",
+  "Deploy admin-users y commercial-reports",
+  "Bucket privado commercial-reports",
+  "Verificar dominio en Resend",
+  "Cron (pg_cron + pg_net)",
+  "Destinatarios del informe",
+  "Subir el modelo V8 para paridad visual",
+  "Repetir las pruebas NOT RUN en el proyecto real"
+ ],
+ "files": [
+  {
+   "path": ".env.example",
+   "bytes": 506,
+   "sha256": "6ea1a97eacb643fb"
+  },
+  {
+   "path": ".gitignore",
+   "bytes": 61,
+   "sha256": "c5985a9bc2dcf3b3"
+  },
+  {
+   "path": "CAMBIOS_FASE1_1.md",
+   "bytes": 4941,
+   "sha256": "aa653882742cddbe"
+  },
+  {
+   "path": "CAMBIOS_FASE2A.md",
+   "bytes": 5253,
+   "sha256": "bc6b3b74623f4eb2"
+  },
+  {
+   "path": "GUIA_PARA_PUBLICAR_CON_CHATGPT.md",
+   "bytes": 1460,
+   "sha256": "64720aa2cda98092"
+  },
+  {
+   "path": "README.md",
+   "bytes": 6269,
+   "sha256": "3a9aee295cf6c0ab"
+  },
+  {
+   "path": "TEST_RESULTS.md",
+   "bytes": 37098,
+   "sha256": "2eb4142ff720f403"
+  },
+  {
+   "path": "VISUAL_PARITY_CHECK.md",
+   "bytes": 2186,
+   "sha256": "7e3777f1e2eb1607"
+  },
+  {
+   "path": "docs/FASE2_PENDIENTES.md",
+   "bytes": 1849,
+   "sha256": "6044d2c957743d15"
+  },
+  {
+   "path": "docs/GUIA_CLOUDFLARE.md",
+   "bytes": 801,
+   "sha256": "4e22f115187d2c90"
+  },
+  {
+   "path": "docs/GUIA_EMAIL_PROVEEDOR.md",
+   "bytes": 1838,
+   "sha256": "7d623f889cf25602"
+  },
+  {
+   "path": "docs/GUIA_SUPABASE.md",
+   "bytes": 2433,
+   "sha256": "dd5ad133d5623c2b"
+  },
+  {
+   "path": "docs/GUIA_VARIABLES.md",
+   "bytes": 902,
+   "sha256": "8ef0f2127e0c52a2"
+  },
+  {
+   "path": "docs/capturas/ejemplo_Informe_Cristian_Torres_Semanal_2026-10-10_DEMO.pdf",
+   "bytes": 9028,
+   "sha256": "83e58fb29206a8e7"
+  },
+  {
+   "path": "docs/capturas/offline_v15.png",
+   "bytes": 154993,
+   "sha256": "4034670113351cf1"
+  },
+  {
+   "path": "docs/capturas/online_email.png",
+   "bytes": 193771,
+   "sha256": "a4e8fbbf899466f7"
+  },
+  {
+   "path": "docs/capturas/online_hoja.png",
+   "bytes": 266209,
+   "sha256": "3498921018346d99"
+  },
+  {
+   "path": "docs/capturas/online_informe.png",
+   "bytes": 131405,
+   "sha256": "0a7b90b6d07319db"
+  },
+  {
+   "path": "docs/capturas/online_operario.png",
+   "bytes": 165298,
+   "sha256": "378d32201eb845d1"
+  },
+  {
+   "path": "docs/capturas/online_usuarios.png",
+   "bytes": 189635,
+   "sha256": "613f3679d3754ceb"
+  },
+  {
+   "path": "docs/capturas/prototipo_v16_selector.png",
+   "bytes": 161757,
+   "sha256": "b36b8671877cbf25"
+  },
+  {
+   "path": "docs/prototipo/OK_Despacho_Online_V16_Prototipo_Aceptacion.html",
+   "bytes": 369240,
+   "sha256": "a0b3a43f2d12346e"
+  },
+  {
+   "path": "index.html",
+   "bytes": 74008,
+   "sha256": "bdbd215b8975ce32"
+  },
+  {
+   "path": "package-lock.json",
+   "bytes": 52059,
+   "sha256": "f6e23fb9016c752b"
+  },
+  {
+   "path": "package.json",
+   "bytes": 832,
+   "sha256": "0f4a5b86dc443aed"
+  },
+  {
+   "path": "public/_headers",
+   "bytes": 175,
+   "sha256": "f379003c601ce430"
+  },
+  {
+   "path": "public/legacy/despacho-v15.js",
+   "bytes": 227257,
+   "sha256": "06d49749eed2df34"
+  },
+  {
+   "path": "public/legacy/exceljs.min.js",
+   "bytes": 947702,
+   "sha256": "7e49da68588e250d"
+  },
+  {
+   "path": "public/legacy/jspdf.plugin.autotable.min.js",
+   "bytes": 38960,
+   "sha256": "2223830cf9a1ec85"
+  },
+  {
+   "path": "public/legacy/jspdf.umd.min.js",
+   "bytes": 365730,
+   "sha256": "85ba2cc3ff858a20"
+  },
+  {
+   "path": "public/legacy/worker.js",
+   "bytes": 10926,
+   "sha256": "62c0ee3fe1321ef7"
+  },
+  {
+   "path": "public/legacy/xlsx.full.min.js",
+   "bytes": 881731,
+   "sha256": "c2915844676c8d3d"
+  },
+  {
+   "path": "public/logo.png",
+   "bytes": 49026,
+   "sha256": "b241dd19987a8d62"
+  },
+  {
+   "path": "src/main.js",
+   "bytes": 4797,
+   "sha256": "dd9046d9036058e2"
+  },
+  {
+   "path": "src/online/account-ui.js",
+   "bytes": 2309,
+   "sha256": "755c7722cf71c121"
+  },
+  {
+   "path": "src/online/api.js",
+   "bytes": 391,
+   "sha256": "2d76594fcd966a0e"
+  },
+  {
+   "path": "src/online/auth-ui.js",
+   "bytes": 4021,
+   "sha256": "3850a180eb7a0f39"
+  },
+  {
+   "path": "src/online/demo-api.js",
+   "bytes": 15459,
+   "sha256": "b86a081fc5ca56cb"
+  },
+  {
+   "path": "src/online/reports-ui.js",
+   "bytes": 21857,
+   "sha256": "4e49bdbe4bd6aee2"
+  },
+  {
+   "path": "src/online/supabase-api.js",
+   "bytes": 5223,
+   "sha256": "20141821d6ea48d6"
+  },
+  {
+   "path": "src/online/users-ui.js",
+   "bytes": 16726,
+   "sha256": "c2ea6a94f7331453"
+  },
+  {
+   "path": "src/online/util.js",
+   "bytes": 441,
+   "sha256": "fb19ce3ec5b1ea1c"
+  },
+  {
+   "path": "src/styles/offline.css",
+   "bytes": 23575,
+   "sha256": "836e4b64dd676f90"
+  },
+  {
+   "path": "src/styles/online.css",
+   "bytes": 8931,
+   "sha256": "14406eab36a2ae07"
+  },
+  {
+   "path": "supabase/config.toml",
+   "bytes": 138,
+   "sha256": "b08d187e0d38d552"
+  },
+  {
+   "path": "supabase/functions/_shared/report-demo-data.js",
+   "bytes": 4306,
+   "sha256": "d623339b5beeab37"
+  },
+  {
+   "path": "supabase/functions/_shared/report-email.js",
+   "bytes": 8102,
+   "sha256": "6fb9869d739b041a"
+  },
+  {
+   "path": "supabase/functions/_shared/report-engine.js",
+   "bytes": 17428,
+   "sha256": "b492c3c135ce750b"
+  },
+  {
+   "path": "supabase/functions/_shared/report-memory-store.js",
+   "bytes": 3627,
+   "sha256": "6951c1e6b10c6980"
+  },
+  {
+   "path": "supabase/functions/_shared/report-pdf.js",
+   "bytes": 7739,
+   "sha256": "644710a87ab81aa8"
+  },
+  {
+   "path": "supabase/functions/_shared/report-service.js",
+   "bytes": 5816,
+   "sha256": "e2913e27861568e1"
+  },
+  {
+   "path": "supabase/functions/_shared/rules.js",
+   "bytes": 10157,
+   "sha256": "c23f33aa2157716e"
+  },
+  {
+   "path": "supabase/functions/admin-users/handler.js",
+   "bytes": 12833,
+   "sha256": "5036ccf50d05bb41"
+  },
+  {
+   "path": "supabase/functions/admin-users/handler.test.js",
+   "bytes": 19762,
+   "sha256": "e2bb8331335a7a66"
+  },
+  {
+   "path": "supabase/functions/admin-users/index.ts",
+   "bytes": 4392,
+   "sha256": "e07491c213b794e8"
+  },
+  {
+   "path": "supabase/functions/commercial-reports/handler.js",
+   "bytes": 6326,
+   "sha256": "326e423c16b3be52"
+  },
+  {
+   "path": "supabase/functions/commercial-reports/handler.test.js",
+   "bytes": 9389,
+   "sha256": "a3c9519c101f9501"
+  },
+  {
+   "path": "supabase/functions/commercial-reports/index.ts",
+   "bytes": 5990,
+   "sha256": "bee8d127d6861e92"
+  },
+  {
+   "path": "supabase/functions/deno.json",
+   "bytes": 59,
+   "sha256": "1cb4c65e200a9119"
+  },
+  {
+   "path": "supabase/functions/deno.lock",
+   "bytes": 3147,
+   "sha256": "be5358c7eafb1a6c"
+  },
+  {
+   "path": "supabase/migrations/20261008000100_fase1_usuarios_permisos.sql",
+   "bytes": 13187,
+   "sha256": "b5d466b05aa24bbe"
+  },
+  {
+   "path": "supabase/migrations/20261009000100_fase1_1_seguridad_y_aprobaciones.sql",
+   "bytes": 22114,
+   "sha256": "4bcc0e72c15226cd"
+  },
+  {
+   "path": "supabase/migrations/20261010000100_fase2a_informe_cristian.sql",
+   "bytes": 8706,
+   "sha256": "c16e0a92f5bb9be9"
+  },
+  {
+   "path": "supabase/sql/cron_commercial_reports.sql",
+   "bytes": 776,
+   "sha256": "fa653644f99a71db"
+  },
+  {
+   "path": "tests/e2e/run_e2e.py",
+   "bytes": 28231,
+   "sha256": "8e9d04e8ae5cb5a2"
+  },
+  {
+   "path": "tests/make_test_results.py",
+   "bytes": 6538,
+   "sha256": "e0a20b2320a4f2d3"
+  },
+  {
+   "path": "tests/pdf/check_pdf.sh",
+   "bytes": 2064,
+   "sha256": "f02adb95d6551e55"
+  },
+  {
+   "path": "tests/pdf/make_pdf.js",
+   "bytes": 985,
+   "sha256": "eaeb1c1b9392e092"
+  },
+  {
+   "path": "tests/run_all.sh",
+   "bytes": 1527,
+   "sha256": "e1dccee52f658cbc"
+  },
+  {
+   "path": "tests/sql/fase1_1_test.sql",
+   "bytes": 19060,
+   "sha256": "fdf4107f6dd2b278"
+  },
+  {
+   "path": "tests/sql/fase1_test.sql",
+   "bytes": 14926,
+   "sha256": "683bedb56148bae0"
+  },
+  {
+   "path": "tests/sql/fase2a_test.sql",
+   "bytes": 6910,
+   "sha256": "ecddc8d21b5dbee2"
+  },
+  {
+   "path": "tests/sql/post_migration_grants.sql",
+   "bytes": 325,
+   "sha256": "8420078ec8bf322e"
+  },
+  {
+   "path": "tests/sql/run.sh",
+   "bytes": 1190,
+   "sha256": "733195d8391e168d"
+  },
+  {
+   "path": "tests/sql/supabase_stub.sql",
+   "bytes": 2057,
+   "sha256": "e417ac9a7592b709"
+  },
+  {
+   "path": "tests/sql/zz_summary.sql",
+   "bytes": 294,
+   "sha256": "0f8ad34cacd6e7b8"
+  },
+  {
+   "path": "tests/unit/demo-api.test.js",
+   "bytes": 5657,
+   "sha256": "bbbf6014939e8cf1"
+  },
+  {
+   "path": "tests/unit/report-engine.test.js",
+   "bytes": 13439,
+   "sha256": "59abfad9730b06ab"
+  },
+  {
+   "path": "tests/unit/rules.test.js",
+   "bytes": 6641,
+   "sha256": "14486a77deab3585"
+  },
+  {
+   "path": "tests/unit/supabase-api.test.js",
+   "bytes": 3153,
+   "sha256": "b2a34010b1f9b0b7"
+  },
+  {
+   "path": "vite.config.js",
+   "bytes": 216,
+   "sha256": "b4893d7e3c2aec10"
+  }
+ ]
+}

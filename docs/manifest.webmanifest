@@ -1,0 +1,11 @@
+{
+  "name": "OK Despacho",
+  "short_name": "OK Despacho",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F2F5F7",
+  "theme_color": "#000E18",
+  "lang": "es-AR",
+  "icons": [{ "src": "/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }]
+}

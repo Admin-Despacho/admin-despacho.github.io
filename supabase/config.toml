@@ -1,0 +1,5 @@
+# Proyecto Supabase PROPIO de OK Despacho (independiente de MAGIC).
+project_id = "ok-despacho"
+
+[functions.admin-users]
+verify_jwt = true
