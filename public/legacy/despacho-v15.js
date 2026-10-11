@@ -59,7 +59,7 @@ const Config = {
       tolerance: 1,
       opNotesInExcel: false,
       exportCols: [true, true, true, true, true, true, true, true, true, true],
-      carriers: ['UCO', 'VASCA', 'ANDESMAR', 'CRISTIAN TORRES - ESTE', 'CRISTIAN TORRES - ALREDEDORES', 'MARCHETTI'],
+      carriers: ['UCO', 'VASCA', 'ANDESMAR', 'CRISTIAN TORRES - ESTE', 'CRISTIAN TORRES - ALREDEDORES', 'MARCHETTI', 'TRANSPORTE INTERNO'],
       rules: [
         { estado: 'CRISTIAN', zona: 'ESTE', carrier: 'CRISTIAN TORRES - ESTE' },
         { estado: 'CRISTIAN', zona: '', carrier: 'CRISTIAN TORRES - ALREDEDORES' },
@@ -82,6 +82,10 @@ const Config = {
     if (v && v.nocMonths != null && v.creditMonths == null) this.value.creditMonths = v.nocMonths;
     delete this.value.nocMonths;
     if (!Array.isArray(this.value.exportCols) || this.value.exportCols.length !== 10) this.value.exportCols = d.exportCols.slice();
+    // STG-04: Transporte Interno debe estar disponible siempre, incluso con configuraciones guardadas anteriores.
+    // No se infiere desde el Excel: puede tener contador 0 y el Operador decide cuándo usarlo.
+    if (!Array.isArray(this.value.carriers)) this.value.carriers = d.carriers.slice();
+    if (!this.value.carriers.some(c => Normalizer.name(c) === Normalizer.name('TRANSPORTE INTERNO'))) this.value.carriers.push('TRANSPORTE INTERNO');
     // Agrega una sola vez la regla "ZONA ESTE" a configuraciones guardadas anteriores
     if (!this.value.rulesV || this.value.rulesV < 2) {
       if (!this.value.rules.some(r => Normalizer.name(r.estado) === 'ZONA ESTE')) {
