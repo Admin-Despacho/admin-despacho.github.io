@@ -4,7 +4,7 @@
 import { hasPerm } from '../_shared/rules.js';
 import { buildReport } from '../_shared/report-engine.js';
 
-const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type, x-cron-secret' } });
+import { json, withCors } from '../_shared/http.js';
 const VIEW = 'can_view_commercial_transport_reports', MANAGE = 'can_manage_commercial_transport_reports';
 const B64 = bytes => { let s = ''; const a = new Uint8Array(bytes); for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode(...a.subarray(i, i + 0x8000)); return btoa(s); };
 
@@ -12,7 +12,8 @@ const B64 = bytes => { let s = ''; const a = new Uint8Array(bytes); for (let i =
  * deps = { getUserFromJwt, getProfile, cronSecret, service (createReportService), store (mismo store del servicio),
  *          now(), audit(entry) }
  */
-export async function handle(req, deps) {
+export const handle = withCors(handleRaw);
+async function handleRaw(req, deps) {
   if (req.method === 'OPTIONS') return json(200, { ok: true });
   if (req.method !== 'POST') return json(405, { error: 'Método no permitido' });
   let body; try { body = await req.json(); } catch (e) { return json(400, { error: 'JSON inválido.' }); }
