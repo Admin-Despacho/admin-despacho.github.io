@@ -4,13 +4,8 @@
 // Auditoría: un evento de éxito se registra RECIÉN cuando la operación terminó bien.
 import { validateUserAction, ROLES } from '../_shared/rules.js';
 
-// CORS en TODAS las respuestas (OPTIONS, 2xx, 4xx y 500): supabase-js envía authorization, apikey, x-client-info y content-type
-export const CORS = {
-  'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'authorization, apikey, x-client-info, content-type',
-  'access-control-allow-methods': 'POST, OPTIONS'
-};
-export const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...CORS } });
+import { CORS, json } from '../_shared/http.js';
+export { CORS, json };
 const errMsg = e => String((e && e.message) || e);
 
 /**
@@ -95,7 +90,9 @@ async function handleInner(req, deps) {
       const email = String(payload.email).trim().toLowerCase();
       let created;
       try { created = await deps.inviteUser(email, deps.redirectTo); }
-      catch (e) { await audit('USER_CREATE_FAILED', null, null, { email, step: 'invite', error: errMsg(e) }); return json(502, { error: 'No se pudo enviar la invitación: ' + errMsg(e), code: 'INVITE_FAILED' }); }
+      catch (e) { await audit('USER_CREATE_FAILED', null, null, { email, step: 'invite', error: errMsg(e) });
+        if (/rate limit/i.test(errMsg(e))) return json(429, { error: 'Se alcanzó el límite de emails de Supabase. Configurá un SMTP propio (Authentication → SMTP) o esperá unos minutos.', code: 'EMAIL_RATE_LIMIT' });
+        return json(502, { error: 'No se pudo enviar la invitación: ' + errMsg(e), code: 'INVITE_FAILED' }); }
       const profile = { id: created.id, full_name: String(payload.full_name).trim(), email, phone: payload.phone || null, role,
         status: payload.active === false ? 'DESHABILITADO' : 'INVITACION_PENDIENTE', created_by: actor.id };
       try {
@@ -182,7 +179,14 @@ async function handleInner(req, deps) {
     }
     case 'resend_invite': {
       try { await deps.resendInvite(target.email, deps.redirectTo); }
-      catch (e) { return json(502, { error: 'No se pudo reenviar la invitación: ' + errMsg(e), code: 'INVITE_FAILED' }); }
+      catch (e) {
+        if (/rate limit/i.test(errMsg(e))) return json(429, { error: 'Se alcanzó el límite de emails de Supabase. Configurá un SMTP propio (Authentication → SMTP) o esperá unos minutos.', code: 'EMAIL_RATE_LIMIT' });
+        // Si Auth ya registró al usuario, NO se crea otro: se envía un enlace para que defina su contraseña
+        if (/already|registered|exists/i.test(errMsg(e))) {
+          try { await deps.sendPasswordReset(target.email, deps.redirectTo); }
+          catch (e2) { return json(502, { error: 'No se pudo reenviar la invitación: ' + errMsg(e2), code: 'INVITE_FAILED' }); }
+        } else return json(502, { error: 'No se pudo reenviar la invitación: ' + errMsg(e), code: 'INVITE_FAILED' });
+      }
       await audit('INVITE_RESENT', target.id, null, { email: target.email });
       return json(200, { ok: true, message: 'Invitación reenviada a ' + target.email + '.' });
     }
