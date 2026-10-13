@@ -82,10 +82,7 @@ const Config = {
     if (v && v.nocMonths != null && v.creditMonths == null) this.value.creditMonths = v.nocMonths;
     delete this.value.nocMonths;
     if (!Array.isArray(this.value.exportCols) || this.value.exportCols.length !== 10) this.value.exportCols = d.exportCols.slice();
-    // STG-04: Transporte Interno debe estar disponible siempre, incluso con configuraciones guardadas anteriores.
-    // No se infiere desde el Excel: puede tener contador 0 y el Operador decide cuándo usarlo.
-    if (!Array.isArray(this.value.carriers)) this.value.carriers = d.carriers.slice();
-    if (!this.value.carriers.some(c => Normalizer.name(c) === Normalizer.name('TRANSPORTE INTERNO'))) this.value.carriers.push('TRANSPORTE INTERNO');
+    if (!this.value.carriers.includes('TRANSPORTE INTERNO')) this.value.carriers.push('TRANSPORTE INTERNO'); // siempre visible en Despacho
     // Agrega una sola vez la regla "ZONA ESTE" a configuraciones guardadas anteriores
     if (!this.value.rulesV || this.value.rulesV < 2) {
       if (!this.value.rules.some(r => Normalizer.name(r.estado) === 'ZONA ESTE')) {
@@ -95,7 +92,15 @@ const Config = {
       this.value.rulesV = 2;
     }
   },
-  get() { return this.value; },
+  // Modo online: las reglas financieras vigentes del servidor son la ÚNICA fuente (FAC/NDP, costos de envío, antigüedad, tipos de crédito, tolerancia).
+  // Se re-imponen en cada lectura: un cambio local no puede alterar el cálculo.
+  get() {
+    const s = window.OKD_SERVER_RULES, v = this.value, rr = window.OKD_SERVER_ROUTING;
+    if (rr && v) v.rules = JSON.parse(JSON.stringify(rr)); // reglas Estado/Zona → Transportista del servidor (única fuente online)
+    if (s && v) { v.pay = Object.assign({}, v.pay, s.pay || {}); if (s.shipCosts) v.shipCosts = JSON.parse(JSON.stringify(s.shipCosts));
+      ['creditMonths', 'tolerance', 'creditTypes'].forEach(k => { if (s[k] != null) v[k] = JSON.parse(JSON.stringify(s[k])); }); }
+    return v;
+  },
   isCristian(c) { return /CRISTIAN/i.test(c || ''); },
   payFor(doc) {
     const t = Normalizer.compType(doc);
@@ -105,7 +110,7 @@ const Config = {
   },
   carrierFor(estado, zona) {
     const e = ' ' + Normalizer.name(estado) + ' ', z = ' ' + Normalizer.name(zona) + ' ';
-    for (const r of this.value.rules) {
+    for (const r of this.get().rules) {
       const re = Normalizer.name(r.estado), rz = Normalizer.name(r.zona);
       if (!re || !r.carrier) continue;
       if (e.indexOf(' ' + re + ' ') < 0) continue;
@@ -266,10 +271,12 @@ const FinancialIndex = {
     // Financiación propia: agrupa partes/cuotas del mismo comprobante y descarta duplicados exactos
     const g = window.OKFinancing.groupAll(docs, this.importId);
     this.comps = g.groups;
+    this.finSync = FinancingPlans.sync(g.groups, this.importId); // se espera antes de mostrar financiación, ofrecer NOC a financiación o publicar
     for (const r of g.uniqueRows) {
       if (!this.byClient.has(r.key)) this.byClient.set(r.key, []);
       this.byClient.get(r.key).push(r);
     }
+    this.nocSync = NocReconcile.run(this.importId);                // RC3: conciliación NOC con la importación ya indexada
   },
   buildCC(records) {
     this.ccByCuit = new Map(); this.ccByName = new Map(); this.ccByFull = new Map();
@@ -442,7 +449,7 @@ const CalculationEngine = {
     const rows = FinancialIndex.clientRows(key);
     const allowed = new Set((Config.get().creditTypes || ['NOC', 'REC', 'REP']).map(t => String(t).toUpperCase()));
     const list = rows.filter(r => r.s != null && r.s < -0.004 && allowed.has(r.t)).map(r => ({
-      comp: r.comp, t: r.t || '', d: r.d || '', amt: r2(-r.s), cat: !r.d ? 'undated' : (r.d < limit ? 'old' : 'valid')
+      comp: r.comp, t: r.t || '', d: r.d || '', amt: r2(-r.s), orig: r.m != null ? r2(Math.abs(r.m)) : null, cuit: r.cuit || '', cat: !r.d ? 'undated' : (r.d < limit ? 'old' : 'valid')
     })).sort((a, b) => (a.d || '9999').localeCompare(b.d || '9999') || a.comp.localeCompare(b.comp));
     const sum = cat => r2(list.filter(x => x.cat === cat).reduce((s, x) => s + x.amt, 0));
     const visible = r2(rows.reduce((s, r) => s + (r.s || 0), 0));
@@ -759,7 +766,113 @@ const ShipConfirm = {
   }
 };
 
+/* ---------------- Reglas financieras del servidor (RC2): pisan la configuración local y quedan en el snapshot ---------------- */
+// Modo online: los campos financieros de la configuración local quedan de solo lectura (se editan en CONFIGURACIÓN → REGLAS FINANCIERAS)
+function lockFinancialConfig() {
+  if (window.OKD_SERVER_ROUTING) { const t = document.getElementById('cfgRules'); if (t) t.querySelectorAll('input,button').forEach(x => { x.disabled = true; }); const ad = document.getElementById('cfgAddRule'); if (ad) { ad.disabled = true; ad.title = 'Las reglas de asignación se editan en CONFIGURACIÓN → REGLAS DE ASIGNACIÓN (servidor)'; } }
+  ['cfgFAC', 'cfgNDP', 'cfgEste', 'cfgAlr', 'cfgNoc', 'cfgTol'].forEach(id => { const el = document.getElementById(id); if (el) { el.disabled = true; el.title = 'Lo define Administración en CONFIGURACIÓN → REGLAS FINANCIERAS (servidor)'; } });
+  const t = document.getElementById('cfgTitle'); if (t && !document.getElementById('cfgServerNote')) t.insertAdjacentHTML('afterend', '<p class="rp-note" id="cfgServerNote">Medios de pago, costos de envío, antigüedad de créditos y tolerancia vienen del servidor (versión ' + (window.OKD_RULES_VERSION || '—') + ') y son iguales para todos los operadores.</p>');
+}
+// Acceso del shell online a funciones del panel (abrir/quitar borradores, PDF desde snapshot)
+window.OKD_LEGACY = {
+  openDraft: (k, n, c) => SheetTabs.openDraft(k, n, c), dropLocal: k => SheetTabs.dropLocal(k),
+  pdfBytes: model => PdfExporter.bytesFromModel(model), xlsxBytes: model => ExcelExporter.bytesFromModel(model)
+};
+// Reglas Estado/Zona → Transportista vigentes del servidor. Recalcula solo asignaciones AUTOMÁTICAS: una reasignación manual del Operario no se toca.
+window.OKD_APPLY_ROUTING = (f) => {
+  if (!f || !Array.isArray(f.rules)) return;
+  window.OKD_SERVER_ROUTING = f.rules.filter(r => r.active !== false).sort((a, b) => (a.priority || 0) - (b.priority || 0)).map(r => ({ estado: r.estado, zona: r.zona || '', carrier: r.carrier }));
+  window.OKD_ROUTING_VERSION = f.version; lockFinancialConfig();
+  if (!Config.value || !window.OKD_BOOTED) { window.OKD_PENDING_ROUTING = f; return; }
+  try { RouteStore.applyConfig(); CalculationEngine.computeAll(RouteStore.rows); RouteStore.save(); UI.renderTable(); } catch (e) { console.warn('reglas de asignación', e); }
+};
+window.OKD_APPLY_RULES = (f) => {
+  if (!f || !f.rules) return;
+  window.OKD_SERVER_RULES = JSON.parse(JSON.stringify(f.rules)); window.OKD_RULES_VERSION = f.version; lockFinancialConfig();
+  if (!Config.value || !window.OKD_BOOTED) { window.OKD_PENDING_RULES = f; return; } // el panel todavía arranca: se aplican al terminar
+  Config.get();
+  try { RouteStore.applyConfig(); CalculationEngine.computeAll(RouteStore.rows); RouteStore.save(); UI.renderTable(); } catch (e) { console.warn('reglas', e); } // medios de pago, costos, créditos y tolerancia recalculados
+};
+
+/* ---------------- Financiación propia del cliente (RC2.1b): planes persistidos en el servidor ---------------- */
+const FinancingPlans = {
+  byClient: new Map(), state: 'OK', error: '', failedKeys: new Set(), localKeys: new Set(), promise: null,
+  bridge() { return window.OKD_BRIDGE && window.OKD_BRIDGE.financing; },
+  store(plans) { (plans || []).forEach(p => { const l = (this.byClient.get(p.client_key) || []).filter(x => x.id !== p.id); l.push(p); this.byClient.set(p.client_key, l); }); },
+  setState(st, err) {
+    this.state = st; this.error = err || '';
+    const el = document.getElementById('finSync'); if (!el) return;
+    el.hidden = st === 'OK' && !this.lastRun; el.className = 'finsync ' + st;
+    el.innerHTML = st === 'SINCRONIZANDO' ? 'FINANCIACIÓN PROPIA · SINCRONIZANDO…' : st === 'ERROR' ? '<b>FINANCIACIÓN PROPIA · REVISAR</b> · no se pudo verificar la financiación con el servidor (' + esc(err) + '). No se puede aplicar NOC a financiación ni publicar hojas de esos clientes. <button type="button" class="btn soft" id="finRetry">REINTENTAR</button>' : 'FINANCIACIÓN PROPIA · OK';
+    const rb = document.getElementById('finRetry'); if (rb) rb.onclick = () => this.retry();
+  },
+  // Se llama al terminar de procesar el Saldo Comprobante. La promesa queda guardada y todo lo que depende de la financiación la espera.
+  sync(groups, importId) {
+    const b = this.bridge(); if (!b || !window.OKFinancing.planCandidates) return Promise.resolve();
+    this.lastGroups = groups; this.lastImport = importId; this.lastRun = true;
+    this.promise = (async () => {
+      this.setState('SINCRONIZANDO');
+      // claves de clientes con financiación detectada localmente (para saber a quién afecta una falla)
+      const loc = new Set(); groups.forEach(list => list.forEach(g => { if (g.fin && g.fin.status !== 'NORMAL') loc.add(g.key); }));
+      try {
+        const keys = new Set((await b.keys()).map(k => k.client_key + '||' + k.comp));
+        keys.forEach(k => loc.add(k.split('||')[0]));
+        const c = window.OKFinancing.planCandidates(groups, importId, keys);
+        if (c.length) this.store(await b.sync(importId || '', c));
+        this.failedKeys = new Set(); this.localKeys = loc; this.setState('OK');
+      } catch (e) { this.failedKeys = loc; this.localKeys = loc; this.setState('ERROR', String(e.message || e)); }
+      if (this.state === 'OK' && this.readFailed.size) this.setState('ERROR', 'planes sin verificar');
+    })();
+    return this.promise;
+  },
+  async ready() { if (this.promise) await this.promise; },
+  // ¿Este cliente depende de una sincronización fallida?
+  blocked(key) { return (this.state === 'ERROR' && this.failedKeys.has(key)) || this.readFailed.has(key); },
+  readFailed: new Set(),
+  // Una falla de lectura NO equivale a "sin planes": esos clientes quedan en REVISAR (no se aplica NOC a financiación ni se publica) hasta reintentar.
+  async forClients(keys) {
+    await this.ready();
+    const b = this.bridge(); keys = [...new Set(keys.filter(Boolean))]; if (!b || !keys.length) return [];
+    try {
+      const l = await b.forClients(keys);
+      keys.forEach(k => { this.readFailed.delete(k); this.byClient.set(k, []); }); this.store(l);   // limpia solo lo consultado con éxito
+      if (this.state === 'ERROR' && !this.readFailed.size && !this.failedKeys.size) this.setState('OK');
+      return l;
+    } catch (e) {
+      keys.forEach(k => this.readFailed.add(k)); this.lastReadKeys = keys; this.setState('ERROR', 'no se pudieron leer los planes: ' + (e.message || e));
+      return null;
+    }
+  },
+  async retry() {
+    if (this.failedKeys.size && this.lastGroups) await this.sync(this.lastGroups, this.lastImport);
+    if (this.readFailed.size) await this.forClients([...this.readFailed]);
+  },
+  active(key) { return (this.byClient.get(key) || []).filter(p => p.status === 'ACTIVO' && Number(p.operational_pending) > 0.004); },
+  freqLabel(f) { return f === 'POR_CONFIRMAR' ? 'POR CONFIRMAR' : f; }
+};
+function nocReconLabel(st) { return { OK: 'Sin diferencias', PENDING_CIANBOX: 'Pendiente de Cianbox', CANCELLED_ROUTE_REVIEW: 'Hoja cancelada — revisar', RECONCILED: 'Conciliada', REVERSED: 'Revertida', CIANBOX_DIFFERENCE: 'Diferencia detectada' }[st] || st || ''; }
+window.OKD_NOC_LABEL = nocReconLabel;
+// RC3: conciliación de las NOC conocidas contra el Saldo Comprobante importado (Cianbox informa; nunca borra aplicaciones locales)
+const NocReconcile = {
+  async run(importId) {
+    const b = window.OKD_BRIDGE && window.OKD_BRIDGE.noc; if (!b || !b.reconcile) return;
+    const items = [];
+    FinancialIndex.byClient.forEach(list => list.forEach(r => { if (/^\s*NOC\b/i.test(r.comp || '') && r.m != null) items.push({ comp: r.comp, cuit: r.cuit || '', issued_date: r.d || '', original_amount: Math.abs(r.m), available_amount: Math.max(0, -(r.s || 0)) }); }));
+    if (!items.length) return;   // sin NOC en el archivo no hay evidencia para conciliar (nunca se marca "no informada" con un archivo vacío)
+    const el = document.getElementById('nocSync');
+    try { const res = await b.reconcile(importId || '', items, true); if (el) { el.hidden = true; } this.last = res; }
+    catch (e) { if (el) { el.hidden = false; el.className = 'finsync ERROR'; el.innerHTML = '<b>CONCILIACIÓN NOC · REVISAR</b> · no se pudo conciliar con el Saldo Comprobante (' + esc(e.message || e) + '). <button type="button" class="btn soft" id="nocRetry">REINTENTAR</button>'; document.getElementById('nocRetry').onclick = () => this.run(importId); } }
+  }
+};
+const rowKey = r => (r.calc && r.calc.refKey) || (r.calc && r.calc.cuit) || Normalizer.name(r.cliente);
+
 /* ---------------- Hojas múltiples: cada pestaña = una hoja/borrador independiente (Fase 2B.1) ---------------- */
+// "3 paradas · 9 bultos" de la hoja activa
+function sheetSummary(rows) {
+  rows = (rows || RouteStore.rows).filter(r => r.sale);
+  const b = rows.reduce((a, r) => a + (parseInt(r.bultos, 10) || 0), 0);
+  return rows.length + ' parada' + (rows.length === 1 ? '' : 's') + ' · ' + b + ' bulto' + (b === 1 ? '' : 's');
+}
 const SheetTabs = {
   idx: null,
   async boot() {
@@ -786,6 +899,33 @@ const SheetTabs = {
     t.published = RouteStore.published ? RouteStore.published.number : null;
     this.idx.active = RouteStore.sheetId;
     DB.set('sheets_index', this.idx);
+    this.sync(t);
+  },
+  sync(t) {
+    const b = window.OKD_BRIDGE && window.OKD_BRIDGE.drafts; if (!b || RouteStore.published || !RouteStore.rows.length) return;
+    clearTimeout(this._st); const id = RouteStore.sheetId, rows = RouteStore.rows.filter(r => r.sale);
+    const content = { rows: RouteStore.rows, selected: [...RouteStore.selected], sheetDate: RouteStore.sheetDate, oldDecisions: RouteStore.oldDecisions, showCash: RouteStore.showCash, showCheques: RouteStore.showCheques, showTransfers: RouteStore.showTransfers };
+    const carriers = [...new Set(rows.map(r => r.transportista).filter(Boolean))].join(' / ');
+    this._st = setTimeout(() => b.touch(id, t.name, carriers, rows.length, t.orders, JSON.parse(JSON.stringify(content))).catch(() => null), 600);
+  },
+  rename(id) {
+    const t = this.tab(id); if (!t) return;
+    const n = prompt('Nombre de la hoja', t.name); if (!n || !n.trim()) return;
+    t.name = n.trim().slice(0, 40); DB.set('sheets_index', this.idx); this.render(); if (id === RouteStore.sheetId) this.sync(t);
+  },
+  // Abre un borrador (propio o, con permiso, de otro operador) desde BORRADORES o desde un conflicto de pedido
+  async openDraft(key, name, content) {
+    if (this.tab(key)) { await this.switchTo(key); return; }
+    await RouteStore.flush();
+    this.idx.tabs.push({ id: key, name: name || 'Borrador', closed: false, orders: [] });
+    await this.show(key, Object.assign({}, content || {}, { sheetId: key })); await RouteStore.flush();
+  },
+  // Borrador eliminado en el servidor: se quita del equipo (no toca hojas publicadas)
+  async dropLocal(key) {
+    const t = this.tab(key); if (!t || t.published) return;
+    this.idx.tabs = this.idx.tabs.filter(x => x.id !== key); await DB.set('sheet:' + key, null);
+    if (RouteStore.sheetId === key) { const o = this.idx.tabs.find(x => !x.closed); if (o) await this.show(o.id); else await this.create(); }
+    else { await DB.set('sheets_index', this.idx); this.render(); }
   },
   // Pedido ya cargado en OTRA hoja borrador (no publicada)
   orderInOther(id) { const t = (this.idx ? this.idx.tabs : []).find(x => x.id !== RouteStore.sheetId && !x.published && (x.orders || []).includes(String(id))); return t ? t.name : null; },
@@ -820,8 +960,9 @@ const SheetTabs = {
     const open = this.idx.tabs.filter(t => !t.closed), closed = this.idx.tabs.filter(t => t.closed);
     el.innerHTML = open.map(t => '<span class="stab' + (t.id === RouteStore.sheetId ? ' on' : '') + '" data-tab="' + t.id + '"><b>' + esc(t.name) + '</b>' + (t.published ? '<i>' + esc(t.published) + '</i>' : '') + '<button type="button" class="stx" data-close="' + t.id + '" title="Cerrar pestaña (no borra)">×</button></span>').join('') +
       '<button class="btn soft" type="button" id="tabNew">+ NUEVA HOJA</button>' +
-      (closed.length ? '<select id="tabReopen"><option value="">Reabrir borrador…</option>' + closed.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('') + '</select>' : '');
-    el.querySelectorAll('.stab').forEach(b => b.addEventListener('click', e => { if (!e.target.closest('[data-close]')) this.switchTo(b.dataset.tab); }));
+      (closed.length ? '<select id="tabReopen"><option value="">Reabrir borrador…</option>' + closed.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('') + '</select>' : '') +
+      '<span class="sheetsum" id="sheetSummary">' + sheetSummary() + '</span>';
+    el.querySelectorAll('.stab').forEach(b => { b.addEventListener('click', e => { if (!e.target.closest('[data-close]')) this.switchTo(b.dataset.tab); }); b.addEventListener('dblclick', () => this.rename(b.dataset.tab)); b.title = 'Doble clic para renombrar'; });
     el.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => this.close(b.dataset.close)));
     el.querySelector('#tabNew').addEventListener('click', () => this.create());
     const ro = el.querySelector('#tabReopen'); if (ro) ro.addEventListener('change', () => ro.value && this.switchTo(ro.value));
@@ -837,6 +978,144 @@ const Publisher = {
     return null;
   },
   rows() { return RouteStore.rows.filter(r => r.sale && !r.shipPending); },
+  // NOC: nunca automáticas. Se listan las NOC del Saldo Comprobante y el operador decide APLICAR (el servidor controla piso CC, remanente y consumo único).
+  nocList(r) { return ((r.calc && r.calc.creditsAll) || []).filter(x => String(x.t || '').toUpperCase() === 'NOC' && x.amt > 0.004); },
+  // PEDIDO ACTUAL y FINANCIACIÓN PROPIA ACTIVA, separados (nunca se mezclan los saldos)
+  finHtml(rows) {
+    const seen = new Set(), parts = [];
+    rows.forEach(r => { const k = rowKey(r); if (seen.has(k)) return; seen.add(k);
+      // sin verificación del servidor no se muestran saldos de planes (podrían estar desactualizados)
+      if (FinancingPlans.blocked(k)) { parts.push('<div class="finrev"><b>FINANCIACIÓN PROPIA · REVISAR</b> · ' + esc(r.cliente) + ': no se pudo verificar la financiación con el servidor. Usá REINTENTAR.</div>'); return; }
+      FinancingPlans.active(k).forEach(p => parts.push('<div class="finbox" data-plan="' + p.id + '"><b>CLIENTE CON FINANCIACIÓN PROPIA ACTIVA</b> · ' + esc(r.cliente) +
+        '<div class="fincols"><div><span>PEDIDO ACTUAL</span><b>' + ars(rows.filter(x => rowKey(x) === k).reduce((t, x) => t + (x.monto || 0), 0)) + '</b></div>' +
+        '<div><span>FINANCIACIÓN PROPIA ACTIVA · ' + esc(p.comp_label || p.comp) + '</span><b data-finsaldo>' + ars(p.operational_pending) + '</b><small>Modalidad: ' + FinancingPlans.freqLabel(p.frequency) +
+        (p.next_due ? ' · Próxima cuota: ' + esc(isoToDMY(p.next_due)) + (p.next_amount ? ' ' + ars(p.next_amount) : '') : '') + ' · fuente ' + ars(p.source_pending) + (Number(p.noc_adjustments) > 0 ? ' · ajuste NOC ' + ars(p.noc_adjustments) : '') + '</small></div></div></div>')); });
+    return parts.join('');
+  },
+  financingPayload(rows) {
+    const out = [], seen = new Set();
+    rows.forEach(r => FinancingPlans.active(rowKey(r)).forEach(p => { if (seen.has(p.id)) return; seen.add(p.id);
+      out.push({ plan_id: p.id, comp: p.comp, client_key: p.client_key, client_name: p.client_name || r.cliente, classification: 'FINANCIACION_PROPIA_VIGENTE', frequency: p.frequency, parts: p.parts,
+        resolver_version: window.OKFinancing.RESOLVER_VERSION, import_id: p.last_import_id }); }));
+    return out;
+  },
+  nocItem(r, n) { return { comp: n.comp, cuit: n.cuit || (r.calc && r.calc.cuit) || '', issued_date: n.d || '', original_amount: n.orig, available_amount: n.amt }; },
+  rowOrders(r) { return [r.mainOrder, r.shipOrder].concat(r.orders || []).filter(Boolean).map(String).filter((v, i, a) => a.indexOf(v) === i); },
+  // RC3: antecedente en una hoja CANCELADA (mismo pedido): en revisión → solo informa; MANTENIDA por Administración → se puede considerar sin un segundo consumo
+  priorHtml(x, d) {
+    const orders = this.rowOrders(x.r), pr = (d.prior || []).filter(p => !(p.order_numbers || []).length || p.order_numbers.some(o => orders.includes(String(o))));
+    return pr.map(p => p.resolution === 'KEEP' && (!p.reassigned_sheet_key || p.reassigned_sheet_key === RouteStore.sheetId)
+      ? '<div class="nocprior keep" data-app="' + p.app_id + '" data-amt="' + p.amount + '"><b>APLICACIÓN MANTENIDA</b> de la hoja ' + esc(p.route_number || '') + ' (cancelada): ' + ars(p.amount) + ' ya aplicados a este pedido.' +
+        (p.reassigned_sheet_key === RouteStore.sheetId ? ' <span class="nocres">Considerada en esta hoja (sin nuevo consumo).</span>' : ' <button type="button" class="btn soft" data-nocreuse>CONSIDERAR EN ESTA HOJA (sin nuevo consumo)</button>') + '</div>'
+      : '<div class="nocprior"><b>ANTECEDENTE</b>: aplicada ' + ars(p.amount) + ' en la hoja ' + esc(p.route_number || '') + ' (cancelada) · ' + esc(nocReconLabel(p.state)) + '.</div>').join('');
+  },
+  async nocDetect(rows) {
+    const b = window.OKD_BRIDGE && window.OKD_BRIDGE.noc; if (!b || !b.detect) return {};
+    const items = []; rows.forEach(r => this.nocList(r).forEach(n => items.push(this.nocItem(r, n))));
+    if (!items.length) return {};
+    try { const res = await b.detect(RouteStore.sheetId, items); const map = {}; res.forEach(x => { map[x.comp] = x; }); return map; } catch (e) { return { __error: e.message }; }
+  },
+  nocHtml(rows, info) {
+    const items = rows.map((r, i) => ({ r, i, list: this.nocList(r) })).filter(x => x.list.length);
+    if (!items.length || !(window.OKD_BRIDGE && window.OKD_BRIDGE.noc)) return '';
+    info = info || {};
+    const row = (x, n) => {
+      const d = info[n.comp] || {}, head = '<span><b>' + esc(x.r.cliente) + '</b> · ' + esc(n.comp) + ' · ' + esc(isoToDMY(n.d) || 's/f') + '</span>';
+      const attrs = ' data-i="' + x.i + '" data-comp="' + esc(n.comp) + '" data-date="' + esc(n.d || '') + '" data-amt="' + n.amt + '" data-orig="' + (n.orig != null ? n.orig : '') + '" data-cuit="' + esc(n.cuit || (x.r.calc && x.r.calc.cuit) || '') + '"';
+      if (info.__error || d.error) return '<div class="nocrow blocked"' + attrs + '>' + head + '<span class="nocres">No se pudo verificar la NOC en el servidor (' + esc(info.__error || d.error) + '): no se ofrece.</span></div>';
+      const prior = this.priorHtml(x, d);
+      if (['CANCELLED_ROUTE_REVIEW', 'CIANBOX_DIFFERENCE'].includes(d.reconciliation_status)) return '<div class="nocrow blocked"' + attrs + '>' + head + '<span class="nocres"><b>NOTA DE CRÉDITO EN REVISIÓN ADMINISTRATIVA</b> · ' + esc(nocReconLabel(d.reconciliation_status)) + ' · no se puede aplicar hasta que Administración la resuelva</span>' + prior + '</div>';
+      if (prior && /data-nocreuse|Considerada/.test(prior)) return '<div class="nocrow"' + attrs + '>' + head + prior + '</div>';
+      if (d.status === 'UTILIZADA' || (d.available <= 0.004 && !d.mine)) return '<div class="nocrow blocked"' + attrs + '>' + head + '<span class="nocres"><b>NOTA DE CRÉDITO YA UTILIZADA</b> · original ' + ars(d.original) + ' · consumido ' + ars(d.consumed) +
+        (d.used_at ? ' · ' + esc(new Date(d.used_at).toLocaleDateString('es-AR')) : '') + (d.used_destination ? ' · ' + esc(d.used_destination === 'FINANCIACION_PROPIA' ? 'financiación propia' : 'pedido') : '') + (d.used_reference ? ' · ' + esc(d.used_reference) : '') + '</span></div>';
+      if (d.reserved_elsewhere) return '<div class="nocrow blocked"' + attrs + '>' + head + '<span class="nocres"><b>NOTA DE CRÉDITO RESERVADA EN OTRO BORRADOR</b>' + (d.reserved_by ? ' · ' + esc(d.reserved_by) : '') + '</span></div>';
+      if (['IGNORADA', 'RECHAZADA'].includes(d.status)) return '<div class="nocrow blocked"' + attrs + '>' + head + '<span class="nocres"><b>NOC ' + d.status + '</b> por Administración</span></div>';
+      if (d.mine > 0) return '<div class="nocrow"' + attrs + '>' + head + '<span class="nocres">APLICADA ' + ars(d.mine) + ' en esta hoja</span></div>';
+      const plans = FinancingPlans.blocked(rowKey(x.r)) ? [] : FinancingPlans.active(rowKey(x.r));
+      const plan = plans.length === 1 ? plans[0] : null;
+      const sel = plans.length > 1 ? '<select class="ed" data-planpick><option value="">Elegí el plan de financiación…</option>' + plans.map(p => '<option value="' + p.id + '">' + esc(p.comp_label || p.comp) + ' · ' + FinancingPlans.freqLabel(p.frequency) + ' · saldo ' + ars(p.operational_pending) + (p.next_due ? ' · próxima ' + esc(isoToDMY(p.next_due)) : '') + '</option>').join('') + '</select>' : '';
+      return '<div class="nocrow"' + attrs + (plan ? ' data-plan="' + plan.id + '"' : '') + '>' + head + '<span>disponible ' + ars(d.available) + (d.status === 'PARCIALMENTE_UTILIZADA' ? ' (remanente de ' + ars(d.original) + ')' : '') + '</span>' +
+        '<span class="nocq">¿Dónde querés aplicar esta Nota de Crédito?</span><input class="ed" data-nocamt inputmode="decimal" value="' + d.available + '">' +
+        (plans.length ? sel + '<button type="button" class="btn soft" data-nocfin>APLICAR A FINANCIACIÓN PROPIA</button>' : (FinancingPlans.blocked(rowKey(x.r)) ? '<span class="nocres">Financiación sin sincronizar: REVISAR</span>' : '')) +
+        '<button type="button" class="btn soft" data-nocok>APLICAR AL PEDIDO ACTUAL</button><button type="button" class="btn ghost" data-nocno>NO APLICAR</button><span class="nocres" data-nocres></span></div>';
+    };
+    return '<div class="nocbox" id="pubNoc"><b>NOTAS DE CRÉDITO (NOC) · se aplican solo si las aceptás</b><p class="rp-note">Por defecto el piso del cobro es el Saldo CC. Si aceptás una NOC, su importe reduce ese piso y el cobro. Si no la aceptás, el piso sigue siendo el Saldo CC. Cada NOC se usa una sola vez: se ofrece solo el remanente real según el servidor.</p>' +
+      items.map(x => x.list.map(n => row(x, n)).join('')).join('') + '</div>';
+  },
+  bindNoc(m, rows) {
+    const b = window.OKD_BRIDGE && window.OKD_BRIDGE.noc; if (!b) return;
+    m.querySelectorAll('[data-nocreuse]').forEach(btn => btn.onclick = async () => {   // reasociación operativa: NO es un segundo consumo
+      const box = btn.closest('.nocprior'), el = btn.closest('.nocrow'), r = rows[+el.dataset.i]; btn.disabled = true;
+      try {
+        const res = await b.reassociate(box.dataset.app, RouteStore.sheetId);
+        r.nocApplied = Math.round(((r.nocApplied || 0) + res.amount) * 100) / 100; (r.nocList = r.nocList || []).push({ fingerprint: res.fingerprint, comp: el.dataset.comp, applied: res.amount, reassociated: true });
+        btn.replaceWith(Object.assign(document.createElement('span'), { className: 'nocres', textContent: 'Considerada en esta hoja (sin nuevo consumo): ' + ars(res.amount) }));
+        RouteStore.log({ tipo: 'NOC mantenida considerada en la hoja', comp: el.dataset.comp, importe: res.amount });
+      } catch (e) { btn.disabled = false; toast(String(e.message || e).replace(/^[A-Z_]+:\s*/, '')); }
+    });
+    m.querySelectorAll('.nocrow').forEach(el => { if (!el.querySelector('[data-nocok]')) return; // NOC ya utilizada / reservada / bloqueada: sin acciones
+      const r = rows[+el.dataset.i], out = el.querySelector('[data-nocres]');
+      const done = () => el.querySelectorAll('[data-nocok],[data-nocfin],[data-nocno],[data-planpick]').forEach(x => { x.disabled = true; });
+      el.querySelector('[data-nocno]').onclick = () => { out.textContent = 'NO SE APLICA'; done(); };
+      const fin = el.querySelector('[data-nocfin]');
+      if (fin) fin.onclick = async () => {
+        const amount = Number(String(el.querySelector('[data-nocamt]').value).replace(/\./g, '').replace(',', '.'));
+        if (!(amount > 0)) { out.textContent = 'Importe inválido.'; return; }
+        const pick = el.querySelector('[data-planpick]'); const planId = pick ? pick.value : el.dataset.plan;
+        if (!planId) { out.textContent = 'Elegí a qué plan de financiación aplicar la NOC (hay más de uno activo).'; return; }   // sin prioridad inventada
+        if (FinancingPlans.blocked(rowKey(r))) { out.textContent = 'Financiación sin sincronizar: REVISAR.'; return; }
+        el.dataset.plan = planId;
+        done();
+        try {
+          // Solo baja el saldo operativo del plan; el pedido actual no cambia y no se incorpora al plan
+          const res = await b.applyFinancing({ plan_id: el.dataset.plan, cuit: el.dataset.cuit, comp: el.dataset.comp, issued_date: el.dataset.date, original_amount: el.dataset.orig ? Number(el.dataset.orig) : null,
+            available_amount: Number(el.dataset.amt), amount, op_id: 'nocfin-' + RouteStore.sheetId + '-' + el.dataset.comp, accept: true });
+          if (res.ok === false) { out.innerHTML = '<b>' + esc(res.message) + '</b>'; el.classList.add('blocked'); return; }
+          out.textContent = 'APLICADA A FINANCIACIÓN PROPIA ' + ars(res.applied) + ' · saldo del plan ' + ars(res.plan_operational_pending) + ' · remanente NOC ' + ars(res.remaining);
+          FinancingPlans.store([Object.assign({}, (FinancingPlans.byClient.get(rowKey(r)) || []).find(p => p.id === el.dataset.plan) || {}, { id: el.dataset.plan, client_key: rowKey(r), operational_pending: res.plan_operational_pending, noc_adjustments: res.plan_noc_adjustments, status: res.plan_status })]);
+          const box = m.querySelector('.finbox[data-plan="' + el.dataset.plan + '"] [data-finsaldo]'); if (box) box.textContent = ars(res.plan_operational_pending);
+          RouteStore.log({ tipo: 'NOC aplicada a financiación propia', comp: el.dataset.comp, importe: res.applied });
+        } catch (e) {   // error transitorio (red/servidor): se rehabilitan controles conservando plan e importe
+          out.textContent = 'No se pudo aplicar: ' + String(e.message || e).replace(/^[A-Z_]+:\s*/, '') + '. Podés reintentar.';
+          el.querySelectorAll('[data-nocok],[data-nocfin],[data-nocno],[data-planpick]').forEach(x => { x.disabled = false; });
+        }
+      };
+      el.querySelector('[data-nocok]').onclick = async ev => {
+        const amount = Number(String(el.querySelector('[data-nocamt]').value).replace(/\./g, '').replace(',', '.'));
+        if (!(amount > 0)) { out.textContent = 'Importe inválido.'; return; }
+        const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null;
+        ev.target.disabled = true;
+        try {
+          // Identidad de la NOC: tipo+letra+PV+número (del comprobante) + CUIT + fecha de emisión + importe original (columna "Monto original")
+          const res = await b.apply({ sheet_key: RouteStore.sheetId, cuit: el.dataset.cuit, comp: el.dataset.comp, issued_date: el.dataset.date, original_amount: el.dataset.orig ? Number(el.dataset.orig) : null,
+            available_amount: Number(el.dataset.amt), amount, order_numbers: this.rowOrders(r), order_amount: (r.monto || 0) - (r.nocApplied || 0), cc_saldo: cc && cc.s != null ? cc.s : 0, op_id: 'noc-' + RouteStore.sheetId + '-' + el.dataset.comp, accept: true });
+          if (res.ok === false) { out.innerHTML = '<b>' + esc(res.message) + '</b>' + (res.code === 'NOC_CONSUMED' ? ' · consumido ' + ars(res.consumed) : ''); el.classList.add('blocked'); el.querySelector('[data-nocamt]').remove(); return; } // otra sesión la usó/reservó: estado actualizado
+          if (!res.repeated) { r.nocApplied = Math.round(((r.nocApplied || 0) + res.applied) * 100) / 100; (r.nocList = r.nocList || []).push({ fingerprint: res.fingerprint, comp: el.dataset.comp, applied: res.applied }); }
+          out.textContent = 'APLICADA ' + ars(res.applied) + (res.floor_after != null ? ' · piso ' + ars(res.floor_before) + ' → ' + ars(res.floor_after) : '') + ' · remanente NOC ' + ars(res.remaining); RouteStore.log({ tipo: 'NOC aplicada', comp: el.dataset.comp, importe: res.applied });
+        } catch (e) { out.textContent = String(e.message || e).replace(/^NOC_[A-Z_]+:\s*/, ''); ev.target.disabled = false; }
+      };
+    });
+  },
+  // Preparación antes de publicar: LISTO / LISTO CON ADVERTENCIAS / REVISAR
+  readiness(rows, carrier, resp, bad, vehicles) {
+    const items = [], add = (lvl, t) => items.push([lvl, t]);
+    if (window.OKD_CFG_STATE && window.OKD_CFG_STATE !== 'OK') add('err', 'CONFIGURACIÓN · SIN CONEXIÓN / REVISAR: la hoja se calculó con la configuración local de contingencia');
+    if (this.tplErr) add('err', 'No se pudo verificar la plantilla de columnas de ' + this.tplErr.carrier + ' (' + this.tplErr.msg + '). Usá REINTENTAR.');
+    const finBlocked = rows.filter(r => FinancingPlans.blocked(rowKey(r)));
+    if (finBlocked.length) add('err', 'FINANCIACIÓN PROPIA · REVISAR: la sincronización falló para ' + finBlocked.length + ' entrega(s) con financiación (reintentá antes de publicar)');
+    if (carrier && carrier.kind === 'INTERNO') add(vehicles && vehicles.length ? 'ok' : 'err', vehicles && vehicles.length ? 'Ruta interna: vehículo asignado (obligatorio)' : 'Ruta interna sin vehículo activo: dalo de alta en CONFIGURACIÓN → VEHÍCULOS');
+    add(carrier ? 'ok' : 'err', carrier ? 'Transportista: ' + carrier.name : 'Transportista sin definir o hay más de uno');
+    add(resp.length ? 'ok' : 'err', resp.length ? 'Responsable compatible disponible' : 'Sin responsable compatible');
+    add(rows.length ? 'ok' : 'err', rows.length + ' entrega(s)');
+    if (bad.length) add('err', bad.length + ' pedido(s) con montos/documentos, financiación o NOC por revisar');
+    const noAddr = rows.filter(r => !String(r.domicilio || '').trim() || !String(r.localidad || '').trim()).length; if (noAddr) add('warn', noAddr + ' entrega(s) sin domicilio o localidad');
+    const noBul = rows.filter(r => !(parseInt(r.bultos, 10) > 0)).length; if (noBul) add('warn', noBul + ' entrega(s) con 0 bultos');
+    const warns = rows.filter(r => { const st = baseStatus(r); return !st.blocking && st.issues.some(i => i.level === 'warn'); }).length; if (warns) add('warn', warns + ' entrega(s) con advertencias');
+    const noMail = rows.filter(r => { const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null; return !(r.email || (cc && cc.email)); }).length;
+    if (noMail) add('warn', noMail + ' cliente(s) sin email (no reciben avisos)');
+    const level = items.some(i => i[0] === 'err') ? 'REVISAR' : items.some(i => i[0] === 'warn') ? 'LISTO CON ADVERTENCIAS' : 'LISTO';
+    return { level: level === 'REVISAR' ? 'REVISAR' : level === 'LISTO' ? 'LISTO' : 'WARN', label: level, items };
+  },
   problems() {
     return this.rows().filter(r => { const st = baseStatus(r); return r.monto == null || (st.blocking && !(r.calc && r.calc.shipProv && st.issues.every(i => i.level !== 'error' && (i.level !== 'warn' || i.code === 'ENVÍO A CONFIRMAR')))); });
   },
@@ -853,6 +1132,9 @@ const Publisher = {
   async open() {
     const b = this.bridge(); if (!b) return;
     if (RouteStore.published) { toast('Esta hoja ya está publicada (' + RouteStore.published.number + ').'); return; }
+    // Configuración vigente del servidor: si estaba en contingencia, esto la recupera, aplica y recalcula antes de revisar
+    if (window.OKD_SYNC_CONFIG) await window.OKD_SYNC_CONFIG();
+    if (window.OKD_CFG_STATE && window.OKD_CFG_STATE !== 'OK') { toast('CONFIGURACIÓN · SIN CONEXIÓN / REVISAR: no se puede publicar hasta recuperar las reglas del servidor.', 6000); return; }
     const rows = this.rows(); if (!rows.length) { toast('La hoja no tiene pedidos para publicar.'); return; }
     const bad = this.problems();
     const carriers = await b.carriers();
@@ -862,21 +1144,65 @@ const Publisher = {
     let resp = [];
     if (carrier) { try { resp = await b.responsables(carrier.id); } catch (e) { resp = []; } }
     const vehicles = carrier && carrier.kind === 'INTERNO' && b.vehicles ? (await b.vehicles().catch(() => [])).filter(v => v.active) : [];
+    // Plantilla: "sin plantilla" (respuesta válida → predeterminada) ≠ error del servidor (→ REVISAR, no se publica)
+    let tpl = null, tplErr = null;
+    if (carrier && b.template) { try { tpl = await b.template(carrier.id); } catch (e) { tplErr = e.message || String(e); } }
+    this.tplErr = tplErr ? { carrier: carrier.name, msg: tplErr } : null;
+    await FinancingPlans.forClients(rows.map(rowKey)); // espera la sincronización de financiación pendiente
+    const ready = this.readiness(rows, carrier, resp, bad, vehicles);
+    const nocInfo = await this.nocDetect(rows); // estado REAL de cada NOC en el servidor (nunca solo el Excel)
     const blockMsg = !carrier ? (names.length > 1 ? 'La hoja tiene pedidos de varios transportistas (' + names.join(', ') + '). Publicá una hoja por transportista.' : 'El transportista "' + (names[0] || '') + '" no está dado de alta.')
       : !resp.length ? 'No hay usuarios activos compatibles con ' + carrier.name + '.' : bad.length ? 'Hay ' + bad.length + ' pedido(s) con revisión pendiente o sin monto: ' + bad.map(r => r.mainOrder || r.shipOrder).join(', ') + '.' : '';
     m.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"><header><b>PUBLICAR HOJA</b></header><div class="body">' +
       '<p>Transportista: <b>' + esc(carrier ? carrier.name : (names.join(', ') || '—')) + '</b> · ' + rows.length + ' entregas</p>' +
       (resp.length ? '<label>Responsable <select class="ed" id="pubResp">' + resp.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select></label>' : '') +
-      (carrier && carrier.kind === 'INTERNO' && vehicles.length ? '<label>Vehículo <select class="ed" id="pubVeh"><option value="">— sin vehículo —</option>' + vehicles.map(v => '<option value="' + v.id + '">' + esc(v.name + ' · ' + v.plate) + '</option>').join('') + '</select></label>' : '') +
-      (blockMsg ? '<p class="shiperr" id="pubBlock">' + esc(blockMsg) + '</p>' : '') + '<p class="shiperr" id="pubErr" hidden></p></div>' +
-      '<footer><button class="btn ghost" type="button" id="pubCancel">Cancelar</button><button class="btn go" type="button" id="pubGo"' + (blockMsg ? ' disabled' : '') + '>PUBLICAR</button></footer></div>';
+      (carrier && carrier.kind === 'INTERNO' && vehicles.length ? '<label>Vehículo (obligatorio) <select class="ed" id="pubVeh">' + vehicles.map(v => '<option value="' + v.id + '">' + esc(v.name + ' · ' + v.plate) + '</option>').join('') + '</select></label>' : '') +
+      (blockMsg ? '<p class="shiperr" id="pubBlock">' + esc(blockMsg) + '</p>' : '') +
+      '<div class="ready ' + ready.level + '" id="pubReady"><b>' + ready.label + '</b><ul>' + ready.items.map(i => '<li class="' + i[0] + '">' + esc(i[1]) + '</li>').join('') + '</ul></div>' +
+      '<div class="bulwrap"><table class="bultab"><thead><tr><th>ENTREGA</th><th>BULTOS</th></tr></thead><tbody>' + rows.map((r, i) => '<tr><td>' + esc(r.cliente) + ' <small>' + esc(r.mainOrder || '') + '</small></td><td><input class="ed" data-bul="' + i + '" inputmode="numeric" value="' + (parseInt(r.bultos, 10) || 0) + '"></td></tr>').join('') +
+      '</tbody></table><p class="sheetsum" id="pubSum">' + sheetSummary(rows) + '</p></div>' +
+      this.finHtml(rows) + this.nocHtml(rows, nocInfo) +
+      (tpl ? '<p class="rp-note">Plantilla de hoja: ' + (tpl.version ? 'v' + tpl.version : 'predeterminada') + '</p>' : '') +
+      '<p class="shiperr" id="pubErr" hidden></p></div>' +
+      '<footer><button class="btn ghost" type="button" id="pubCancel">Cancelar</button>' + (this.tplErr || rows.some(r => FinancingPlans.blocked(rowKey(r))) ? '<button class="btn soft" type="button" id="pubRetry">REINTENTAR</button>' : '') +
+      '<button class="btn go" type="button" id="pubGo"' + (blockMsg ? ' disabled' : '') + '>PUBLICAR</button></footer></div>';
     document.body.appendChild(m);
     m.querySelector('#pubCancel').onclick = () => m.remove();
+    const bulVals = () => [...m.querySelectorAll('[data-bul]')].map(x => x.value.trim());
+    m.querySelectorAll('[data-bul]').forEach(inp => inp.oninput = () => { const v = bulVals(); m.querySelector('#pubSum').textContent = sheetSummary(rows.map((r, i) => ({ sale: true, bultos: v[i] }))); });
+    const vs = m.querySelector('#pubVeh'), rs = m.querySelector('#pubResp');
+    const habitual = () => { if (!vs || !rs) return; const v = vehicles.find(x => x.habitual_driver_id === rs.value); if (v) vs.value = v.id; };
+    if (rs) rs.addEventListener('change', habitual); habitual();
+    if (ready.level === 'REVISAR') m.querySelector('#pubGo').disabled = true;
+    this.bindNoc(m, rows);
+    const rt = m.querySelector('#pubRetry');
+    if (rt) rt.onclick = async () => { rt.disabled = true; await FinancingPlans.retry(); m.remove(); this.open(); }; // vuelve a verificar plantilla y financiación
     m.querySelector('#pubGo').onclick = async ev => {
       ev.target.disabled = true;
       try {
+        const bv = bulVals(); if (bv.some(v => !/^\d+$/.test(v))) { const er = m.querySelector('#pubErr'); er.textContent = 'Los bultos deben ser números enteros mayores o iguales a 0.'; er.hidden = false; ev.target.disabled = false; return; }
+        rows.forEach((r, i) => { r.bultos = parseInt(bv[i], 10); });
+        const keep = rows.map(r => ({ r, monto: r.monto, obs: r.obsPago }));
+        rows.forEach(r => { if (r.nocApplied > 0 && r.monto != null) { r.monto = Math.round((r.monto - r.nocApplied) * 100) / 100; r.obsPago = [r.obsPago, (r.nocList || []).map(x => 'NOC ' + x.comp + ' aplicada ' + ars(x.applied)).join(' · ')].filter(Boolean).join(' · '); } });
+        try {
         const pl = await this.payload(carrier, m.querySelector('#pubResp').value); const veh = m.querySelector('#pubVeh'); if (veh && veh.value) pl.vehicle_id = veh.value;
-        pl.pdf_model = JSON.parse(JSON.stringify(ExportModel.build())); // el PDF sale SIEMPRE de este snapshot publicado
+        pl.financing = this.financingPayload(rows); // snapshot de financiación propia (plan real) al publicar
+        pl.stops.forEach((st, i) => { if (rows[i].nocApplied > 0) { st.noc = rows[i].nocList; st.merchandise_amount = Math.max(0, Math.round(((st.merchandise_amount || 0) - rows[i].nocApplied) * 100) / 100); } });
+        pl.stops.forEach((st, i) => { st.bultos = rows[i].bultos; });
+        const cols = tpl ? tpl.columns : null;
+        pl.template = tpl ? { template_id: tpl.id, version: tpl.version, carrier_id: carrier.id, columns: cols } : null;
+        pl.rules_version = window.OKD_RULES_VERSION || null; pl.routing_rules_version = window.OKD_ROUTING_VERSION || null;
+        pl.summary = sheetSummary(rows);
+        // El PDF sale SIEMPRE de este snapshot publicado (columnas de la plantilla vigente al publicar)
+        const ec = Config.get().exportCols.slice(); Config.get().exportCols = ec.map(() => true);
+        let model; try { model = ExportModel.build(); } finally { Config.get().exportCols = ec; }
+        // Cada salida según su flag de la plantilla (snapshot completo de la plantilla en pl.template)
+        const ctxT = { responsable: (resp.find(u => u.id === pl.responsable_id) || {}).full_name || '', summary: pl.summary }, base = JSON.stringify(model);
+        const out = flag => { const mm = JSON.parse(base); if (cols) ExportModel.applyTemplate(mm, cols, ctxT, flag); return mm; };
+        pl.pdf_model = out('pdf'); pl.xlsx_model = out('excel'); pl.screen_model = out('screen');
+        var plOut = pl;
+        } finally { keep.forEach(k => { k.r.monto = k.monto; k.r.obsPago = k.obs; }); }
+        const pl = plOut;
         const r = await b.publish(pl);
         RouteStore.published = { id: r.id, number: r.number, at: r.published_at, carrier: carrier.name, responsable: (resp.find(u => u.id === r.responsable_id) || {}).full_name || '' };
         RouteStore.log({ tipo: 'hoja publicada', numero: r.number }); await RouteStore.flush();
@@ -1344,6 +1670,15 @@ const UI = {
     $('#btnExport').addEventListener('click', () => ShipConfirm.guard('excel', () => ExcelExporter.export()));
     $('#btnPdf').addEventListener('click', () => ShipConfirm.guard('pdf', () => PdfExporter.export()));
     $('#btnPublish').addEventListener('click', () => ShipConfirm.guard('publish', () => Publisher.open()));
+    $('#log').addEventListener('click', async e => {
+      const g = e.target.closest('[data-goto]'), d = e.target.closest('[data-deldraft]'), b = window.OKD_BRIDGE && window.OKD_BRIDGE.drafts;
+      if (!b) return;
+      if (g) { const x = await b.content(g.dataset.goto).catch(err => { toast(err.message); return null; }); if (x) await SheetTabs.openDraft(g.dataset.goto, x.name, x.content); }
+      if (d && confirm('¿Eliminar el borrador y liberar sus pedidos? Las hojas publicadas no se tocan.')) {
+        try { const n = await b.remove(d.dataset.deldraft); await SheetTabs.dropLocal(d.dataset.deldraft); toast(n + ' pedido(s) liberados.'); $('#ids').value = d.dataset.order; UI.searchAndAdd(); }
+        catch (err) { toast(err.message); }
+      }
+    });
     $('#btnReset').addEventListener('click', async () => {
       if (!confirm('Se borrarán los archivos cargados, la hoja en curso y la configuración guardada en este equipo. ¿Continuar?')) return;
       await DB.clear(); location.reload();
@@ -1546,6 +1881,12 @@ const UI = {
         msgs.push('<div class="msg err"><b>' + id + ' · ERROR:</b> el pedido tiene mercadería y no quedó en la hoja. Avisá para revisarlo.</div>');
     });
     let addedRows = (this._added || []).filter(r => RouteStore.rows.includes(r)); this._added = [];
+    if (addedRows.length && FinancingPlans.bridge()) {
+      CalculationEngine.computeAll(RouteStore.rows); // la clave del cliente (CUIT) sale del cálculo
+      await FinancingPlans.forClients(addedRows.map(rowKey));
+      addedRows.forEach(r => FinancingPlans.active(rowKey(r)).forEach(p => msgs.push('<div class="msg warn"><b>CLIENTE CON FINANCIACIÓN PROPIA ACTIVA</b> · ' + esc(r.cliente) + ' · Modalidad: ' + FinancingPlans.freqLabel(p.frequency) +
+        ' · Saldo pendiente: ' + ars(p.operational_pending) + (p.next_due ? ' · Próxima cuota: ' + esc(isoToDMY(p.next_due)) : '') + '. El pedido ' + esc(r.mainOrder || '') + ' NO se suma al plan.</div>')));
+    }
     // Reserva server-side: un pedido activo pertenece a una sola hoja (aunque sea de otro operador)
     const ob = window.OKD_BRIDGE && window.OKD_BRIDGE.orders;
     if (ob) for (const r of addedRows.slice()) {
@@ -1553,7 +1894,11 @@ const UI = {
       catch (e) {
         if (/PEDIDO_YA_EN_OTRA_HOJA/.test(e.message || e.code || '')) {
           RouteStore.rows = RouteStore.rows.filter(x => x !== r); addedRows = addedRows.filter(x => x !== r); added--;
-          msgs.push('<div class="msg warn"><b>' + esc(r.mainOrder || r.shipOrder) + ' · PEDIDO YA AGREGADO A OTRA HOJA</b> ' + esc(String(e.message).replace(/^PEDIDO_YA_EN_OTRA_HOJA:\s*/, '')) + '. No se duplica.</div>');
+          const me = window.OKD_ME || {}, det = (e.details || []).filter((x, i, all) => !x.published && all.findIndex(y => y.sheet_key === x.sheet_key) === i); // un botón por borrador
+          const acts = det.map(x => (x.owner_id === me.id || me.allDrafts ? '<button type="button" class="btn soft" data-goto="' + esc(x.sheet_key) + '">IR AL BORRADOR</button>' : '') +
+            (x.owner_id === me.id || me.allDrafts ? '<button type="button" class="btn danger" data-deldraft="' + esc(x.sheet_key) + '" data-order="' + esc(r.mainOrder || r.shipOrder) + '">ELIMINAR BORRADOR Y LIBERAR PEDIDOS</button>' : '')).join('');
+          msgs.push('<div class="msg warn"><b>' + esc(r.mainOrder || r.shipOrder) + ' · ' + (det.length ? 'PEDIDO RESERVADO EN BORRADOR ' + esc(det[0].draft_name || '') + ' · OPERADOR ' + esc(det[0].owner || '') : 'PEDIDO YA AGREGADO A OTRA HOJA') + '</b> ' +
+            esc(String(e.message).replace(/^PEDIDO_YA_EN_OTRA_HOJA:\s*/, '')) + '. No se duplica.' + (acts ? '<div class="msgacts">' + acts + '</div>' : '') + '</div>');
         } else msgs.push('<div class="msg warn"><b>' + esc(r.mainOrder || '') + '</b>: no se pudo reservar en el servidor (' + esc(e.message) + '); se vuelve a validar al publicar.</div>');
       }
     }
@@ -2054,6 +2399,7 @@ const CfgUI = {
   close() { $('#cfgModal').classList.remove('open'); },
   renderRules(rules) {
     $('#cfgRules').innerHTML = rules.map(r => '<tr><td><input class="inp" data-k="estado" value="' + esc(r.estado) + '"></td><td><input class="inp" data-k="zona" value="' + esc(r.zona) + '"></td><td><input class="inp" data-k="carrier" value="' + esc(r.carrier) + '"></td><td><button class="ibtn del" type="button" data-rm>✕</button></td></tr>').join('');
+    if (typeof lockFinancialConfig === 'function' && (window.OKD_SERVER_RULES || window.OKD_SERVER_ROUTING)) lockFinancialConfig(); // modo online: reglas del servidor (solo lectura)
   },
   readRules() { return $$('#cfgRules tr').map(tr => ({ estado: $('[data-k=estado]', tr).value.trim(), zona: $('[data-k=zona]', tr).value.trim(), carrier: $('[data-k=carrier]', tr).value.trim() })).filter(r => r.estado && r.carrier); },
   costs(s) { return String(s).split(/[;\n]/).map(x => parseMoney(x)).filter(x => x != null && x > 0); },
@@ -2131,6 +2477,32 @@ const ExportModel = {
     const idx = {}; ['fecha', 'pedido', 'comp', 'cliente', 'domicilio', 'localidad', 'monto', 'pago', 'obs', 'transp'].forEach((k, i) => idx[k] = src.indexOf(i));
     return { rows: items.filter(x => x.type === 'row').map(x => x.r), data: items.filter(x => x.type === 'row'), items, head: src.map(i => head[i]), src, idx, withOps, carriers, total, base, fecha: isoToDMY(RouteStore.sheetDate || todayISO()) };
   },
+  // Aplica la plantilla del transportista: orden, títulos y visibilidad (PDF) + columnas BULTOS, ACCIÓN, RESPONSABLE y ESTADO
+  // flag: 'pdf' | 'excel' | 'screen' → cada salida usa SOLO las columnas visibles con ese flag
+  applyTemplate(m, cols, ctx, flag = 'pdf') {
+    const LEG = ['fecha', 'pedido', 'comp', 'cliente', 'domicilio', 'localidad', 'monto', 'pago', 'obs', 'transp'], EXTRA = ['bultos', 'accion', 'responsable', 'estado'];
+    const use = cols.filter(c => c.visible !== false && c[flag] !== false && (LEG.includes(c.key) || EXTRA.includes(c.key))).sort((a, b) => (a.order || 0) - (b.order || 0));
+    if (!use.length) return m;
+    const L = v => ({ label: '', value: String(v == null ? '' : v), kind: '' });
+    // items (lo que dibuja el PDF/Excel) y data pueden ser objetos distintos si el modelo se clonó: se transforman ambos, una sola vez cada uno
+    const seen = new Set();
+    [...(m.items || []), ...(m.data || [])].filter(it => it && it.cells && it.type !== 'sub' && !seen.has(it) && seen.add(it)).forEach(it => {
+      const r = it.r, cur = it.cells;
+      it.cells = use.map(c => {
+        if (LEG.includes(c.key)) return m.idx[c.key] >= 0 ? cur[m.idx[c.key]] : [L('')];
+        if (c.key === 'bultos') return [L(parseInt(r.bultos, 10) || 0)];
+        if (c.key === 'accion') return [L((r.monto || 0) > 0 ? 'ENTREGA + COBRO' : 'ENTREGA')];
+        if (c.key === 'responsable') return [L(ctx.responsable || '')];
+        return [L((rowStatus(r) || {}).label || '')];
+      });
+    });
+    m.head = use.map(c => c.title || c.key.toUpperCase());
+    m.src = use.map(c => LEG.includes(c.key) ? LEG.indexOf(c.key) : 11 + EXTRA.indexOf(c.key));
+    const idx = {}; LEG.forEach(k => { idx[k] = use.findIndex(c => c.key === k); }); m.idx = idx;
+    m.withOps = false; m.template = use.map(c => c.key);
+    if (ctx.summary) m.carriers = (m.carriers ? m.carriers + ' · ' : '') + ctx.summary;
+    return m;
+  },
   check(m) {
     if (!m.rows.length) { toast('No hay entregas marcadas con SALE para exportar.'); return false; }
     const pend = m.rows.filter(r => r.monto == null).length;
@@ -2166,6 +2538,13 @@ const ExcelExporter = {
     const m = ExportModel.build();
     if (!ExportModel.check(m)) return;
     if (typeof ExcelJS === 'undefined') { alert('No se pudo cargar el generador de Excel.'); return; }
+    const buf = await this.bufferFor(m);
+    ExportModel.download(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), m.base + '.xlsx');
+    toast('Excel descargado: ' + m.base + '.xlsx', 4000);
+  },
+  // RC2: el mismo .xlsx desde un modelo guardado (snapshot publicado con su plantilla), sin depender de la hoja viva
+  async bytesFromModel(m) { if (typeof ExcelJS === 'undefined') throw new Error('No se pudo cargar el generador de Excel.'); return this.bufferFor(m); },
+  async bufferFor(m) {
     const NC = m.head.length;
     const wb = new ExcelJS.Workbook();
     wb.creator = 'OK Despacho'; wb.created = new Date();
@@ -2176,7 +2555,7 @@ const ExcelExporter = {
       headerFooter: { oddFooter: '&L&8OK Accesorios · Hoja de ruta ' + m.fecha + '&R&8Página &P de &N' }
     });
     // Anchos pensados para que A4 horizontal quede legible (sin cortar: todo con ajuste de texto)
-    const baseW = [10.5, 19, 25, 23, 26, 17, 14, 28, 17, 17, 24];
+    const baseW = [10.5, 19, 25, 23, 26, 17, 14, 28, 17, 17, 24, 9, 16, 20, 18]; // 11-14: BULTOS, ACCIÓN, RESPONSABLE, ESTADO (plantilla)
     let widths = m.src.map(i => baseW[i]);
     const sumW = widths.reduce((a, b) => a + b, 0), targetW = m.withOps ? 222 : 199;
     if (sumW < targetW) widths = widths.map(w => Math.round(w * targetW / sumW * 10) / 10); // pocas columnas: se ensanchan para llenar la hoja
@@ -2266,9 +2645,7 @@ const ExcelExporter = {
     ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: last, column: NC } };
     const endRow = this.carrierBlock(ws, rIdx + 2, NC);
     ws.pageSetup.printArea = 'A1:' + lastCol + endRow;
-    const buf = await wb.xlsx.writeBuffer();
-    ExportModel.download(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), m.base + '.xlsx');
-    toast('Excel descargado: ' + m.base + '.xlsx', 4000);
+    return wb.xlsx.writeBuffer();
   },
   // Subtotal de un cliente con varias entregas (SUBTOTAL no se suma dos veces en el total general)
   subRow(ws, r, from, g, NC, PM) {
@@ -2571,6 +2948,8 @@ const PdfExporter = {
   $('#optCash').checked = RouteStore.showCash; $('#optCheques').checked = RouteStore.showCheques; $('#optTransfers').checked = RouteStore.showTransfers;
   UI.renderHead(); UI.renderFiles(); UI.renderCarriers(); UI.renderTable();
   SheetTabs.render(); Publisher.render();
+  window.OKD_BOOTED = true; if (window.OKD_PENDING_RULES) { const f = window.OKD_PENDING_RULES; window.OKD_PENDING_RULES = null; window.OKD_APPLY_RULES(f); }
+  if (window.OKD_PENDING_ROUTING) { const f = window.OKD_PENDING_ROUTING; window.OKD_PENDING_ROUTING = null; window.OKD_APPLY_ROUTING(f); }
   if (Publisher.bridge() && Publisher.bridge().subscribe) Publisher.bridge().subscribe(() => Publisher.render()); // estado en vivo
   // El aviso de revisado heredado ya se mostró en esta apertura: se guarda para no repetirlo
   if (RouteStore.rows.some(r => r.reviewLegacy)) { RouteStore.rows.forEach(r => { if (r.reviewLegacy) r.reviewLegacySeen = true; }); }
