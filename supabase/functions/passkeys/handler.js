@@ -3,7 +3,7 @@
 // RP ID = dominio de la app (ej. okdespacho.pages.dev); origen esperado = https://<ese dominio>.
 import { hasPerm } from '../_shared/rules.js';
 
-const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type' } });
+import { json, withCors } from '../_shared/http.js';
 const b64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const canLogin = p => p && p.status === 'ACTIVO' && (hasPerm(p, 'routes.view_assigned') || hasPerm(p, 'routes.create') || hasPerm(p, 'users.view'));
 
@@ -19,7 +19,8 @@ export function validateConfig({ rpID, origin }) {
   if (u.hostname !== rpID && !u.hostname.endsWith('.' + rpID)) return 'APP_URL (' + u.hostname + ') no corresponde a WEBAUTHN_RP_ID (' + rpID + ')';
   return null;
 }
-export async function handle(req, deps) {
+export const handle = withCors(handleRaw);
+async function handleRaw(req, deps) {
   if (req.method === 'OPTIONS') return json(200, { ok: true });
   const cfg = validateConfig({ rpID: deps.rpID, origin: deps.origin });
   if (cfg) return json(500, { error: 'Ingreso rápido no configurado: ' + cfg, code: 'PASSKEY_CONFIG' });
