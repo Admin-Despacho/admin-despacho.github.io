@@ -19,3 +19,8 @@ select cron.schedule('okd-internal-approvals', '*/5 * * * *',
 select cron.schedule('okd-customer-emails', '*/5 * * * *',
   $$ select net.http_post(url := 'https://TU-PROYECTO.supabase.co/functions/v1/internal-approvals',
        headers := jsonb_build_object('content-type','application/json','x-cron-secret','TU_CRON_SECRET'), body := jsonb_build_object('action','send_customer_queued')); $$);
+
+-- RC2: email diario de PDFs de hojas (la función respeta el horario configurado, default 18:00 Mendoza; idempotente)
+select cron.schedule('okd-sheet-emails', '*/15 * * * *',
+  $$ select net.http_post(url := 'https://TU-PROYECTO.supabase.co/functions/v1/internal-approvals',
+       headers := jsonb_build_object('content-type','application/json','x-cron-secret','TU_CRON_SECRET'), body := jsonb_build_object('action','send_sheet_emails')); $$);
