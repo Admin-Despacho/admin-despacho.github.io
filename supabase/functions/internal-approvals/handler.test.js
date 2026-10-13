@@ -55,3 +55,24 @@ Deno.test('MAILC-04 emails al cliente: sin DNI/CUIL/GPS/firma/notas; parcial ind
   const prov = { send: async m => { if (fail-- > 0) throw new Error('caído'); sent.push(m); return { id: 'p' }; } };
   eq((await sendCustomerEmails({ store: st, provider: prov }))[0].status, 'ERROR'); eq((await sendCustomerEmails({ store: st, provider: prov }))[0].status, 'SENT'); eq(await sendCustomerEmails({ store: st, provider: prov }), []); eq(sent.length, 1);
 });
+
+Deno.test('RC2-EMAIL hojas: envía el PDF adjunto una vez por hoja+versión; error queda para reintento', async () => {
+  const s = setup(); const jobs = [{ id: 'h1', route_id: 'r1', route_version: 1, recipient: 'log@ok.test', idempotency_key: 'r1|1|log', status: 'QUEUED' }]; let fail = 1;
+  s.deps.sheetStore = { listJobs: async () => jobs.filter(j => j.status !== 'SENT'), pdfFor: async () => ({ number: '01-000001', file_name: 'Hoja_01-000001_v1.pdf', bytes: new Uint8Array([37, 80]) }), updateJob: async (id, p) => Object.assign(jobs[0], p) };
+  const prov = s.deps.provider; s.deps.provider = { send: async m => { if (fail-- > 0) throw new Error('caído'); return prov.send(m); } };
+  eq((await call(s.deps, { action: 'send_sheet_emails' })).body.results[0].status, 'ERROR');
+  eq((await call(s.deps, { action: 'send_sheet_emails' })).body.results[0].status, 'SENT'); eq((await call(s.deps, { action: 'send_sheet_emails' })).body.results, []);
+  eq(s.sent.at(-1).attachments[0].filename, 'Hoja_01-000001_v1.pdf');
+});
+Deno.test('RC2-17 reenviar invitación sin crear otro usuario de Auth (fallback a enlace) y límite de emails claro', async () => {
+  const { handle: h } = await import('../admin-users/handler.js');
+  const base = { getUserFromJwt: async () => ({ id: 'adm' }), getProfile: async id => id === 'adm' ? { id: 'adm', role: 'ADMIN', status: 'ACTIVO', carriers: [] } : { id: 'inv', email: 'inv@ok.test', status: 'INVITACION_PENDIENTE', role: 'DESPACHO', carriers: [] },
+    listProfiles: async () => [], userHasPerm: async () => true, audit: async () => {}, hasHistory: async () => false, activeRoutes: async () => [] };
+  let created = 0, resets = 0;
+  const d1 = { ...base, inviteUser: async () => { created++; }, resendInvite: async () => { throw new Error('A user with this email address has already been registered'); }, sendPasswordReset: async () => { resets++; } };
+  const r = await h(new Request('https://x', { method: 'POST', headers: { authorization: 'Bearer t' }, body: JSON.stringify({ action: 'resend_invite', user_id: 'inv' }) }), d1);
+  eq(r.status, 200); eq([created, resets], [0, 1]);
+  const d2 = { ...base, resendInvite: async () => { throw new Error('email rate limit exceeded'); } };
+  const r2 = await h(new Request('https://x', { method: 'POST', headers: { authorization: 'Bearer t' }, body: JSON.stringify({ action: 'resend_invite', user_id: 'inv' }) }), d2);
+  eq(r2.status, 429); eq((await r2.json()).code, 'EMAIL_RATE_LIMIT');
+});
