@@ -1,6 +1,7 @@
 // Edge Function "passkeys". Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (automáticos), WEBAUTHN_RP_ID (dominio de la app, sin https://), APP_URL (origen).
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { verifyRegistrationResponse, verifyAuthenticationResponse } from 'npm:@simplewebauthn/server@10.0.1';
+import { json } from '../_shared/http.js';
 import { handle, validateConfig } from './handler.js';
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
@@ -42,4 +43,4 @@ const deps = {
 };
 const cfgError = validateConfig({ rpID: Deno.env.get('WEBAUTHN_RP_ID') ?? '', origin: (Deno.env.get('APP_URL') ?? '').replace(/\/$/, '') });
 if (cfgError) console.error('[passkeys] Configuración incompleta: ' + cfgError); // también se responde con error claro en cada llamada
-Deno.serve(async (req) => { try { return await handle(req, deps); } catch (e) { return new Response(JSON.stringify({ error: String((e as Error).message) }), { status: 500 }); } });
+Deno.serve(async (req) => { try { return await handle(req, deps); } catch (e) { return json(500, { error: String((e as Error).message || e), code: 'SERVER_ERROR' }); } });
