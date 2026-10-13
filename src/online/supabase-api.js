@@ -88,8 +88,29 @@ export class SupabaseApi {
     return { ...p, carriers: (uc || []).map(x => x.carrier_id) };
   }
   async listCarriers() { const { data, error } = await this.sb.from('carriers').select('*').order('name'); if (error) throw error; return data; }
+  // Sesión estable (RC2): antes de llamar se renueva el token si está por vencer; ante 401 se renueva y se reintenta una vez;
+  // si la renovación falla, la sesión realmente expiró → evento okd-session-expired (vuelve al acceso con aviso).
+  async _fresh(force) {
+    const { data } = await this.sb.auth.getSession(); const s = data && data.session;
+    if (!s) return null;
+    if (force || !s.expires_at || s.expires_at * 1000 - Date.now() < 60000) { const r = await this.sb.auth.refreshSession(); return r.data && r.data.session; }
+    return s;
+  }
+  _expired() { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('okd-session-expired')); }
+  async _invoke(name, opts) {
+    await this._fresh(false).catch(() => null);
+    let r = await this.sb.functions.invoke(name, opts);
+    const st = r.error && r.error.context && r.error.context.status;
+    if (st === 401) {
+      const s2 = await this._fresh(true).catch(() => null);
+      if (!s2) { this._expired(); return r; }
+      r = await this.sb.functions.invoke(name, opts);
+      if (r.error && r.error.context && r.error.context.status === 401) this._expired();
+    }
+    return r;
+  }
   async _fn(body) {
-    const { data, error } = await this.sb.functions.invoke('admin-users', { body });
+    const { data, error } = await this._invoke('admin-users', { body });
     if (error) {
       if (error.name === 'FunctionsFetchError' || error.name === 'FunctionsRelayError') throw Object.assign(new Error('No se pudo conectar con el servidor de usuarios (admin-users). Verificá que la función esté desplegada y sus secrets cargados.'), { code: 'OFFLINE' });
       let msg = error.message, code, extra = {};
@@ -100,8 +121,16 @@ export class SupabaseApi {
   }
   async listUsers() { return (await this._fn({ action: 'list' })).users; }
   // ===== Fase 2B.1: hojas publicadas y recorrido =====
-  _rpcErr(error) { const m = error.message || ''; return Object.assign(new Error(m), { code: /fetch|network|Failed/i.test(m) ? 'OFFLINE' : (m.split(':')[0] || 'ERROR') }); }
-  async _rpc(fn, args) { let r; try { r = await this.sb.rpc(fn, args); } catch (e) { throw Object.assign(new Error('Sin conexión'), { code: 'OFFLINE' }); } if (r.error) throw this._rpcErr(r.error); return r.data; }
+  _rpcErr(error) { const m = error.message || ''; let details = null; try { details = error.details ? JSON.parse(error.details) : null; } catch (e) { }
+    return Object.assign(new Error(m), { code: /fetch|network|Failed/i.test(m) ? 'OFFLINE' : (m.split(':')[0] || 'ERROR'), details }); }
+  async _rpc(fn, args) {
+    let r; try { r = await this.sb.rpc(fn, args); } catch (e) { throw Object.assign(new Error('Sin conexión'), { code: 'OFFLINE' }); }
+    if (r.error && (/JWT expired|jwt/i.test(r.error.message || '') || r.error.code === 'PGRST301')) { // token vencido: renovar y reintentar una vez
+      const s2 = await this._fresh(true).catch(() => null); if (!s2) { this._expired(); throw this._rpcErr(r.error); }
+      r = await this.sb.rpc(fn, args);
+    }
+    if (r.error) throw this._rpcErr(r.error); return r.data;
+  }
   async publishRoute(p) { return this._rpc('publish_route', { p }); }
   async reserveOrders(sheetKey, orders) { return this._rpc('reserve_orders', { p_sheet_key: sheetKey, p_orders: orders.map(String) }); }
   async releaseOrders(sheetKey, orders) { return this._rpc('release_orders', { p_sheet_key: sheetKey, p_orders: orders ? orders.map(String) : null }); }
@@ -114,7 +143,7 @@ export class SupabaseApi {
   }
   async markDelivered(id) { return this._rpc('mark_notification_delivered', { p_route: id }); }
   async markViewed(id) { return this._rpc('mark_route_viewed', { p_route: id }); }
-  async startRoute(id) { return this._rpc('start_route', { p_route: id }); }
+  async startRoute(id, kmStart) { return this._rpc('start_route', { p_route: id, p_km_start: kmStart ?? null }); }
   async setStopOutcome(stop, outcome, note, reason, opId, extra) { const r = await this._rpc('set_stop_outcome', { p_stop: stop, p_outcome: outcome, p_note: note || null, p_reason: reason || null, p_op_id: opId, p_extra: extra || null }); this.sendCustomerQueued().catch(() => null); return r; }
   async finalizeRoute(id, kmEnd) { return this._rpc('finalize_route', { p_route: id, p_km_end: kmEnd ?? null }); }
   async arriveStop(stop, location, opId) { return this._rpc('arrive_stop', { p_stop: stop, p_location: location, p_op_id: opId }); }
@@ -135,7 +164,7 @@ export class SupabaseApi {
     const { data: u, error } = await this.sb.storage.from('identity-docs').createSignedUrl(data.storage_path, 60);
     if (error) throw new Error(error.message); return u.signedUrl;
   }
-  async sendCustomerQueued(ids) { const { data } = await this.sb.functions.invoke('internal-approvals', { body: ids ? { action: 'retry_customer', job_ids: ids } : { action: 'send_customer_queued' } }); return data && data.results; }
+  async sendCustomerQueued(ids) { const { data } = await this._invoke('internal-approvals', { body: ids ? { action: 'retry_customer', job_ids: ids } : { action: 'send_customer_queued' } }); return data && data.results; }
   async listVehicles() { const { data } = await this.sb.from('vehicle_service_status').select('*').order('name'); return data || []; }
   async upsertVehicle(p) { return this._rpc('upsert_vehicle', { p }); }
   async correctVehicleKm(id, km, reason) { return this._rpc('correct_vehicle_km', { p_vehicle: id, p_km: km, p_reason: reason }); }
@@ -147,7 +176,7 @@ export class SupabaseApi {
   async cancelRoute(id, reason) { return this._rpc('cancel_route', { p_route: id, p_reason: reason }); }
   async addInternalStop(id, stop, version, opId, offline) { return this._rpc('add_internal_stop', { p_route: id, p_stop: stop, p_version: version, p_op_id: opId, p_offline: !!offline }); }
   async reorderInternalStops(id, order, version, opId, offline) { return this._rpc('reorder_internal_stops', { p_route: id, p_order: order, p_version: version, p_op_id: opId, p_offline: !!offline }); }
-  async _ir(body) { const { data, error } = await this.sb.functions.invoke('internal-approvals', { body }); if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch (e) { } throw new Error(m); } return data; }
+  async _ir(body) { const { data, error } = await this._invoke('internal-approvals', { body }); if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch (e) { } throw new Error(m); } return data; }
   async pendingApprovals() {
     const { routeDiff } = await import('../../supabase/functions/_shared/internal-route.js');
     const { data, error } = await this.sb.from('route_approval_requests').select('*, routes(*, route_stops(*))').eq('status', 'PENDING');
@@ -163,7 +192,7 @@ export class SupabaseApi {
   async irSettings() { return (await this._ir({ action: 'settings_get' })).settings; }
   async setIrSettings(s) { return (await this._ir({ action: 'settings_set', settings: s })).settings; }
   // Passkeys (Edge Function passkeys + Supabase Auth)
-  async _pk(body) { const { data, error } = await this.sb.functions.invoke('passkeys', { body }); if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch (e) { } throw new Error(m); } return data; }
+  async _pk(body) { const { data, error } = await this._invoke('passkeys', { body }); if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch (e) { } throw new Error(m); } return data; }
   async passkeyRegisterOptions() { const o = (await this._pk({ action: 'register_options' })).options; this._regCh = o.challenge; const d = x => Uint8Array.from(atob(x.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((x.length + 3) % 4)), c => c.charCodeAt(0));
     return { challenge: d(o.challenge), rp: o.rp, user: { ...o.user, id: d(o.user.id) }, excludeCredentials: [] }; }
   async passkeyRegisterSave(rec) { return (await this._pk({ action: 'register_verify', challenge: this._regCh, response: rec.json, device_name: rec.device_name })).passkey; }
@@ -191,7 +220,7 @@ export class SupabaseApi {
   async shippingInvalidate(p) { await this.sb.rpc('invalidate_shipping_confirmation', { p_sheet_key: p.sheet_key, p_ship_order: p.ship_order, p_fingerprint: p.fingerprint }); }
   // Informe comercial de Cristian Torres (Edge Function commercial-reports)
   async reports(action, body = {}) {
-    const { data, error } = await this.sb.functions.invoke('commercial-reports', { body: { action, ...body } });
+    const { data, error } = await this._invoke('commercial-reports', { body: { action, ...body } });
     if (error) { let msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } throw new Error(msg); }
     return data;
   }
@@ -208,3 +237,7 @@ export class SupabaseApi {
     return data;
   }
 }
+
+// RC2: borradores, historial, configuración, auditoría, backup y dashboard
+import { SupabaseAdmin } from './supabase-admin.js';
+Object.assign(SupabaseApi.prototype, SupabaseAdmin);

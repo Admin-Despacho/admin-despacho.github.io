@@ -6,7 +6,7 @@ export class ApprovalsPanel {
   constructor(api, me) { this.api = api; this.me = me; this.el = document.getElementById('usersPanel'); this.msg = null; }
   async open() {
     this.el.hidden = false;
-    this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Rutas internas</span></div><div class="sp"></div>' +
+    this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Aprobaciones</span></div><div class="sp"></div>' +
       '<span class="who-chip">' + esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b></span><button class="tbtn" type="button" id="apClose">Volver al panel</button></header><div class="up-wrap" id="apWrap"></div>';
     this.el.querySelector('#apClose').onclick = () => { if (location.hash) history.replaceState(null, '', location.pathname); this.el.hidden = true; this.el.innerHTML = ''; };
     await this.render();
@@ -15,7 +15,7 @@ export class ApprovalsPanel {
     const w = this.el.querySelector('#apWrap');
     let list = [], jobs = [], st = null, users = [];
     try { list = hasPerm(this.me, 'can_approve_internal_route_changes') ? await this.api.pendingApprovals() : []; } catch (e) { this.msg = { err: true, text: e.message }; }
-    const canCfg = hasPerm(this.me, 'settings.manage');
+    const canCfg = false; // RC2: la configuración vive en CONFIGURACIÓN
     if (canCfg) { try { [st, jobs, users] = await Promise.all([this.api.irSettings(), this.api.approvalEmailJobs(), this.api.listUsers()]); } catch (e) { } }
     const mark = m => '<span class="apr-mark' + (m.startsWith('PARADA AGREGADA') ? ' add' : m.startsWith('INCIDENCIA') ? ' inc' : '') + '">' + esc(m) + '</span>';
     w.innerHTML = '<div class="up-head"><h2>HOJAS INTERNAS PENDIENTES DE APROBACIÓN</h2></div>' + (this.msg ? '<div class="up-msg ' + (this.msg.err ? 'err' : 'ok') + '" id="apMsg">' + esc(this.msg.text) + '</div>' : '') +
@@ -24,7 +24,7 @@ export class ApprovalsPanel {
           (a.supervisor_missing ? ' <span class="apr-mark inc">SIN SUPERIOR CONFIGURADO</span>' : '') +
           '<div class="apr-cols"><div><h4>RUTA PUBLICADA ORIGINAL</h4><ol>' + d.original.map(o => '<li>' + esc(o.client_name) + (o.bultos ? ' · ' + o.bultos + ' bultos' : '') + '</li>').join('') + '</ol></div>' +
           '<div><h4>RUTA REAL EJECUTADA</h4><ol>' + d.executed.map(x => '<li>' + esc(x.client_name) + (x.action !== 'ENTREGA' ? ' · ' + esc(x.action) : '') + (x.bultos ? ' · ' + x.bultos + ' bultos' : '') + x.marks.map(mark).join('') + '</li>').join('') + '</ol></div></div>' +
-          '<p class="rp-note">Agregadas: ' + d.added + ' · Movidas: ' + d.moved + ' · Incidencias: ' + d.incidents + ' · Bultos: ' + d.bultos + '</p>' +
+          '<p class="rp-note">' + ((r.events || []).length ? 'Cambios: ' + r.events.map(e => (e.type === 'INTERNAL_STOP_ADDED' ? 'parada agregada' : 'reordenamiento') + ' ' + new Date(e.at || e.created_at).toLocaleString('es-AR') + (e.offline ? ' (sin conexión)' : '')).join(' · ') + '<br>' : '') + 'Agregadas: ' + d.added + ' · Movidas: ' + d.moved + ' · Incidencias: ' + d.incidents + ' · Bultos: ' + d.bultos + '</p>' +
           '<div class="uact"><button class="btn go" type="button" data-ok>APROBAR Y CERRAR HOJA</button><input class="ed" data-note placeholder="Motivo de la aclaración" style="min-width:260px"><button class="btn soft" type="button" data-obs>SOLICITAR ACLARACIÓN</button><span class="shiperr" hidden></span></div></div>'; }).join('')
         : '<p class="rp-empty" id="apEmpty">No hay hojas internas pendientes de aprobación.</p>') +
       (canCfg && st ? '<section class="step rp-step" id="irCfg"><h2><span class="n">@</span>CONFIGURACIÓN → NOTIFICACIONES → RUTAS INTERNAS</h2>' +
@@ -37,8 +37,6 @@ export class ApprovalsPanel {
         '<div class="utable-wrap"><table class="utable"><thead><tr><th>HOJA / TIPO</th><th>DESTINATARIO</th><th>ESTADO</th><th>ERROR</th><th></th></tr></thead><tbody>' +
         (jobs.length ? jobs.map(j => '<tr><td>' + esc(j.kind === 'INTERNAL_ROUTE_OBSERVED' ? 'Aclaración' : 'Pendiente de aprobación') + '</td><td>' + esc(j.recipient) + '</td><td><span class="ust ' + (j.status === 'SENT' ? 'ACTIVO' : j.status === 'ERROR' ? 'DESHABILITADO' : 'INVITACION_PENDIENTE') + '">' + j.status + '</span></td><td>' + esc(j.error || '') + '</td><td>' + (j.status !== 'SENT' ? '<button class="btn soft" type="button" data-retry="' + j.id + '">REINTENTAR EMAIL</button>' : '') + '</td></tr>').join('') : '<tr><td colspan="5">Sin emails.</td></tr>') +
         '</tbody></table></div></section>' : '');
-    if (hasPerm(this.me, 'routes.manage_all_drafts') || hasPerm(this.me, 'vehicles.manage')) await this.renderOps(w);
-    if (canCfg) await this.renderPdfCfg(w);
     w.querySelectorAll('.apr-item').forEach(box => {
       const id = box.dataset.ap, er = box.querySelector('.shiperr');
       box.querySelector('[data-ok]').onclick = async () => { try { await this.api.reviewApproval(id, 'APPROVED', null); this.msg = { text: 'Hoja aprobada: COMPLETADA · APROBADA.' }; } catch (e) { this.msg = { err: true, text: e.message }; } this.render(); };

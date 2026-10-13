@@ -63,7 +63,7 @@ export class DriverApp {
       if (this.conn !== 'sync') this.setConn(this.queue.length ? 'off' : 'live');
     } catch (e) { if (offline(e)) this.setConn('off'); }
     // No redibujar si el transportista está escribiendo una observación o un motivo
-    if (silent === true && document.querySelector('#drv .drv-form:not([hidden])')) return;
+    if (silent === true && (document.querySelector('#drv .drv-form:not([hidden])') || [...document.querySelectorAll('#drvKm, #drvKmIni, #drvSearch')].some(i => i.value || document.activeElement === i))) return; // no pisar lo que se está escribiendo
     this.render();
   }
   async reconnect() {
@@ -85,7 +85,7 @@ export class DriverApp {
   _send(op) {
     const a = op.args;
     if (op.kind === 'view') return this.api.markViewed(a.route);
-    if (op.kind === 'start') return this.api.startRoute(a.route);
+    if (op.kind === 'start') return this.api.startRoute(a.route, a.km);
     if (op.kind === 'outcome') return this._sendOutcome(op);
     if (op.kind === 'arrive') return this.api.arriveStop(a.stop, a.location, op.op_id);
     if (op.kind === 'finalize') return this.api.finalizeRoute(a.route, a.km);
@@ -161,14 +161,18 @@ export class DriverApp {
         (running && s.outcome === 'PENDIENTE' && cur && s.id === cur.id ? (s.arrived_at ? '<small class="drv-note">Llegada registrada ' + hhmm(s.arrived_at) + (s.arrive_location && s.arrive_location.missing_reason ? ' · sin ubicación' : '') + '</small>' : '<button class="btn soft drv-arrive" type="button" data-arrive>LLEGUÉ A LA PARADA</button>') : '') + '</div>').join('') +
       (internal ? '<button class="btn soft" type="button" id="drvAddOpen">+ AGREGAR PARADA</button><div class="drv-add" id="drvAdd" hidden><input class="ed" id="naName" placeholder="Destino / cliente"><input class="ed" id="naAddr" placeholder="Dirección">' +
         '<select class="ed" id="naAct"><option>ENTREGA</option><option>RETIRO</option><option>TRÁMITE</option></select><input class="ed" id="naBul" inputmode="numeric" placeholder="Bultos"><button class="btn dark" type="button" id="naSave">AGREGAR</button><span class="shiperr" id="naErr" hidden></span></div>' : '') +
+      (r.operational_status === 'PUBLICADA' && !this.readOnly && r.vehicle_id ? '<label class="drv-km">KM INICIAL del vehículo ' + esc(r.vehicle_plate || '') + ' (obligatorio) <input class="ed" id="drvKmIni" inputmode="numeric"></label>' : '') +
       '<div class="drv-foot">' + (r.operational_status === 'PUBLICADA' && !this.readOnly ? '<button class="btn go" type="button" id="drvStart">INICIAR RECORRIDO</button><small>Abrir la hoja no inicia el recorrido.</small>' : '') +
-      (running && r.vehicle_id ? '<label class="drv-km">Km final del vehículo (último ' + (r.km_start ?? '—') + ') <input class="ed" id="drvKm" inputmode="numeric"></label>' : '') +
+      (running && r.vehicle_id ? '<label class="drv-km">KM FINAL del vehículo (inicial ' + (r.km_start ?? '—') + ') <input class="ed" id="drvKm" inputmode="numeric"></label>' : '') +
       (running ? '<button class="btn go" type="button" id="drvFin"' + (pend ? ' disabled' : '') + '>FINALIZAR HOJA</button>' + (pend ? '<small>Faltan ' + pend + ' entregas por resolver.</small>' : '') : '') +
       (closed ? '<b class="drv-closed">HOJA FINALIZADA · solo lectura</b><button class="btn dark" type="button" id="drvPdf">DESCARGAR PDF</button>' +
         (!this.readOnly && this.canReturn(r) ? '<button class="btn soft" type="button" id="drvRet">DEVOLVER HOJA</button><div class="drv-form" id="drvRetForm" hidden><input class="ed" id="drvRetWhy" placeholder="Motivo (obligatorio)"><button class="btn dark" type="button" id="drvRetGo">ENVIAR SOLICITUD</button><span class="shiperr" hidden></span></div>' : '') : '') + '</div>';
     el.querySelector('#drvBack').onclick = () => { this.openId = null; this.render(); };
     if (internal) this.bindInternal(el, r, fut);
-    const st = el.querySelector('#drvStart'); if (st) st.onclick = async () => { st.disabled = true; await this.act('start', { route: r.id }); this.render(); };
+    const st = el.querySelector('#drvStart'); if (st) st.onclick = async () => {
+      const ki = el.querySelector('#drvKmIni'), km = ki ? ki.value.trim().replace(/\./g, '') : null;
+      if (ki && !/^\d+$/.test(km)) { this.toast('Cargá el kilometraje inicial del vehículo.'); return; }
+      st.disabled = true; await this.act('start', { route: r.id, km: km ? Number(km) : null }); this.render(); };
     const fin = el.querySelector('#drvFin'); if (fin) fin.onclick = async () => {
       const kmI = el.querySelector('#drvKm'); const km = kmI ? kmI.value.trim() : null;
       if (kmI && (!km || Number(km) < Number(r.km_start || 0))) { this.toast(!km ? 'Cargá el kilometraje final.' : 'El kilometraje no puede ser menor a ' + r.km_start + '.'); return; }

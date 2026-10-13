@@ -3,6 +3,7 @@
 import { validateUserAction, compatibleResponsables, hasPerm, canBeResponsable, userModules } from '../../supabase/functions/_shared/rules.js';
 import { reorderError, applyReorder, currentStop, approvalRecipients, sendQueuedEmails, routeDiff } from '../../supabase/functions/_shared/internal-route.js';
 import { sendCustomerEmails } from '../../supabase/functions/_shared/customer-email.js';
+import { DemoAdmin } from './demo-admin.js';
 
 
 const KEY = 'okd_online_demo_v2';
@@ -37,7 +38,7 @@ export function demoSeed() {
     ],
     passwords: {},            // contraseñas cambiadas en la demo (por defecto: "demo")
     history: ['u-gabriel', 'u-cristian'], // usuarios con hojas/firmas/eventos (no se eliminan, se archivan)
-    vehicles: [{ id: 'vh-1', name: 'Kangoo', plate: 'AB123CD', active: true, brand: 'Renault', model: 'Kangoo', type: 'Utilitario', year: 2019, notes: '', current_km: 50000, last_service_km: 41000, last_service_date: '2026-03-01', service_interval_km: 10000 }],
+    vehicles: [{ id: 'vh-1', name: 'Kangoo', plate: 'AB123CD', active: true, brand: 'Renault', model: 'Kangoo', type: 'Utilitario', year: 2019, notes: '', current_km: 50000, last_service_km: 41000, last_service_date: '2026-03-01', service_interval_km: 10000, habitual_driver_id: 'u-gabriel' }],
     audit: [], mails: [], seq: 1
   };
 }
@@ -141,7 +142,7 @@ export class DemoApi {
     if (String(password || '').length < 8) throw err('La contraseña debe tener al menos 8 caracteres.', 'WEAK', 400);
     this.db.passwords[me.id] = password; this._audit(me, 'OWN_PASSWORD_CHANGED', me.id); this._save();
   }
-  async listCarriers() { return DEMO_CARRIERS.map(c => ({ ...c })); }
+  async listCarriers() { this._refresh(); return this._carriers().map(c => ({ ...c })); }
 
   async listUsers() {
     const me = await this.me();
@@ -239,7 +240,16 @@ export class DemoApi {
     const R = this.db.routes2 = this.db.routes2 || [];
     const draft = this._draft(p.sheet_key, me, true, false);
     if (draft.status === 'PUBLICADA') return R.find(r => r.id === draft.route_id); // reintento
-    const carrier = DEMO_CARRIERS.find(c => c.id === p.carrier_id); if (!carrier) throw err('Elegí el transportista.', 'BAD_CARRIER', 400);
+    { const F = this.db.financialRules || [{ version: 1 }], cur = F[F.length - 1].version, v = p.rules_version; // obligatorio y EXACTO (como el servidor)
+      if (v == null || v === '') throw err('RULES_REQUIRED: la hoja debe calcularse con la versión vigente de las reglas financieras (v' + cur + ')', 'RULES_REQUIRED', 409);
+      if (Number(v) < cur) throw err('RULES_OUTDATED: las reglas financieras cambiaron (v' + cur + '); recalculá la hoja antes de publicar', 'RULES_OUTDATED', 409);
+      if (Number(v) > cur) throw err('RULES_UNKNOWN: la versión de reglas v' + v + ' no existe (vigente v' + cur + ')', 'RULES_UNKNOWN', 409); }
+    { const RR = this.db.routingRules, cur = RR && RR.length ? RR[RR.length - 1].version : 1, v = p.routing_rules_version; // reglas de asignación: obligatoria y EXACTA
+      if (v == null || v === '') throw err('ROUTING_RULES_REQUIRED: la hoja debe calcularse con la versión vigente de las reglas de asignación (v' + cur + ')', 'ROUTING_RULES_REQUIRED', 409);
+      if (Number(v) < cur) throw err('ROUTING_RULES_OUTDATED: las reglas de asignación cambiaron (v' + cur + '); recalculá la hoja antes de publicar', 'ROUTING_RULES_OUTDATED', 409);
+      if (Number(v) > cur) throw err('ROUTING_RULES_UNKNOWN: la versión de reglas de asignación v' + v + ' no existe (vigente v' + cur + ')', 'ROUTING_RULES_UNKNOWN', 409); }
+    const carrier = this._carriers().find(c => c.id === p.carrier_id && c.active !== false); if (!carrier) throw err('Elegí el transportista.', 'BAD_CARRIER', 400);
+    if (carrier.kind === 'INTERNO' && !(this.db.vehicles || []).some(v => v.id === p.vehicle_id && v.active)) throw err(p.vehicle_id ? 'BAD_VEHICLE: vehículo inexistente o inactivo' : 'VEHICLE_REQUIRED: la ruta interna necesita un vehículo activo', p.vehicle_id ? 'BAD_VEHICLE' : 'VEHICLE_REQUIRED', 409);
     const resp = this._user(p.responsable_id);
     if (!canBeResponsable(resp, carrier)) throw err('RESPONSABLE_INCOMPATIBLE', 'RESPONSABLE_INCOMPATIBLE', 409);
     if (!(p.stops || []).length) throw err('La hoja no tiene pedidos.', 'EMPTY_SHEET', 400);
@@ -250,7 +260,7 @@ export class DemoApi {
     const ords = [...new Set(p.stops.flatMap(x => x.order_numbers || []))];
     this._reserve(p.sheet_key, ords, me); // falla si algún pedido está en otra hoja
     // Correlativo por transportista/base, continuo (CT Este y Alrededores comparten el 01)
-    const code = SEQ_CODE[carrier.id]; this.db.sequences = this.db.sequences || {}; const n = this.db.sequences[code] = (this.db.sequences[code] || 0) + 1;
+    const code = carrier.sequence_code || SEQ_CODE[carrier.id]; this.db.sequences = this.db.sequences || {}; const n = this.db.sequences[code] = (this.db.sequences[code] || 0) + 1;
     const now = new Date().toISOString();
     const r = { id: 'rt-' + (++this.db.seq) + '-' + Date.now().toString(36), number: code + '-' + String(n).padStart(6, '0'), carrier_id: carrier.id, carrier_name: carrier.name,
       responsable_id: resp.id, responsable_name: resp.full_name, operational_status: 'PUBLICADA', sheet_key: p.sheet_key, published_at: now, published_by: me.id,
@@ -259,8 +269,14 @@ export class DemoApi {
       stops: p.stops.map((x, i) => ({ id: 'st-' + this.db.seq + '-' + i, seq: i + 1, sequence_number: i + 1, provenance: 'PUBLISHED', action: x.action || 'ENTREGA', client_name: x.client_name, client_key: x.client_key, zone: x.zone || null, order_numbers: x.order_numbers || [], address: x.address || '', bultos: x.bultos || null,
         merchandise_amount: x.merchandise_amount || 0, shipping_fee: x.shipping_fee || 0, shipping_fee_source: x.ship_fee_status === 'PROVISIONAL' ? 'CONFIRMED_FALLBACK' : 'SALDO', outcome: 'PENDIENTE',
         task: x.task || 'ENTREGA', expected_amount: x.expected_amount ?? null, customer_email: x.customer_email || null, collection_status: 'PENDIENTE' })) };
-    if (p.vehicle_id && carrier.kind === 'INTERNO') { const v = (this.db.vehicles || []).find(x => x.id === p.vehicle_id && x.active); if (!v) throw err('Vehículo inexistente o inactivo.', 'BAD_VEHICLE', 400); r.vehicle_id = v.id; r.km_start = v.current_km; }
+    if (carrier.kind === 'INTERNO' && !p.vehicle_id) throw err('VEHICLE_REQUIRED: la ruta interna necesita un vehículo activo', 'VEHICLE_REQUIRED', 409);
+    if (p.vehicle_id && carrier.kind === 'INTERNO') { const v = (this.db.vehicles || []).find(x => x.id === p.vehicle_id && x.active); if (!v) throw err('Vehículo inexistente o inactivo.', 'BAD_VEHICLE', 400); r.vehicle_id = v.id; r.vehicle_plate = v.plate; r.vehicle_name = v.name; r.km_start = null; }
     R.push(r); Object.assign(draft, { status: 'PUBLICADA', route_id: r.id, updated_at: now });
+    this._nocConsume(a => a.sheet_key === p.sheet_key, Object.assign(r, { sheet_key: p.sheet_key }), me); // consumo definitivo de las NOC reservadas en este borrador (y reasociaciones)
+    // Snapshot de financiación propia (inmutable) desde el plan real
+    (p.financing || []).forEach(e => { const f = (this.db.finPlans || []).find(x => x.id === e.plan_id); (this.db.finSnapshots = this.db.finSnapshots || []).push({ route_id: r.id, route_version: 1, comp: e.comp || (f && f.comp),
+      client_key: e.client_key || (f && f.client_key), classification: e.classification || 'FINANCIACION_PROPIA_VIGENTE', parts: e.parts || (f && f.parts) || [], frequency: f ? f.frequency : e.frequency,
+      source_pending: f ? f.source_pending : null, noc_adjustments: f ? f.noc_adjustments : null, operational_pending: f ? f.operational_pending : null, source_import: e.import_id || (f && f.last_import_id), resolver_version: e.resolver_version, plan_id: e.plan_id, created_at: now }); });
     Object.values(this.db.reservations).filter(x => x.sheet_key === p.sheet_key).forEach(x => { x.status = 'PUBLICADA'; x.route_id = r.id; x.number = r.number; });
     this.db.notifs = this.db.notifs || [];
     if (!this.db.notifs.some(x => x.user_id === resp.id && x.route_id === r.id)) this.db.notifs.push({ id: 'nt-' + this.db.seq, user_id: resp.id, route_id: r.id, type: 'NUEVA_HOJA_PUBLICADA', title: 'NUEVA HOJA PUBLICADA', body: 'Hoja ' + r.number + ' · ' + r.stops.length + ' entregas', created_at: now, read_at: null });
@@ -280,9 +296,10 @@ export class DemoApi {
   // Reserva de pedidos (equivale a reserve_orders / release_orders del servidor)
   _reserve(sheetKey, orders, me) {
     const RS = this.db.reservations = this.db.reservations || {};
-    const conflicts = orders.filter(o => o && RS[o] && RS[o].sheet_key !== sheetKey)
-      .map(o => o + ' (' + (RS[o].number ? 'hoja ' + RS[o].number : 'otra hoja borrador' + (this._user(RS[o].reserved_by) ? ' de ' + this._user(RS[o].reserved_by).full_name : '')) + ')');
-    if (conflicts.length) throw err('PEDIDO_YA_EN_OTRA_HOJA: ' + conflicts.join(', '), 'PEDIDO_YA_EN_OTRA_HOJA', 409);
+    const bad = orders.filter(o => o && RS[o] && RS[o].sheet_key !== sheetKey);
+    const details = bad.map(o => { const d = (this.db.drafts || {})[RS[o].sheet_key] || {}, u = this._user(RS[o].reserved_by) || {};
+      return { order: o, sheet_key: RS[o].sheet_key, draft_name: d.name || null, owner_id: RS[o].reserved_by, owner: u.full_name || '', route_number: RS[o].number || null, published: !!RS[o].number }; });
+    if (bad.length) throw err('PEDIDO_YA_EN_OTRA_HOJA: ' + details.map(x => x.order + ' (' + (x.route_number ? 'hoja ' + x.route_number : 'borrador' + (x.draft_name ? ' "' + x.draft_name + '"' : '') + (x.owner ? ' de ' + x.owner : '')) + ')').join(', '), 'PEDIDO_YA_EN_OTRA_HOJA', 409, { details });
     orders.filter(Boolean).forEach(o => { if (!RS[o]) RS[o] = { sheet_key: sheetKey, status: 'BORRADOR', reserved_by: me.id, reserved_at: new Date().toISOString() }; });
   }
   async reserveOrders(sheetKey, orders) {
@@ -306,10 +323,16 @@ export class DemoApi {
   }
   async markDelivered(id) { this._net(); this._refresh(); const { r } = this._mine(id); if (!r.notified_at) { r.notified_at = new Date().toISOString(); this._save(); } }
   async markViewed(id) { this._net(); this._refresh(); const { r, me } = this._mine(id); const t = new Date().toISOString(); r.viewed_at = r.viewed_at || t; r.notified_at = r.notified_at || t; (this.db.notifs || []).filter(x => x.route_id === id && x.user_id === me.id).forEach(x => { x.read_at = x.read_at || t; }); this._save(); return r; }
-  async startRoute(id) {
+  async startRoute(id, kmStart) {
     this._net(); this._refresh(); const { r, me } = this._mine(id);
     if (r.operational_status === 'EN_CURSO') return r;
     if (r.operational_status !== 'PUBLICADA') throw err('La hoja no se puede iniciar.', 'BAD_STATE', 409);
+    if (r.vehicle_id) {
+      const v = this.db.vehicles.find(x => x.id === r.vehicle_id);
+      if (kmStart == null || kmStart === '') throw err('KM_START_REQUIRED: cargá el kilometraje inicial', 'KM_START_REQUIRED', 400);
+      if (Number(kmStart) < v.current_km) throw err('KM_LOWER: el kilometraje no puede ser menor al último registrado (' + v.current_km + ')', 'KM_LOWER', 400);
+      v.current_km = Number(kmStart); r.km_start = Number(kmStart); r.km_started_at = new Date().toISOString();
+    }
     Object.assign(r, { operational_status: 'EN_CURSO', started_at: new Date().toISOString(), started_by: me.id, viewed_at: r.viewed_at || new Date().toISOString() });
     this._onTheWay(r); this._audit(me, 'ROUTE_STARTED', r.id); this._save(); await this.sendCustomerQueued(); return r;
   }
@@ -439,7 +462,8 @@ export class DemoApi {
       const v = this.db.vehicles.find(x => x.id === r.vehicle_id);
       if (kmEnd == null || kmEnd === '') throw err('KM_REQUIRED: cargá el kilometraje final', 'KM_REQUIRED', 400);
       if (Number(kmEnd) < v.current_km) throw err('KM_LOWER: el kilometraje no puede bajar (último ' + v.current_km + ')', 'KM_LOWER', 400);
-      v.current_km = Number(kmEnd); r.km_end = Number(kmEnd);
+      if (r.km_start != null && Number(kmEnd) < r.km_start) throw err('KM_LOWER: el km final no puede ser menor al inicial', 'KM_LOWER', 400);
+      v.current_km = Number(kmEnd); r.km_end = Number(kmEnd); r.km_ended_at = new Date().toISOString(); this._serviceCheck(v);
     }
     const summary = {}; r.stops.forEach(s => { summary[s.outcome] = (summary[s.outcome] || 0) + 1; });
     const mods = (r.events || []).length;
@@ -547,6 +571,12 @@ export class DemoApi {
     if (!String(reason || '').trim()) throw err('Indicá el motivo.', 'REASON_REQUIRED', 400);
     const r = this.db.routes2.find(x => x.id === id && ['PUBLICADA', 'EN_CURSO'].includes(x.operational_status)); if (!r) throw err('Solo hojas publicadas o en curso.', 'BAD_STATE', 409);
     r.operational_status = 'CANCELADA'; Object.values(this.db.drafts || {}).filter(d => d.route_id === id).forEach(d => { d.status = 'CANCELADA'; });
+    // RC3: cancelar ≠ revertir NOC. Importes intactos; las aplicaciones consumidas quedan en revisión administrativa
+    (this.db.nocApps || []).filter(a => a.route_id === id && a.status === 'CONSUMED').forEach(a => {
+      Object.assign(a, { reconciliation_status: 'CANCELLED_ROUTE_REVIEW', cancelled_route_id: id, cancelled_route_number: r.number, cancelled_by: me.id, cancelled_at: new Date().toISOString(), cancel_reason: reason, resolution: null });
+      this._nocEvent(a.fingerprint, 'HOJA_CANCELADA_REVISION', a.amount, { route_id: id, reference: 'hoja ' + r.number, reason, order_numbers: a.order_numbers, application: a.id }, me);
+      this._nocAggregate(a.fingerprint); const n = this.db.nocs[a.fingerprint]; n.recon_version = (n.recon_version || 1) + 1;
+    });
     Object.keys(this.db.reservations || {}).forEach(o => { if (this.db.reservations[o].route_id === id) delete this.db.reservations[o]; });
     this._notif(r.responsable_id, r, 'ROUTE_CANCELLED', 'HOJA ' + r.number + ' CANCELADA', reason); this._audit(me, 'ROUTE_CANCELLED', id, null, { reason, number: r.number }); this._save(); return r;
   }
@@ -653,3 +683,6 @@ export class DemoApi {
   outbox() { return this._rep ? this._rep.store.state.outbox.slice() : []; }
   auditLog() { return this.db.audit.slice(); }
 }
+
+// RC2: borradores, historial, configuración, auditoría, backup y dashboard (mismas reglas que la base)
+Object.assign(DemoApi.prototype, DemoAdmin);

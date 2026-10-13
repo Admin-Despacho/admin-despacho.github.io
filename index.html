@@ -4,11 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>OK Despacho · Hojas de ruta</title>
-<link rel="icon" href="/logo.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="OK Despacho">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+/* Splash de inicialización (solo mientras arranca la app; sin demoras artificiales). Imagen completa con "contain": nunca se estira ni se corta. */
+#splash{position:fixed;inset:0;z-index:9999;background:#010306;display:flex;align-items:center;justify-content:center;overflow:hidden;
+  padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);box-sizing:border-box;transition:opacity .18s ease}
+#splash .splash-img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;
+  /* bordes de la imagen fundidos con el fondo: sin costuras en pantallas más anchas o más altas que el diseño */
+  -webkit-mask-image:linear-gradient(to right,transparent 0,#000 5%,#000 95%,transparent 100%),linear-gradient(to bottom,transparent 0,#000 4%,#000 96%,transparent 100%);-webkit-mask-composite:source-in;
+  mask-image:linear-gradient(to right,transparent 0,#000 5%,#000 95%,transparent 100%),linear-gradient(to bottom,transparent 0,#000 4%,#000 96%,transparent 100%);mask-composite:intersect}
+#splash.hide{opacity:0;pointer-events:none}
+</style>
 <meta name="theme-color" content="#000E18">
 </head>
 <body>
+<div id="splash"><img class="splash-img" src="/splash.webp" alt="OK Accesorios · OK Despacho" width="652" height="1020"></div>
 <div id="demoBanner" hidden>MODO DEMO · sin servidor · los datos quedan solo en este navegador</div>
 
 <!-- ===== Acceso (misma estética de la versión offline) ===== -->
@@ -65,6 +82,9 @@
   </section>
 
   <div class="sheettabs" id="sheetTabs"></div>
+  <div class="finsync" id="cfgSync" hidden></div>
+  <div class="finsync" id="finSync" hidden></div>
+  <div class="finsync" id="nocSync" hidden></div>
   <div class="sheethead">
     <h2><span class="n">4</span>Hoja de ruta</h2>
     <label class="sheetdate">Fecha de la hoja <input id="sheetDate" inputmode="numeric" placeholder="dd/mm/aaaa"></label>

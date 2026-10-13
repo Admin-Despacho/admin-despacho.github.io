@@ -197,7 +197,7 @@ export class UsersPanel {
       });
     m.id = 'editModal';
     const roleSel = m.querySelector('#nuRole');
-    const sync = () => { m.querySelector('#nuCarrWrap').hidden = roleSel.value !== 'TRANSPORTISTA'; m.querySelector('#nuSupWrap').hidden = roleSel.value !== 'TRANSPORTISTA_INTERNO' || isNew; this.renderAccess(m, roleSel.value, u ? u.disabled_modules || [] : []); };
+    const sync = () => { m.querySelector('#nuCarrWrap').hidden = roleSel.value !== 'TRANSPORTISTA'; m.querySelector('#nuSupWrap').hidden = roleSel.value !== 'TRANSPORTISTA_INTERNO'; /* Superior: SOLO Transportista Interno */ this.renderAccess(m, roleSel.value, u ? u.disabled_modules || [] : []); };
     roleSel.addEventListener('change', sync); sync();
   }
   // Acceso por rol (RC1.1): el rol carga los módulos; Administración solo puede RESTRINGIR (nunca agregar)

@@ -1,6 +1,6 @@
 {
   "name": "ok-despacho-online",
-  "version": "0.6.3-rc1",
+  "version": "0.7.5-rc3",
   "private": true,
   "type": "module",
   "description": "OK Despacho Online — Fase 1.1: login, usuarios y permisos, panel del Operario (lógica v15), seguridad de usuarios y base de aprobación de rutas internas.",
