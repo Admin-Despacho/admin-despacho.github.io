@@ -21,7 +21,7 @@ export const PERMISSIONS = [
   'signatures.view', 'audit.view', 'settings.manage',
   'can_approve_internal_route_changes',
   'can_view_commercial_transport_reports', 'can_manage_commercial_transport_reports',
-  'routes.manage_all_drafts', 'identity_docs.view', 'collections.manage', 'vehicles.manage'
+  'routes.manage_all_drafts', 'identity_docs.view', 'collections.manage', 'vehicles.manage', 'credit_notes.manage'
 ];
 
 export const ROLE_PERMISSIONS = {
@@ -43,7 +43,7 @@ export const MODULE_PERMISSIONS = {
   USUARIOS: ['users.view', 'users.manage'],
   INFORMES: ['can_view_commercial_transport_reports', 'can_manage_commercial_transport_reports'],
   APROBACIONES: ['can_approve_internal_route_changes'],
-  CONFIGURACION: ['settings.manage', 'vehicles.manage', 'locations.manage'],
+  CONFIGURACION: ['settings.manage', 'vehicles.manage', 'locations.manage', 'credit_notes.manage'],
   AUDITORIA: ['audit.view', 'identity_docs.view']
 };
 export const moduleOf = perm => MODULES.find(m => MODULE_PERMISSIONS[m].includes(perm)) || null;
