@@ -1,6 +1,7 @@
 // Edge Function "commercial-reports" en Supabase (Deno).
 // Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (automáticos), CRON_SECRET, RESEND_API_KEY, REPORT_FROM
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { json } from '../_shared/http.js';
 import { handle } from './handler.js';
 import { createReportService } from '../_shared/report-service.js';
 import { reportPdf } from '../_shared/report-pdf.js';
@@ -67,5 +68,5 @@ const deps = {
 
 Deno.serve(async (req) => {
   try { return await handle(req, deps); }
-  catch (e) { return new Response(JSON.stringify({ error: String((e as Error).message || e) }), { status: 500, headers: { 'content-type': 'application/json' } }); }
+  catch (e) { return json(500, { error: String((e as Error).message || e), code: 'SERVER_ERROR' }); }
 });
