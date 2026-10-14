@@ -997,7 +997,8 @@ index 3189b75181866ee0f27cfb910e10eef3ad736746..0dd918024787e73029e4d14e8350007f
  }
  /** store: { listJobs(q), stopFor(job), updateJob(id, patch) } — idempotente por job; una falla no revierte la entrega */
 -export async function sendCustomerEmails({ store, provider, onlyIds }) {
-+export async function sendCustomerEmails({ store, provider, onlyIds, inlineLogo }) {   const out = [];
++export async function sendCustomerEmails({ store, provider, onlyIds, inlineLogo }) {
+   const out = [];
    for (const j of await store.listJobs({ statuses: ['QUEUED', 'ERROR'], ids: onlyIds })) {
 -    const mail = customerEmail({ kind: j.kind, stop: await store.stopFor(j) });
 +    const stop = await store.stopFor(j);
