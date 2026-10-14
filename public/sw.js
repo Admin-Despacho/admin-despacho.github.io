@@ -17,3 +17,32 @@ self.addEventListener('fetch', e => {
   e.respondWith(fetch(e.request).then(res => { if (res.ok && PRECACHE.includes(u.pathname)) { const cp = res.clone(); caches.open(CACHE).then(c => c.put(e.request, cp)); } return res; })
     .catch(() => caches.match(e.request, { ignoreSearch: true })));
 });
+
+
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) { d = { title: 'OK Despacho', body: e.data ? e.data.text() : '' }; }
+  const title = d.title || 'OK Despacho';
+  const opts = {
+    body: d.body || '',
+    icon: d.icon || '/icons/icon-192.png',
+    badge: d.badge || '/icons/icon-192.png',
+    tag: d.tag || 'okd-notification',
+    renotify: true,
+    data: d.data || { url: '/' }
+  };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) {
+      if ('focus' in c) {
+        c.navigate(target).catch(() => null);
+        return c.focus();
+      }
+    }
+    return clients.openWindow ? clients.openWindow(target) : null;
+  }));
+});
