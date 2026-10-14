@@ -1,6 +1,6 @@
 // Admin → USUARIOS. Misma estética que la versión offline (cabecera oscura, tabla negra con línea cyan).
 import { esc, fmtDate, fmtDay } from './util.js';
-import { ROLES, ROLE_LABEL, hasPerm, compatibleResponsables, MODULES, MODULE_LABEL, roleModules, ROLE_PERMISSIONS, SENSITIVE_PERMISSIONS } from '../../supabase/functions/_shared/rules.js';
+import { ROLES, ASSIGNABLE_ROLES, ROLE_LABEL, hasPerm, compatibleResponsables, MODULES, MODULE_LABEL, roleModules, ROLE_PERMISSIONS, SENSITIVE_PERMISSIONS } from '../../supabase/functions/_shared/rules.js';
 import { PERM_GROUPS, PERM_LABEL } from './rc4-ui.js';
 // RC4: roles que tienen superior asignado y qué roles pueden ser su superior
 const SUP_ROLES = { OPERARIO_DEPOSITO: ['SUPERVISOR_DESPACHO', 'ADMIN'], SUPERVISOR_DESPACHO: ['ADMIN'] };
@@ -192,13 +192,13 @@ export class UsersPanel {
   // NUEVO USUARIO (u = null) o EDITAR USUARIO: rol + transportista/empresa + superior en el mismo flujo
   openEdit(u) {
     const isNew = !u, self = u && u.id === this.me.id;
-    const role = u ? u.role : 'DESPACHO';
+    const role = u ? u.role : 'OPERARIO_DEPOSITO';
     const sups = this.users.filter(x => hasPerm(x, 'can_approve_internal_route_changes') && (!u || x.id !== u.id));
     const m = this.modal(isNew ? 'NUEVO USUARIO' : 'EDITAR USUARIO',
       '<label>Nombre y apellido<input id="nuName" value="' + esc(u ? u.full_name : '') + '"></label>' +
       '<label>Email<input id="nuEmail" type="email" value="' + esc(u ? u.email : '') + '"></label>' +
       '<label>Teléfono<input id="nuPhone" value="' + esc(u ? (u.phone || '') : '') + '"></label>' +
-      '<label>Rol<select id="nuRole"' + (self ? ' disabled title="No podés cambiar tu propio rol"' : '') + '>' + ROLES.map(r => '<option value="' + r + '"' + (r === role ? ' selected' : '') + '>' + esc(ROLE_LABEL[r]) + '</option>').join('') + '</select></label>' +
+      '<label>Rol<select id="nuRole"' + (self ? ' disabled title="No podés cambiar tu propio rol"' : '') + '>' + ASSIGNABLE_ROLES.map(r => '<option value="' + r + '"' + (r === role ? ' selected' : '') + '>' + esc(ROLE_LABEL[r]) + '</option>').join('') + '</select></label>' +
       '<div id="nuCarrWrap"><span style="font-size:12.5px;color:var(--muted)">Transportista / empresa (obligatorio para el rol Transportista)</span>' + this.carrierChecks(u ? u.carriers : [], self) + '</div>' +
       '<div id="nuAccess" class="nu-access"></div>' +
       '<label id="nuSupWrap"><span id="nuSupLbl">Superior que aprueba cambios de ruta interna</span><select id="nuSup"><option value="">— sin superior (avisa a Administración) —</option>' + sups.map(x => '<option value="' + x.id + '"' + (u && u.supervisor_user_id === x.id ? ' selected' : '') + '>' + esc(x.full_name) + '</option>').join('') + '</select></label>' +
