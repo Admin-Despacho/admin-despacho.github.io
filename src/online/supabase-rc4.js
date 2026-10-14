@@ -22,7 +22,7 @@ export const SupabaseRC4 = {
   async cancelOperationalRequest(id) { return this._rpc('cancel_operational_request', { p_request: id }); },
   async mileageSettings() { const r = await sel(this.sb.from('mileage_settings').select('*').eq('id', 'DEFAULT')); return r && r[0]; },
   async setMileageSettings(p) { return this._rpc('set_mileage_settings', { p }); },
-  async recordVehicleKm(vehicleId, km, note) { return this._rpc('record_vehicle_km', { p_vehicle: vehicleId, p_km: km, p_note: note || null }); },
+  async recordVehicleKm(vehicleId, km, note) { const r = await this._rpc('record_vehicle_km', { p_vehicle: vehicleId, p_km: km, p_note: note || null }); this.sendServiceAlerts().catch(() => null); return r; },
   async listMileageAlerts(status) { let q = this.sb.from('vehicle_mileage_alerts').select('*, vehicle:vehicles(plate)').order('created_at', { ascending: false }).limit(200); if (status) q = q.eq('status', status); return (await sel(q)).map(a => ({ ...a, plate: a.vehicle && a.vehicle.plate })); },
   async resolveMileageAlert(id, note) { return this._rpc('resolve_mileage_alert', { p_alert: id, p_note: note }); },
   async listNotifications() { const me = await this.me(); return (await sel(this.sb.from('notifications').select('*, user:profiles(full_name)').order('created_at', { ascending: false }).limit(200))).map(n => ({ ...n, user_name: n.user && n.user.full_name, mine: n.user_id === me.id })); },
