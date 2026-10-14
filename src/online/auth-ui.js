@@ -35,7 +35,7 @@ export function renderLogin(api, onDone) {
   const pkb = document.getElementById('loginPasskey');
   if (pkb) pkb.addEventListener('click', async () => {
     err.hidden = true; pkb.disabled = true;
-    try { const a = await getAssertion(await api.passkeyLoginOptions(hint())); await api.passkeyLogin(a, verifyAssertion); onDone(); }
+    try { const a = await getAssertion(await api.passkeyLoginOptions(hint())); await api.passkeyLogin(a, verifyAssertion); try { sessionStorage.setItem('okd_fresh_login','1'); } catch (e) {} onDone(); }
     catch (ex) { err.textContent = ex.name === 'NotAllowedError' ? 'Se canceló el ingreso rápido. Podés usar tu contraseña.' : ex.message; err.hidden = false; }
     finally { pkb.disabled = false; }
   });
@@ -45,6 +45,7 @@ export function renderLogin(api, onDone) {
     const btn = document.getElementById('loginBtn'); btn.disabled = true;
     try {
       await api.signIn(document.getElementById('loginEmail').value, document.getElementById('loginPass').value);
+      try { sessionStorage.setItem('okd_fresh_login','1'); } catch (e) {}
       onDone();
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
     finally { btn.disabled = false; }
