@@ -4,6 +4,7 @@ import { esc } from './util.js';
 import { hasPerm, ROLE_LABEL } from '../../supabase/functions/_shared/rules.js';
 import { ZONE_LABEL, money, dmy, MONTHS, localDate } from '../../supabase/functions/_shared/report-engine.js';
 import { openAccount } from './account-ui.js';
+import { appFrame, isRc4 } from './rc4-ui.js';
 
 const TYPE = { WEEKLY: 'Semanal', MONTHLY: 'Mensual', MANUAL: 'Manual' };
 const days = f => f == null ? '—' : 'cada ' + Math.round(f) + ' días';
@@ -23,11 +24,16 @@ export class ReportsPanel {
   canManage() { return hasPerm(this.me, 'can_manage_commercial_transport_reports'); }
   async open() {
     this.el.hidden = false;
-    this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Informes · Cristian Torres</span></div><div class="sp"></div>' +
-      '<button class="who-chip linkchip" type="button" id="rpMe">' + esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b></button>' +
-      '<button class="tbtn" type="button" id="rpClose">Volver al panel</button></header><div class="up-wrap" id="rpWrap"></div>';
-    this.el.querySelector('#rpClose').addEventListener('click', () => { if (location.hash) history.replaceState(null, '', location.pathname); this.el.hidden = true; this.el.innerHTML = ''; });
-    this.el.querySelector('#rpMe').addEventListener('click', () => openAccount(this.api, this.me, this.onLogout || (() => {})));
+    if (isRc4(this.me)) {
+      const w = appFrame(this.me, 'Informes · Cristian Torres', '#/informes', 'Análisis operativo y comercial del transporte');
+      w.innerHTML = '<div class="up-wrap rc4-reports-wrap" id="rpWrap"></div>';
+    } else {
+      this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Informes · Cristian Torres</span></div><div class="sp"></div>' +
+        '<button class="who-chip linkchip" type="button" id="rpMe">' + esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b></button>' +
+        '<button class="tbtn" type="button" id="rpClose">Volver al panel</button></header><div class="up-wrap" id="rpWrap"></div>';
+      this.el.querySelector('#rpClose').addEventListener('click', () => { if (location.hash) history.replaceState(null, '', location.pathname); this.el.hidden = true; this.el.innerHTML = ''; });
+      this.el.querySelector('#rpMe').addEventListener('click', () => openAccount(this.api, this.me, this.onLogout || (() => {})));
+    }
     await this.render();
   }
   async call(action, body = {}) { return this.api.reports(action, body); }
