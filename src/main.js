@@ -42,7 +42,7 @@ async function loadLegacy() {
 // ===== Módulos (RC1.1): el menú muestra solo lo autorizado y cada URL valida el permiso (el servidor valida igual) =====
 const canApprovals = me => hasPerm(me, 'can_approve_internal_route_changes');
 const adminUi = () => import('./online/admin-ui.js');
-const isAdminHome = me => hasPerm(me, 'users.view') || hasPerm(me, 'settings.manage');
+const isAdminHome = me => me?.role === 'ADMIN' || hasPerm(me, 'users.view') || hasPerm(me, 'settings.manage');
 // RC4: Superior Despacho y Operario Depósito también tienen su dashboard propio
 const RC4_HOME = me => isAdminHome(me) || ['SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'].includes(me.role);
 const rc4Ui = () => import('./online/rc4-ui.js');
