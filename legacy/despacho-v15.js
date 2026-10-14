@@ -958,7 +958,9 @@ const Publisher = {
     if (!pub) {
       btn.disabled = false; btn.textContent = 'PUBLICAR HOJA';
       try {
-        const rows = this.rows(), names = [...new Set(rows.map(r => r.transportista))], carriers = rows.length ? await b.carriers() : [];
+        const rows = this.rows();
+        const names = rows.length ? [...new Set(rows.map(r => r.transportista))] : Array.from(RouteStore.selected || []);
+        const carriers = names.length ? await b.carriers() : [];
         const carrier = names.length === 1 ? carriers.find(c => Normalizer.name(c.name) === Normalizer.name(names[0])) : null;
         if (carrier && carrier.kind === 'EXTERNO' && carrier.report_group !== 'CRISTIAN_TORRES') btn.textContent = 'DESPACHAR E IMPRIMIR';
       } catch (e) {}
@@ -1363,7 +1365,7 @@ const UI = {
     $('#carriers').addEventListener('change', e => {
       if (e.target.matches('input[type=checkbox]')) {
         if (e.target.checked) RouteStore.selected.add(e.target.value); else RouteStore.selected.delete(e.target.value);
-        RouteStore.save(); this.refreshStatuses(); this.renderCards();
+        RouteStore.save(); this.refreshStatuses(); this.renderCards(); Publisher.render();
       }
     });
     // Pedidos
