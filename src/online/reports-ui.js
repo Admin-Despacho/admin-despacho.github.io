@@ -19,13 +19,15 @@ export class ReportsPanel {
     this.month = { year: +today.slice(0, 4), month: +today.slice(5, 7) };
     this.free = { from: today.slice(0, 8) + '01', to: today };
     this.hf = { type: '', sent: '', from: '', to: '' };
+    this.mode = 'CRISTIAN';
+    this.thirdCarrier = '';
     this.viewing = null; this.msg = null;
   }
   canManage() { return hasPerm(this.me, 'can_manage_commercial_transport_reports'); }
   async open() {
     this.el.hidden = false;
     if (isRc4(this.me)) {
-      const w = appFrame(this.me, 'Informes · Cristian Torres', '#/informes', 'Análisis operativo y comercial del transporte');
+      const w = appFrame(this.me, 'Informes', '#/informes', 'Cristian Torres y despachos por transportistas tercerizados');
       w.innerHTML = '<div class="up-wrap rc4-reports-wrap" id="rpWrap"></div>';
     } else {
       this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Informes · Cristian Torres</span></div><div class="sp"></div>' +
@@ -41,14 +43,24 @@ export class ReportsPanel {
 
   async render() {
     const w = this.el.querySelector('#rpWrap');
-    const tabs = ['INFORME', 'HISTORIAL'].concat(this.canManage() ? ['CONFIGURACIÓN'] : []);
-    w.innerHTML = '<div class="up-head"><h2>INFORMES → CRISTIAN TORRES</h2><span class="sp"></span><div class="rp-tabs">' +
-      tabs.map(t => '<button type="button" class="' + (t === this.tab ? 'on' : '') + '" data-tab="' + t + '">' + t + '</button>').join('') + '</div></div>' +
-      (this.msg ? '<div class="up-msg ' + (this.msg.err ? 'err' : 'ok') + '" id="rpMsg">' + esc(this.msg.text) + '</div>' : '') + '<div id="rpBody"></div>';
+    const modeSwitch = '<div class="rp-mode-switch"><button type="button" data-mode="CRISTIAN" class="' + (this.mode === 'CRISTIAN' ? 'on' : '') + '">CRISTIAN TORRES</button><button type="button" data-mode="TERCEROS" class="' + (this.mode === 'TERCEROS' ? 'on' : '') + '">OTROS TRANSPORTISTAS</button></div>';
+    if (this.mode === 'TERCEROS') {
+      w.innerHTML = '<div class="up-head"><h2>INFORMES → OTROS TRANSPORTISTAS</h2><span class="sp"></span>' + modeSwitch + '</div>' +
+        (this.msg ? '<div class="up-msg ' + (this.msg.err ? 'err' : 'ok') + '" id="rpMsg">' + esc(this.msg.text) + '</div>' : '') + '<div id="rpBody"></div>';
+    } else {
+      const tabs = ['INFORME', 'HISTORIAL'].concat(this.canManage() ? ['CONFIGURACIÓN'] : []);
+      w.innerHTML = '<div class="up-head"><h2>INFORMES → CRISTIAN TORRES</h2><span class="sp"></span>' + modeSwitch + '<div class="rp-tabs">' +
+        tabs.map(t => '<button type="button" class="' + (t === this.tab ? 'on' : '') + '" data-tab="' + t + '">' + t + '</button>').join('') + '</div></div>' +
+        (this.msg ? '<div class="up-msg ' + (this.msg.err ? 'err' : 'ok') + '" id="rpMsg">' + esc(this.msg.text) + '</div>' : '') + '<div id="rpBody"></div>';
+    }
+    w.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+      this.mode = b.dataset.mode; this.viewing = null; this.msg = null; this.render();
+    }));
     w.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { this.tab = b.dataset.tab; this.viewing = null; this.msg = null; this.render(); }));
     const body = w.querySelector('#rpBody');
     try {
-      if (this.tab === 'INFORME') await this.renderReport(body);
+      if (this.mode === 'TERCEROS') await this.renderThirdParty(body);
+      else if (this.tab === 'INFORME') await this.renderReport(body);
       else if (this.tab === 'HISTORIAL') await this.renderHistory(body);
       else await this.renderConfig(body);
     } catch (e) { body.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; }
@@ -114,6 +126,45 @@ export class ReportsPanel {
     });
   }
   setKind(k) { this.sel = k === 'MONTH' ? { kind: 'MONTH', year: this.month.year, month: this.month.month } : k === 'FREE' ? { kind: 'FREE', from: this.free.from, to: this.free.to } : { kind: k }; }
+
+  async renderThirdParty(body) {
+    const res = await this.call('third_party_preview', { sel: this.sel, carrier_id: this.thirdCarrier || null });
+    const rep = res.report, carriers = res.carriers || [], s = rep.summary || {};
+    const card = (label, value) => '<div class="rp-card"><span>' + label + '</span><b>' + value + '</b></div>';
+    const tbl = (heads, rows, empty) => rows.length ? '<div class="utable-wrap"><table class="utable rp-table"><thead><tr>' + heads.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>' : '<p class="rp-empty">' + empty + '</p>';
+    body.innerHTML =
+      '<section class="step rp-step third-party-filter"><h2><span class="n">1</span>TRANSPORTISTA</h2><div class="third-carriers">' +
+        '<button type="button" class="' + (!this.thirdCarrier ? 'on' : '') + '" data-third-carrier="">TODOS</button>' +
+        carriers.map(c => '<button type="button" class="' + (this.thirdCarrier === c.id ? 'on' : '') + '" data-third-carrier="' + esc(c.id) + '">' + esc(c.name) + '</button>').join('') +
+      '</div><p class="rp-note">Cristian Torres conserva su informe actual y no se mezcla en este resumen.</p></section>' +
+      '<section class="step rp-step"><h2><span class="n">2</span>PERÍODO A ANALIZAR</h2>' + this.periodControls() +
+        '<p class="rp-plabel"><b>' + esc(rep.period.label) + '</b> · ' + dmy(rep.period.start) + ' al ' + dmy(rep.period.end) + ' · <b>' + rep.period.days + ' días</b></p></section>' +
+      '<section class="step rp-step"><h2><span class="n">3</span>RESUMEN</h2><div class="rp-cards third-summary">' +
+        card('Pedidos despachados', String(s.orders || 0)) +
+        card('Hojas finalizadas', String(s.routes || 0)) +
+        card('Monto enviado a cobrar', money(s.amount || 0)) +
+        card('Pedidos en $0', String(s.zero_amount || 0)) +
+      '</div><p class="rp-note"><b>Monto enviado a cobrar</b> = mercadería que el expreso cobra al cliente y luego rinde a OK Accesorios. El costo del flete es un acuerdo entre el cliente y el transportista y no forma parte de este total.</p></section>' +
+      '<section class="step rp-step"><h2><span class="n">4</span>RESUMEN POR TRANSPORTISTA</h2>' +
+        tbl(['TRANSPORTISTA','HOJAS','PEDIDOS','BULTOS','CON MONTO','EN $0','MONTO ENVIADO A COBRAR'],
+          (rep.by_carrier || []).map(x => '<tr><td><b>' + esc(x.carrier_name) + '</b></td><td>' + x.routes + '</td><td>' + x.orders + '</td><td>' + x.bultos + '</td><td>' + x.with_amount + '</td><td>' + x.zero_amount + '</td><td><b>' + money(x.amount) + '</b></td></tr>'),
+          'Sin despachos finalizados para este período.') + '</section>' +
+      '<section class="step rp-step"><h2><span class="n">5</span>DETALLE DE DESPACHOS</h2>' +
+        tbl(['FECHA','HOJA','TRANSPORTISTA','CLIENTE','PEDIDO(S)','BULTOS','RESULTADO','MONTO A COBRAR'],
+          (rep.details || []).map(x => '<tr><td>' + dmy(String(x.completed_at).slice(0,10)) + '</td><td><b>' + esc(x.route_number) + '</b></td><td>' + esc(x.carrier_name) + '</td><td>' + esc(x.client_name || '') + '</td><td>' + esc((x.order_numbers || []).join(' + ')) + '</td><td>' + x.bultos + '</td><td>' + esc(String(x.outcome || '—').replaceAll('_',' ')) + '</td><td><b>' + (x.merchandise_amount == null ? '—' : money(x.merchandise_amount)) + '</b></td></tr>'),
+          'Sin despachos para este período.') +
+        '<div class="third-total"><span>TOTAL DEL PERÍODO · <b>' + (s.orders || 0) + ' pedidos despachados</b></span><span>MONTO ENVIADO A COBRAR · <b>' + money(s.amount || 0) + '</b></span></div>' +
+        '<p class="rp-note">Los importes en $0 se muestran como $0 y no se consideran faltantes. El informe no calcula costo de flete ni rentabilidad.</p></section>';
+
+    body.querySelectorAll('[data-third-carrier]').forEach(b => b.addEventListener('click', () => { this.thirdCarrier = b.dataset.thirdCarrier; this.render(); }));
+    body.querySelectorAll('.rp-seg [data-k]').forEach(b => b.addEventListener('click', () => { this.setKind(b.dataset.k); this.render(); }));
+    const mSel = body.querySelector('#rpMonth');
+    const applyM = () => { const [y, m] = mSel.value.split('-').map(Number); this.month = { year: y, month: m }; this.setKind('MONTH'); this.render(); };
+    if (mSel) { mSel.addEventListener('change', applyM); body.querySelector('#rpApplyMonth').addEventListener('click', applyM); }
+    const af = body.querySelector('#rpApplyFree'); if (af) af.addEventListener('click', () => { this.free = { from: body.querySelector('#rpFrom').value, to: body.querySelector('#rpTo').value }; this.setKind('FREE'); this.render(); });
+    const fr = body.querySelector('#rpFrom'), to = body.querySelector('#rpTo');
+    if (fr) [fr, to].forEach(i => i.addEventListener('change', () => { this.free = { from: fr.value, to: to.value }; this.setKind('FREE'); }));
+  }
 
   // ===================== HISTORIAL =====================
   async renderHistory(body) {
