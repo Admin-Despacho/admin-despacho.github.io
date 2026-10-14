@@ -64,14 +64,14 @@ async function exportThirdPartyExcel(rep, filename) {
   ws.addRow(['Período', rep.period.label, 'Desde', rep.period.start, 'Hasta', rep.period.end, 'Días', rep.period.days]);
   ws.addRow([]);
   ws.addRow(['Pedidos despachados', s.orders || 0]);
-  ws.addRow(['Hojas finalizadas', s.routes || 0]);
+  ws.addRow(['Hojas despachadas', s.routes || 0]);
   ws.addRow(['Monto enviado a cobrar', s.amount || 0]);
   ws.addRow(['Pedidos en $0', s.zero_amount || 0]);
   ws.addRow([]);
   ws.addRow(['TRANSPORTISTA','HOJAS','PEDIDOS','BULTOS','CON MONTO','EN $0','MONTO ENVIADO A COBRAR']);
   (rep.by_carrier || []).forEach(x => ws.addRow([x.carrier_name,x.routes,x.orders,x.bultos,x.with_amount,x.zero_amount,x.amount]));
   const det = wb.addWorksheet('Detalle');
-  det.addRow(['FECHA','HOJA','TRANSPORTISTA','CLIENTE','PEDIDOS','BULTOS','RESULTADO','MONTO A COBRAR']);
+  det.addRow(['FECHA DESPACHO','HOJA','TRANSPORTISTA','CLIENTE','PEDIDOS','BULTOS','RESULTADO','MONTO A COBRAR']);
   (rep.details || []).forEach(x => det.addRow([String(x.completed_at || '').slice(0,10),x.route_number,x.carrier_name,x.client_name || '',(x.order_numbers || []).join(' + '),x.bultos,x.outcome || '',x.merchandise_amount]));
   [ws,det].forEach(sht => { sht.getRow(1).font = { bold: true }; sht.columns.forEach(col => { col.width = Math.min(45, Math.max(12, ...col.values.slice(1).map(v => String(v ?? '').length + 2))); }); });
   await saveWorkbook(wb, filename);
@@ -219,14 +219,14 @@ export class ReportsPanel {
         '<p class="rp-plabel"><b>' + esc(rep.period.label) + '</b> · ' + dmy(rep.period.start) + ' al ' + dmy(rep.period.end) + ' · <b>' + rep.period.days + ' días</b></p></section>' +
       '<section class="step rp-step"><h2><span class="n">3</span>RESUMEN</h2><div class="rp-cards third-summary">' +
         card('Pedidos despachados', String(s.orders || 0)) +
-        card('Hojas finalizadas', String(s.routes || 0)) +
+        card('Hojas despachadas', String(s.routes || 0)) +
         card('Monto enviado a cobrar', money(s.amount || 0)) +
         card('Pedidos en $0', String(s.zero_amount || 0)) +
       '</div><p class="rp-note"><b>Monto enviado a cobrar</b> = mercadería que el expreso cobra al cliente y luego rinde a OK Accesorios. El costo del flete es un acuerdo entre el cliente y el transportista y no forma parte de este total.</p></section>' +
       '<section class="step rp-step"><h2><span class="n">4</span>RESUMEN POR TRANSPORTISTA</h2>' +
         tbl(['TRANSPORTISTA','HOJAS','PEDIDOS','BULTOS','CON MONTO','EN $0','MONTO ENVIADO A COBRAR'],
           (rep.by_carrier || []).map(x => '<tr><td><b>' + esc(x.carrier_name) + '</b></td><td>' + x.routes + '</td><td>' + x.orders + '</td><td>' + x.bultos + '</td><td>' + x.with_amount + '</td><td>' + x.zero_amount + '</td><td><b>' + money(x.amount) + '</b></td></tr>'),
-          'Sin despachos finalizados para este período.') + '</section>' +
+          'Sin despachos registrados para este período.') + '</section>' +
       '<section class="step rp-step"><h2><span class="n">5</span>DETALLE DE DESPACHOS</h2>' +
         tbl(['FECHA','HOJA','TRANSPORTISTA','CLIENTE','PEDIDO(S)','BULTOS','RESULTADO','MONTO A COBRAR'],
           (rep.details || []).map(x => '<tr><td>' + dmy(String(x.completed_at).slice(0,10)) + '</td><td><b>' + esc(x.route_number) + '</b></td><td>' + esc(x.carrier_name) + '</td><td>' + esc(x.client_name || '') + '</td><td>' + esc((x.order_numbers || []).join(' + ')) + '</td><td>' + x.bultos + '</td><td>' + esc(String(x.outcome || '—').replaceAll('_',' ')) + '</td><td><b>' + (x.merchandise_amount == null ? '—' : money(x.merchandise_amount)) + '</b></td></tr>'),
