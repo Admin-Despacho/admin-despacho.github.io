@@ -231,5 +231,20 @@ window.OKD_SYNC_CONFIG = syncServerConfig;
 window.addEventListener('online', () => { if (window.OKD_CFG_STATE === 'REVISAR') syncServerConfig(); });
 function hideSplash() { const el = document.getElementById('splash'); if (!el) return; el.classList.add('hide'); setTimeout(() => el.remove(), 250); window.OKD_SPLASH_HIDDEN_AT = performance.now(); }
 route().catch(e => console.error(e)).finally(hideSplash);
-// PWA: solo en el build publicado
-if (import.meta.env.PROD && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').then(r => r.update()).catch(() => {}); // busca una versión nueva de los assets en cada inicio
+// PWA: solo en el build publicado.
+// Si entra un service worker nuevo, recargamos UNA vez para no mezclar chunks de dos versiones.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  let reloadingForUpdate = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    reg.update().catch(() => {});
+    // También busca versión nueva al volver a la pestaña, sin molestar al usuario.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
+    });
+  }).catch(() => {});
+}
