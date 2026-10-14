@@ -35,9 +35,10 @@ export function roleNav(me) {
     (hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/vehiculos', 'Vehículos'],
     (hasPerm(me, 'columns.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/config-operativa', 'Configuración operativa']].filter(Boolean);
   return [
-    ['#/dashboard', 'Dashboard'], ['#/nueva-hoja', 'Nueva hoja / Preparar hoja'], ['#/despacho', 'Despacho'], ['#/borradores', 'Mis borradores'],
-    (hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team')) ? ['#/historial', 'Hojas del equipo'] : hasPerm(me, 'routes.view_own') && ['#/historial', 'Mis hojas publicadas'], ['#/notificaciones', 'Notificaciones'], canRequests(me) && ['#/solicitudes', 'Solicitudes'],
-    (hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/vehiculos', 'Vehículo y kilometraje'],
+    ['#/dashboard', 'Dashboard'], ['#/nueva-hoja', 'Nueva hoja / Preparar hoja'], ['#/despacho', 'Despacho'], ['#/borradores', hasPerm(me, 'drafts.manage_all') ? 'Borradores de despacho' : 'Mis borradores'],
+    (hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team')) ? ['#/historial', 'Hojas publicadas'] : hasPerm(me, 'routes.view_own') && ['#/historial', 'Mis hojas publicadas'], ['#/notificaciones', 'Notificaciones'], canRequests(me) && ['#/solicitudes', 'Solicitudes'],
+    hasPerm(me, 'carriers.manage') && ['#/configuracion?sec=transportistas', 'Transportistas'],
+    (hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/vehiculos', 'Vehículos / Kilometraje / Service'],
     hasPerm(me, 'columns.view') && ['#/config-operativa', 'Columnas predeterminadas']].filter(Boolean);
 }
 export const ROUTE_OF = h => h.split('?')[0];
