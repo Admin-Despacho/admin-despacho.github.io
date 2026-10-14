@@ -71,7 +71,17 @@ const deps = {
     }
     const jobs = must(await admin.from('vehicle_service_email_jobs').select('*, vehicle:vehicles(name,plate,current_km,last_service_km,last_service_date,service_interval_km,habitual_driver_id)').in('status', ['QUEUED','ERROR']).lt('retry_count', 5).order('queued_at').limit(200)) as any[];
     for (const j of jobs) {
-      const v = j.vehicle || {}, next = Number(v.last_service_km || 0) + Number(v.service_interval_km || 0), current = Number(v.current_km || 0), remaining = next - current;
+      const v = j.vehicle || {};
+      const currentCycle = Number(v.last_service_km ?? 0);
+      if (Number(j.cycle_base_km ?? 0) !== currentCycle) {
+        must(await admin.from('vehicle_service_email_jobs').update({
+          status: 'CANCELLED',
+          error: 'Alerta anterior cancelada porque el vehículo ya inició un nuevo ciclo de service.'
+        }).eq('id', j.id));
+        out.push({ id: j.id, status: 'CANCELLED', recipient: j.recipient, vehicle_id: j.vehicle_id, level: j.alert_level });
+        continue;
+      }
+      const next = currentCycle + Number(v.service_interval_km || 0), current = Number(v.current_km || 0), remaining = next - current;
       const status = j.alert_level === 'REQUIRED' ? (remaining < 0 ? 'VENCIDO' : 'SERVICE REQUERIDO') : 'PRÓXIMO SERVICE';
       const subject = 'OK Despacho · ' + status + ' · ' + (v.name || 'Vehículo') + ' · ' + (v.plate || '');
       const html = '<div style="font-family:Arial,sans-serif;color:#10222c"><h2>' + status + '</h2><p><b>Vehículo:</b> ' + (v.name || '—') + ' · ' + (v.plate || '—') + '</p><p><b>KM actual:</b> ' + current.toLocaleString('es-AR') + '<br><b>Último service:</b> ' + Number(v.last_service_km || 0).toLocaleString('es-AR') + (v.last_service_date ? ' · ' + v.last_service_date : '') + '<br><b>Próximo service:</b> ' + next.toLocaleString('es-AR') + '<br><b>' + (remaining >= 0 ? 'KM restantes' : 'KM excedidos') + ':</b> ' + Math.abs(remaining).toLocaleString('es-AR') + '</p><p>Revisá Vehículos / Service en OK Despacho.</p></div>';
