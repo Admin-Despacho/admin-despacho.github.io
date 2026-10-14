@@ -298,3 +298,30 @@ body.no-publish #btnPublish{display:none!important}
 @media (max-width:900px){
   .rc4legacy-shell .rc4legacy-body{overflow-x:auto}
 }
+
+
+/* RC4.1.5 · Evita que la regla global legacy main{margin:0 auto} encoja el área derecha del shell. */
+.rc4app > .rc4main{
+  width:100%;
+  max-width:none;
+  margin:0;
+  box-sizing:border-box;
+}
+.rc4legacy-shell .rc4legacy-content > main{
+  width:100%;
+  max-width:none;
+  margin:0;
+  box-sizing:border-box;
+}
+/* El constructor debe aprovechar el ancho real restante después del sidebar. */
+.rc4legacy-shell .rc4legacy-content .steps{
+  width:100%;
+}
+@media (max-width:1500px){
+  .rc4legacy-shell .rc4legacy-content .steps{grid-template-columns:1fr 1fr}
+  .rc4legacy-shell .rc4legacy-content .step.s3{grid-column:1/-1}
+}
+@media (max-width:1050px){
+  .rc4legacy-shell .rc4legacy-content .steps{grid-template-columns:1fr}
+  .rc4legacy-shell .rc4legacy-content .step.s3{grid-column:auto}
+}
