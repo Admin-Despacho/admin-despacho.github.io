@@ -18,7 +18,7 @@ function loadScript(url) {
 }
 // Panel del Operario = versión offline v15 sin cambios de lógica (se carga recién con sesión válida)
 async function loadLegacy() {
-  if (legacyLoaded) return;
+  if (!legacyLoaded) {
   // Puente con el servidor: la confirmación de envíos provisorios se guarda server-side
   window.OKD_BRIDGE = {
     shipping: { confirm: p => api.shippingConfirm(p), invalidate: p => api.shippingInvalidate(p) },
@@ -37,6 +37,15 @@ async function loadLegacy() {
   $('#src-xlsx').textContent = xlsx; $('#src-worker').textContent = worker;
   for (const f of ['exceljs.min.js', 'jspdf.umd.min.js', 'jspdf.plugin.autotable.min.js', 'financing.js', 'despacho-v15.js']) await loadScript('/legacy/' + f);
   legacyLoaded = true;
+  }
+  try {
+    const raw = sessionStorage.getItem('okd_open_revision');
+    if (raw && window.OKD_LEGACY && window.OKD_LEGACY.openDraft) {
+      const x = JSON.parse(raw);
+      await window.OKD_LEGACY.openDraft(x.sheet_key, x.name, x.content);
+      sessionStorage.removeItem('okd_open_revision');
+    }
+  } catch (e) { console.error('No se pudo abrir la corrección aprobada', e); }
 }
 
 // ===== Módulos (RC1.1): el menú muestra solo lo autorizado y cada URL valida el permiso (el servidor valida igual) =====
