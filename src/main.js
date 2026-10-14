@@ -6,6 +6,7 @@ import { UsersPanel } from './online/users-ui.js';
 import { openAccount } from './online/account-ui.js';
 import { esc } from './online/util.js';
 import { hasPerm, ROLE_LABEL } from '../supabase/functions/_shared/rules.js';
+import { ensurePinGate, startPinLockWatcher } from './online/session-pin.js';
 
 const api = createApi();
 const $ = s => document.querySelector(s);
@@ -128,6 +129,7 @@ async function withNav(me, active) {
   if (top && !document.querySelector('#usersPanel #adNav')) top.insertAdjacentHTML('afterend', navHtml(me, active));
 }
 let ME = null;
+let stopPinWatcher = null;
 function closeOverlay() { const p = $('#usersPanel'); p.hidden = true; p.innerHTML = ''; }
 function show403() {
   const p = $('#usersPanel'); p.hidden = false;
@@ -162,7 +164,7 @@ async function addHeaderControls(me) {
   out.addEventListener('click', logout);
   top.appendChild(out);
 }
-async function logout() { await api.signOut(); location.hash = ''; location.reload(); }
+async function logout() { if (stopPinWatcher) { stopPinWatcher(); stopPinWatcher = null; } await api.signOut(); location.hash = ''; location.reload(); }
 
 async function route() {
   // Enlace de nueva contraseña (recuperación o invitación): antes de cualquier otra cosa
@@ -179,6 +181,9 @@ async function route() {
     show('#auth'); renderSetPassword(api, () => { location.hash = ''; route(); }, logout); return;
   }
   if (me.status !== 'ACTIVO') { await api.signOut(); showLogin('Tu usuario no está activo. Consultá con Administración.'); return; }
+  await ensurePinGate(api, me, { onForceLogin: () => { history.replaceState(null, '', location.pathname); location.reload(); } });
+  if (stopPinWatcher) stopPinWatcher();
+  stopPinWatcher = startPinLockWatcher(api, me, { onForceLogin: () => { history.replaceState(null, '', location.pathname); location.reload(); } });
   window.OKD_LOGOUT = logout;
   ME = me; window.OKD_ME = { id: me.id, allDrafts: hasPerm(me, 'routes.manage_all_drafts') };
   if (hasPerm(me, 'routes.create')) {
