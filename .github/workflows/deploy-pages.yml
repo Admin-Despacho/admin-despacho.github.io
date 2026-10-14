@@ -1,4 +1,4 @@
-name: Deploy OK Despacho RC4.1.2 to GitHub Pages
+name: Deploy OK Despacho RC4.1.4 to GitHub Pages
 
 on:
   push:
@@ -52,27 +52,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Wait for legacy Jekyll Pages run
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-        run: |
-          echo "Waiting for the legacy 'pages build and deployment' run for $SHA so the Vite deployment is always last."
-          for i in $(seq 1 60); do
-            RUN=$(gh api "repos/$REPO/actions/runs?head_sha=$SHA&per_page=20" --jq '.workflow_runs[] | select(.name=="pages build and deployment") | .id' | head -n1)
-            if [ -z "$RUN" ]; then
-              sleep 2
-              continue
-            fi
-            STATUS=$(gh api "repos/$REPO/actions/runs/$RUN" --jq '.status')
-            CONCLUSION=$(gh api "repos/$REPO/actions/runs/$RUN" --jq '.conclusion // ""')
-            echo "legacy run $RUN: $STATUS $CONCLUSION"
-            if [ "$STATUS" = "completed" ]; then
-              break
-            fi
-            sleep 3
-          done
 
       - name: Deploy Vite build to GitHub Pages
         id: deployment
