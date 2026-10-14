@@ -23,6 +23,16 @@ export const SupabaseAdmin = {
     const returns = await sel(this.sb.from('route_return_requests').select('*').eq('route_id', id));
     return { route: { ...r, carrier_name: r.carriers && r.carriers.name, stops: (r.route_stops || []).sort((a, b) => a.seq - b.seq) }, pdfs, audit, returns };
   },
+  async deliveryTrace(stopId) {
+    const stop = await sel(this.sb.from('route_stops').select('*').eq('id', stopId).single());
+    const evidence = await sel(this.sb.from('stop_evidence').select('*').eq('stop_id', stopId).maybeSingle()).catch(() => null);
+    const receipt = await sel(this.sb.from('delivery_receipts').select('*').eq('stop_id', stopId).maybeSingle()).catch(() => null);
+    const emails = await sel(this.sb.from('customer_email_jobs').select('*').eq('stop_id', stopId).order('queued_at', { ascending: false })).catch(() => []);
+    const ids = [...new Set([stop.outcome_by, evidence && evidence.created_by, receipt && receipt.generated_by].filter(Boolean))];
+    const people = ids.length ? await sel(this.sb.from('profiles').select('id,full_name').in('id', ids)).catch(() => []) : [];
+    const by = id => (people.find(p => p.id === id) || {}).full_name || null;
+    return { stop, evidence, receipt, emails, outcome_by_name: by(stop.outcome_by) };
+  },
   async resendNotification(id) { return this._rpc('resend_route_notification', { p_route: id }); },
   // Transportistas y plantillas
   async upsertCarrier(p) { return this._rpc('upsert_carrier', { p }); },
