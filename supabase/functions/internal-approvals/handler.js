@@ -43,6 +43,11 @@ async function handleRaw(req, deps) {
     }
     return json(200, { results: out });
   }
+  if (action === 'send_service_alerts') {
+    // Puede invocarlo cualquier usuario autenticado: no acepta destinatarios ni contenido arbitrario,
+    // solo evalúa la configuración central y los vehículos registrados.
+    return json(200, { results: await deps.runServiceAlerts() });
+  }
   if (action === 'settings_get' || action === 'settings_set') {
     if (!can('settings.manage')) return json(403, { error: 'Sin permiso.' });
     if (action === 'settings_get') return json(200, { settings: await deps.getSettings() });
