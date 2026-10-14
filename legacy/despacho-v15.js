@@ -830,7 +830,16 @@ const SheetTabs = {
 
 /* ---------------- Publicar hoja (Fase 2B.1): valida en el servidor, correlativo, snapshot y notificación ---------------- */
 const Publisher = {
+  _renderSeq: 0,
   bridge() { return window.OKD_BRIDGE && window.OKD_BRIDGE.routes; },
+  carrierMatch(carriers, value) {
+    const v = Normalizer.name(value || '');
+    return (carriers || []).find(c => Normalizer.name(c.name) === v || Normalizer.name(c.id) === v) || null;
+  },
+  actionNames() {
+    const rows = this.rows();
+    return rows.length ? [...new Set(rows.map(r => r.transportista).filter(Boolean))] : Array.from(RouteStore.selected || []).filter(Boolean);
+  },
   zone(row, carrier) {
     if (carrier.id === 'CT-ESTE') return 'ESTE';
     if (carrier.id === 'CT-ALR') return /capital|ciudad de mendoza|centro/i.test((row.localidad || '') + ' ' + (row.domicilio || '')) ? 'CENTRO' : 'ALREDEDORES';
@@ -868,8 +877,8 @@ const Publisher = {
     const rows = this.rows(); if (!rows.length) { toast('La hoja no tiene pedidos para procesar.'); return; }
     const bad = this.problems();
     const carriers = await b.carriers();
-    const names = [...new Set(rows.map(r => r.transportista))];
-    const carrier = names.length === 1 ? carriers.find(c => Normalizer.name(c.name) === Normalizer.name(names[0])) : null;
+    const names = [...new Set(rows.map(r => r.transportista).filter(Boolean))];
+    const carrier = names.length === 1 ? this.carrierMatch(carriers, names[0]) : null;
     const external = !!(carrier && carrier.kind === 'EXTERNO' && carrier.report_group !== 'CRISTIAN_TORRES');
     const m = document.createElement('div'); m.className = 'modal open'; m.id = 'publishModal';
     let resp = [];
@@ -956,13 +965,17 @@ const Publisher = {
     btn.hidden = !b; if (!b) return;
     const pub = RouteStore.published;
     if (!pub) {
+      const seq = ++this._renderSeq;
       btn.disabled = false; btn.textContent = 'PUBLICAR HOJA';
       try {
-        const rows = this.rows();
-        const names = rows.length ? [...new Set(rows.map(r => r.transportista))] : Array.from(RouteStore.selected || []);
+        const names = this.actionNames();
         const carriers = names.length ? await b.carriers() : [];
-        const carrier = names.length === 1 ? carriers.find(c => Normalizer.name(c.name) === Normalizer.name(names[0])) : null;
-        if (carrier && carrier.kind === 'EXTERNO' && carrier.report_group !== 'CRISTIAN_TORRES') btn.textContent = 'DESPACHAR E IMPRIMIR';
+        if (seq !== this._renderSeq) return;
+        const carrier = names.length === 1 ? this.carrierMatch(carriers, names[0]) : null;
+        const external = !!(carrier && carrier.kind === 'EXTERNO' && carrier.report_group !== 'CRISTIAN_TORRES');
+        btn.textContent = external ? 'DESPACHAR E IMPRIMIR' : 'PUBLICAR HOJA';
+        btn.dataset.carrierMode = external ? 'EXTERNAL' : 'APP';
+        btn.title = carrier ? (external ? 'Registra el despacho tercerizado, genera el PDF y lo incorpora a Informes.' : 'Publica la hoja en la app para el responsable asignado.') : '';
       } catch (e) {}
       box.hidden = true; return;
     }
