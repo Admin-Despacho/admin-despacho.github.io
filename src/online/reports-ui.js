@@ -9,6 +9,74 @@ import { appFrame, isRc4 } from './rc4-ui.js';
 const TYPE = { WEEKLY: 'Semanal', BIWEEKLY: 'Quincenal', MONTHLY: 'Mensual', MANUAL: 'Manual' };
 const days = f => f == null ? '—' : 'cada ' + Math.round(f) + ' días';
 
+async function loadExcelJs() {
+  if (window.ExcelJS) return;
+  await new Promise((ok, ko) => {
+    const sc = document.createElement('script');
+    sc.src = (import.meta.env.BASE_URL || '/') + 'legacy/exceljs.min.js';
+    sc.onload = ok;
+    sc.onerror = () => ko(new Error('No se pudo cargar el generador de Excel.'));
+    document.head.appendChild(sc);
+  });
+}
+const excelName = s => String(s || 'informe').replace(/[^a-z0-9áéíóúñü_-]+/gi, '_').replace(/^_+|_+$/g, '');
+async function saveWorkbook(wb, filename) {
+  const buf = await wb.xlsx.writeBuffer();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  a.download = filename.endsWith('.xlsx') ? filename : filename + '.xlsx';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+async function exportCristianExcel(rep, filename) {
+  await loadExcelJs();
+  const wb = new window.ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Resumen');
+  ws.addRow(['INFORME CRISTIAN TORRES']);
+  ws.addRow(['Período', rep.period.label, 'Desde', rep.period.start, 'Hasta', rep.period.end, 'Días', rep.period.days]);
+  ws.addRow([]);
+  ws.addRow(['ZONA','COMPLETADOS','INGRESO ENVÍOS','PROMEDIO']);
+  (rep.zones || []).forEach(z => ws.addRow([ZONE_LABEL[z.zone] || z.zone, z.completed, z.income, z.avg]));
+  ws.addRow(['TOTAL', rep.total?.completed || 0, rep.total?.income || 0, rep.total?.avg || 0]);
+  ws.addRow([]);
+  ws.addRow(['COBERTURA DE COSTO']);
+  ws.addRow(['Costo Cristian', rep.coverage?.cost || 0]);
+  ws.addRow(['Ingreso total', rep.coverage?.income || 0]);
+  ws.addRow(['Diferencia', rep.coverage?.diff || 0]);
+  ws.addRow(['Cubre costo', rep.coverage?.covers ? 'SÍ' : 'NO']);
+  const best = wb.addWorksheet('Mejores clientes');
+  best.addRow(['CLIENTE','COMPRAS','FRECUENCIA PROMEDIO','ÚLTIMA COMPRA','FACTURACIÓN']);
+  (rep.best_clients || []).forEach(x => best.addRow([x.client, x.purchases, x.freq, x.last, x.amount]));
+  const rec = wb.addWorksheet('Clientes a recuperar');
+  rec.addRow(['CLIENTE','ZONA','ÚLTIMA COMPRA','DÍAS SIN COMPRAR','FRECUENCIA','COMPRAS 90 DÍAS','DESVÍO','ESTADO','ACCIÓN']);
+  (rep.recover || []).forEach(x => rec.addRow([x.client, ZONE_LABEL[x.zone] || x.zone, x.last, x.days_since, x.freq, x.purchases_90, x.deviation, x.status, x.action]));
+  const zon = wb.addWorksheet('Zonas');
+  zon.addRow(['ZONA','COMPLETADOS','NO ENTREGADOS','REPROGRAMADOS','INGRESO','TENDENCIA %','CLIENTES ACTIVOS','INACTIVOS','FRECUENCIA','CARGA DÍA','CONCLUSIÓN','POR QUÉ']);
+  (rep.reinforce || []).forEach(x => zon.addRow([ZONE_LABEL[x.zone] || x.zone, x.completed, x.not_delivered, x.rescheduled, x.income, x.growth, x.active_clients, x.inactive_clients, x.avg_freq, x.load_per_day, x.decision, x.why]));
+  [ws,best,rec,zon].forEach(s => { s.getRow(1).font = { bold: true }; s.columns.forEach(col => { col.width = Math.min(45, Math.max(12, ...col.values.slice(1).map(v => String(v ?? '').length + 2))); }); });
+  await saveWorkbook(wb, filename);
+}
+async function exportThirdPartyExcel(rep, filename) {
+  await loadExcelJs();
+  const wb = new window.ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Resumen');
+  const s = rep.summary || {};
+  ws.addRow(['INFORME OTROS TRANSPORTISTAS']);
+  ws.addRow(['Período', rep.period.label, 'Desde', rep.period.start, 'Hasta', rep.period.end, 'Días', rep.period.days]);
+  ws.addRow([]);
+  ws.addRow(['Pedidos despachados', s.orders || 0]);
+  ws.addRow(['Hojas finalizadas', s.routes || 0]);
+  ws.addRow(['Monto enviado a cobrar', s.amount || 0]);
+  ws.addRow(['Pedidos en $0', s.zero_amount || 0]);
+  ws.addRow([]);
+  ws.addRow(['TRANSPORTISTA','HOJAS','PEDIDOS','BULTOS','CON MONTO','EN $0','MONTO ENVIADO A COBRAR']);
+  (rep.by_carrier || []).forEach(x => ws.addRow([x.carrier_name,x.routes,x.orders,x.bultos,x.with_amount,x.zero_amount,x.amount]));
+  const det = wb.addWorksheet('Detalle');
+  det.addRow(['FECHA','HOJA','TRANSPORTISTA','CLIENTE','PEDIDOS','BULTOS','RESULTADO','MONTO A COBRAR']);
+  (rep.details || []).forEach(x => det.addRow([String(x.completed_at || '').slice(0,10),x.route_number,x.carrier_name,x.client_name || '',(x.order_numbers || []).join(' + '),x.bultos,x.outcome || '',x.merchandise_amount]));
+  [ws,det].forEach(sht => { sht.getRow(1).font = { bold: true }; sht.columns.forEach(col => { col.width = Math.min(45, Math.max(12, ...col.values.slice(1).map(v => String(v ?? '').length + 2))); }); });
+  await saveWorkbook(wb, filename);
+}
+
 export class ReportsPanel {
   constructor(api, me, onLogout) {
     this.api = api; this.me = me; this.onLogout = onLogout;
@@ -108,7 +176,8 @@ export class ReportsPanel {
       step(6, 'ZONAS A REFORZAR', '<div class="rp-best">' + rep.reinforce.map(z => '<div class="rp-card rp-zc ' + (z.decision === 'REFORZAR REPARTO' ? 'high' : z.decision === 'RECUPERAR COMERCIALMENTE' ? 'med' : '') + '"><span>' + ZONE_LABEL[z.zone] + '</span><b>' + z.decision.split(' ')[0] + '</b><small>' + esc(z.why) + '</small></div>').join('') + '</div>' + tbl(['ZONA', 'COMPLETADOS', 'NO ENTREG.', 'REPROG.', 'INGRESO', 'TENDENCIA', 'CLIENTES ACTIVOS', 'INACTIVOS', 'FRECUENCIA', 'CARGA/DÍA', 'CONCLUSIÓN', 'POR QUÉ'],
         rep.reinforce.map(z => '<tr><td><b>' + ZONE_LABEL[z.zone] + '</b></td><td>' + z.completed + '</td><td>' + z.not_delivered + '</td><td>' + z.rescheduled + '</td><td>' + money(z.income) + '</td><td>' + (z.growth >= 0 ? '+' : '') + Math.round(z.growth) + '%</td><td>' + z.active_clients + '</td><td>' + z.inactive_clients + '</td><td>' + days(z.avg_freq) + '</td><td>' + z.load_per_day + '</td><td><b>' + z.decision + '</b></td><td>' + esc(z.why) + '</td></tr>'), '') +
         '<ul class="rp-dec">' + rep.decisions.map(d => '<li>' + esc(d) + '</li>').join('') + '</ul>') +
-      (!saved && this.canManage() ? '<div class="rp-actions"><button class="btn go" type="button" id="rpGenerate">GENERAR INFORME Y PDF</button><span class="rp-note">Queda guardado en el historial con estos números (no se recalcula).</span></div>' : '');
+      '<div class="rp-actions"><button class="btn soft" type="button" id="rpExcel">DESCARGAR EXCEL</button>' +
+        (!saved && this.canManage() ? '<button class="btn go" type="button" id="rpGenerate">GENERAR INFORME Y PDF</button><span class="rp-note">Queda guardado en el historial con estos números (no se recalcula).</span>' : '') + '</div>';
     const back = body.querySelector('#rpBack'); if (back) back.addEventListener('click', () => { this.viewing = null; this.render(); });
     body.querySelectorAll('.rp-seg [data-k]').forEach(b => b.addEventListener('click', () => { this.setKind(b.dataset.k); this.render(); }));
     const mSel = body.querySelector('#rpMonth');
@@ -117,6 +186,15 @@ export class ReportsPanel {
     const af = body.querySelector('#rpApplyFree'); if (af) af.addEventListener('click', () => { this.free = { from: body.querySelector('#rpFrom').value, to: body.querySelector('#rpTo').value }; this.setKind('FREE'); this.render(); });
     const f = body.querySelector('#rpFrom'), t = body.querySelector('#rpTo');
     if (f) [f, t].forEach(i => i.addEventListener('change', () => { this.free = { from: f.value, to: t.value }; this.setKind('FREE'); this.render(); }));
+    const ex = body.querySelector('#rpExcel');
+    if (ex) ex.addEventListener('click', async () => {
+      ex.disabled = true;
+      try {
+        const tag = saved ? ('v' + saved.version + '_' + rep.period.start + '_' + rep.period.end) : (rep.period.start + '_' + rep.period.end);
+        await exportCristianExcel(rep, 'Informe_Cristian_Torres_' + excelName(tag) + '.xlsx');
+      } catch (e) { this.say(e.message, true); this.render(); }
+      finally { ex.disabled = false; }
+    });
     const g = body.querySelector('#rpGenerate');
     if (g) g.addEventListener('click', async () => {
       g.disabled = true;
@@ -154,8 +232,18 @@ export class ReportsPanel {
           (rep.details || []).map(x => '<tr><td>' + dmy(String(x.completed_at).slice(0,10)) + '</td><td><b>' + esc(x.route_number) + '</b></td><td>' + esc(x.carrier_name) + '</td><td>' + esc(x.client_name || '') + '</td><td>' + esc((x.order_numbers || []).join(' + ')) + '</td><td>' + x.bultos + '</td><td>' + esc(String(x.outcome || '—').replaceAll('_',' ')) + '</td><td><b>' + (x.merchandise_amount == null ? '—' : money(x.merchandise_amount)) + '</b></td></tr>'),
           'Sin despachos para este período.') +
         '<div class="third-total"><span>TOTAL DEL PERÍODO · <b>' + (s.orders || 0) + ' pedidos despachados</b></span><span>MONTO ENVIADO A COBRAR · <b>' + money(s.amount || 0) + '</b></span></div>' +
-        '<p class="rp-note">Los importes en $0 se muestran como $0 y no se consideran faltantes. El informe no calcula costo de flete ni rentabilidad.</p></section>';
+        '<p class="rp-note">Los importes en $0 se muestran como $0 y no se consideran faltantes. El informe no calcula costo de flete ni rentabilidad.</p></section>' +
+        '<div class="rp-actions"><button class="btn soft" type="button" id="thirdExcel">DESCARGAR EXCEL</button></div>';
 
+    const tx = body.querySelector('#thirdExcel');
+    if (tx) tx.addEventListener('click', async () => {
+      tx.disabled = true;
+      try {
+        const carrier = this.thirdCarrier ? ((carriers.find(x => x.id === this.thirdCarrier) || {}).name || this.thirdCarrier) : 'Todos';
+        await exportThirdPartyExcel(rep, 'Informe_Transportistas_' + excelName(carrier + '_' + rep.period.start + '_' + rep.period.end) + '.xlsx');
+      } catch (e) { this.say(e.message, true); this.render(); }
+      finally { tx.disabled = false; }
+    });
     body.querySelectorAll('[data-third-carrier]').forEach(b => b.addEventListener('click', () => { this.thirdCarrier = b.dataset.thirdCarrier; this.render(); }));
     body.querySelectorAll('.rp-seg [data-k]').forEach(b => b.addEventListener('click', () => { this.setKind(b.dataset.k); this.render(); }));
     const mSel = body.querySelector('#rpMonth');
@@ -177,7 +265,7 @@ export class ReportsPanel {
       (list.length ? '<div class="utable-wrap"><table class="utable"><thead><tr><th>TIPO</th><th>PERÍODO</th><th>VERSIÓN</th><th>GENERADO</th><th>PDF</th><th>EMAIL</th><th>ACCIONES</th></tr></thead><tbody>' +
         list.map(r => '<tr data-rid="' + r.id + '"><td><b>' + TYPE[r.report_type] + '</b></td><td>' + dmy(r.period_start) + ' al ' + dmy(r.period_end) + '</td><td>v' + r.version + '</td><td>' + new Date(r.generated_at).toLocaleString('es-AR') + '</td>' +
           '<td><span class="ust ' + (r.pdf_status === 'OK' ? 'ACTIVO' : 'DESHABILITADO') + '">' + r.pdf_status + '</span></td><td>' + esc(mailState(r)) + '</td><td><div class="uact">' +
-          '<button class="btn dark" type="button" data-a="view">VER</button>' + (r.pdf_status === 'OK' ? '<button class="btn soft" type="button" data-a="pdf">DESCARGAR PDF</button>' : '') +
+          '<button class="btn dark" type="button" data-a="view">VER</button><button class="btn soft" type="button" data-a="excel">EXCEL</button>' + (r.pdf_status === 'OK' ? '<button class="btn soft" type="button" data-a="pdf">DESCARGAR PDF</button>' : '') +
           (this.canManage() ? ((r.emails || []).length ? '<button class="btn soft" type="button" data-a="resend">REENVIAR EMAIL</button>' : '<button class="btn soft" type="button" data-a="send">ENVIAR EMAIL</button>') +
             (r.pdf_status !== 'OK' || (r.emails || []).some(e => e.status !== 'SENT') ? '<button class="btn soft" type="button" data-a="retry">REINTENTAR</button>' : '') : '') +
           '</div></td></tr>').join('') + '</tbody></table></div>' : '<p class="rp-empty">Todavía no hay informes con esos filtros.</p>');
@@ -187,6 +275,11 @@ export class ReportsPanel {
   async historyAction(a, id) {
     try {
       if (a === 'view') { const r = await this.call('get', { report_id: id }); this.viewing = r.report; this.tab = 'INFORME'; return this.render(); }
+      if (a === 'excel') {
+        const r = await this.call('get', { report_id: id }), saved = r.report, rep = saved.snapshot;
+        await exportCristianExcel(rep, 'Informe_Cristian_Torres_v' + saved.version + '_' + excelName(rep.period.start + '_' + rep.period.end) + '.xlsx');
+        return;
+      }
       if (a === 'pdf') {
         const r = await this.call('pdf', { report_id: id });
         const blob = new Blob([Uint8Array.from(atob(r.base64), c => c.charCodeAt(0))], { type: 'application/pdf' });
