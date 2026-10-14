@@ -142,6 +142,13 @@ async function route() {
         const a = document.createElement('a'); a.id = 'btnAskAuth'; a.className = 'btn dark'; a.href = '#/solicitudes?nueva=1'; a.textContent = 'SOLICITAR AUTORIZACIÓN'; bp.after(a);
       }
     }
+    // RC4: el Admin General abre el dashboard de forma explícita.
+    // No dependemos del evento hashchange para evitar quedar visible en el shell operativo legado.
+    if (me.role === 'ADMIN' && (!location.hash || location.hash === '#/despacho')) {
+      history.replaceState(null, '', location.pathname + '#/dashboard');
+      await (await adminUi()).openDashboard(api, me);
+      return;
+    }
     if (!location.hash && RC4_HOME(me)) location.hash = '#/dashboard';
   } else {
     show('#noPanel');
@@ -167,7 +174,7 @@ function showLogin(note) {
 if (api.mode === 'demo') $('#demoBanner').hidden = false;
 window.OKD_ONLINE = { api };
 // La splash se oculta apenas termina la inicialización real (sesión restaurada y primera pantalla elegida): sin demoras artificiales
-window.OKD_BUILD = import.meta.env.VITE_OKD_BUILD_TAG || ''; // identificador del build (diagnóstico)
+window.OKD_BUILD = import.meta.env.VITE_OKD_BUILD_TAG || 'rc4.1.2-admin-dashboard-hotfix'; // identificador del build (diagnóstico)
 async function syncServerConfig() {
   const set = (st, msg) => {
     window.OKD_CFG_STATE = st;
