@@ -1,7 +1,7 @@
 // Admin → USUARIOS. Misma estética que la versión offline (cabecera oscura, tabla negra con línea cyan).
 import { esc, fmtDate, fmtDay } from './util.js';
 import { ROLES, ASSIGNABLE_ROLES, ROLE_LABEL, hasPerm, compatibleResponsables, MODULES, MODULE_LABEL, roleModules, ROLE_PERMISSIONS, SENSITIVE_PERMISSIONS } from '../../supabase/functions/_shared/rules.js';
-import { PERM_GROUPS, PERM_LABEL } from './rc4-ui.js';
+import { PERM_GROUPS, PERM_LABEL, appFrame, isRc4 } from './rc4-ui.js';
 // RC4: roles que tienen superior asignado y qué roles pueden ser su superior
 const SUP_ROLES = { OPERARIO_DEPOSITO: ['SUPERVISOR_DESPACHO', 'ADMIN'], SUPERVISOR_DESPACHO: ['ADMIN'] };
 import { openAccount } from './account-ui.js';
@@ -17,11 +17,16 @@ export class UsersPanel {
   }
   async open() {
     this.el.hidden = false;
-    this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Administración</span></div><div class="sp"></div>' +
-      '<button class="who-chip linkchip" type="button" id="upMe">' + esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b></button>' +
-      '<button class="tbtn" type="button" id="upClose">Volver al panel</button></header><div class="up-wrap" id="upWrap"></div>';
-    this.el.querySelector('#upClose').addEventListener('click', () => this.close());
-    this.el.querySelector('#upMe').addEventListener('click', () => openAccount(this.api, this.me, this.onLogout || (() => {})));
+    if (isRc4(this.me)) {
+      const w = appFrame(this.me, 'Usuarios y permisos', '#/usuarios', 'Roles, jerarquía, accesos y permisos por usuario');
+      w.innerHTML = '<div class="up-wrap rc4-users-wrap" id="upWrap"></div>';
+    } else {
+      this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Administración</span></div><div class="sp"></div>' +
+        '<button class="who-chip linkchip" type="button" id="upMe">' + esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b></button>' +
+        '<button class="tbtn" type="button" id="upClose">Volver al panel</button></header><div class="up-wrap" id="upWrap"></div>';
+      this.el.querySelector('#upClose').addEventListener('click', () => this.close());
+      this.el.querySelector('#upMe').addEventListener('click', () => openAccount(this.api, this.me, this.onLogout || (() => {})));
+    }
     await this.reload();
   }
   close() { if (location.hash) history.replaceState(null, '', location.pathname); this.el.hidden = true; this.el.innerHTML = ''; this.onClose && this.onClose(); }
