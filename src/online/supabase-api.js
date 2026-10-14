@@ -145,7 +145,7 @@ export class SupabaseApi {
   async markViewed(id) { return this._rpc('mark_route_viewed', { p_route: id }); }
   async startRoute(id, kmStart) { return this._rpc('start_route', { p_route: id, p_km_start: kmStart ?? null }); }
   async setStopOutcome(stop, outcome, note, reason, opId, extra) { const r = await this._rpc('set_stop_outcome', { p_stop: stop, p_outcome: outcome, p_note: note || null, p_reason: reason || null, p_op_id: opId, p_extra: extra || null }); this.sendCustomerQueued().catch(() => null); return r; }
-  async finalizeRoute(id, kmEnd) { return this._rpc('finalize_route', { p_route: id, p_km_end: kmEnd ?? null }); }
+  async finalizeRoute(id, kmEnd) { const r = await this._rpc('finalize_route', { p_route: id, p_km_end: kmEnd ?? null }); this.sendServiceAlerts().catch(() => null); return r; }
   async arriveStop(stop, location, opId) { return this._rpc('arrive_stop', { p_stop: stop, p_location: location, p_op_id: opId }); }
   async deliveryIdentityLookup(stopId, cuil, dni) { return this._rpc('delivery_identity_lookup', { p_stop: stopId, p_cuil: cuil || null, p_dni: dni || null }); }
   async cuilHasDni(cuil) { return this._rpc('cuil_has_dni', { p_cuil: cuil }); }
@@ -166,10 +166,11 @@ export class SupabaseApi {
     if (error) throw new Error(error.message); return u.signedUrl;
   }
   async sendCustomerQueued(ids) { const { data } = await this._invoke('internal-approvals', { body: ids ? { action: 'retry_customer', job_ids: ids } : { action: 'send_customer_queued' } }); return data && data.results; }
+  async sendServiceAlerts() { const { data, error } = await this._invoke('internal-approvals', { body: { action: 'send_service_alerts' } }); if (error) throw error; return data && data.results; }
   async listVehicles() { const { data } = await this.sb.from('vehicle_service_status').select('*').order('name'); return data || []; }
-  async upsertVehicle(p) { return this._rpc('upsert_vehicle', { p }); }
-  async correctVehicleKm(id, km, reason) { return this._rpc('correct_vehicle_km', { p_vehicle: id, p_km: km, p_reason: reason }); }
-  async registerService(id, km, date) { return this._rpc('register_vehicle_service', { p_vehicle: id, p_km: km, p_date: date }); }
+  async upsertVehicle(p) { const r = await this._rpc('upsert_vehicle', { p }); this.sendServiceAlerts().catch(() => null); return r; }
+  async correctVehicleKm(id, km, reason) { const r = await this._rpc('correct_vehicle_km', { p_vehicle: id, p_km: km, p_reason: reason }); this.sendServiceAlerts().catch(() => null); return r; }
+  async registerService(id, km, date) { const r = await this._rpc('register_vehicle_service', { p_vehicle: id, p_km: km, p_date: date }); this.sendServiceAlerts().catch(() => null); return r; }
   async requestRouteReturn(id, reason) { return this._rpc('request_route_return', { p_route: id, p_reason: reason }); }
   async returnRequests() { const { data } = await this.sb.from('route_return_requests').select('*, routes(number)').order('created_at', { ascending: false }); return (data || []).map(x => ({ ...x, route_number: x.routes && x.routes.number })); }
   async resolveReturn(id, decision, note) { return this._rpc('resolve_route_return', { p_id: id, p_decision: decision, p_note: note }); }
