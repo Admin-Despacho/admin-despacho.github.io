@@ -41,10 +41,15 @@ export function roleNav(me) {
     hasPerm(me, 'columns.view') && ['#/config-operativa', 'Columnas predeterminadas']].filter(Boolean);
 }
 export const ROUTE_OF = h => h.split('?')[0];
+const NAV_MATCH = (target, active) => {
+  const t = String(target || ''), a = String(active || '');
+  if (t.includes('?') || a.includes('?')) return t === a;
+  return ROUTE_OF(t) === ROUTE_OF(a);
+};
 function navLinks(me, active) {
-  const a = ROUTE_OF(active || '');
-  return roleNav(me).map(([h, l, sub]) => '<a href="' + h + '" data-nav="' + h + '" class="' + (ROUTE_OF(h) === a && !(sub || []).some(s => s[0] === a && s[0] !== h) ? 'active' : '') + '"><span class="dot"></span>' + esc(l) + '</a>' +
-    (sub ? '<div class="sub">' + sub.map(([sh, sl]) => '<a href="' + sh + '" data-nav="' + sh + '" class="' + (sh === a ? 'active' : '') + '">' + esc(sl) + '</a>').join('') + '</div>' : '')).join('');
+  const a = String(active || '');
+  return roleNav(me).map(([h, l, sub]) => '<a href="' + h + '" data-nav="' + h + '" class="' + (NAV_MATCH(h, a) && !(sub || []).some(s => NAV_MATCH(s[0], a) && s[0] !== h) ? 'active' : '') + '"><span class="dot"></span>' + esc(l) + '</a>' +
+    (sub ? '<div class="sub">' + sub.map(([sh, sl]) => '<a href="' + sh + '" data-nav="' + sh + '" class="' + (NAV_MATCH(sh, a) ? 'active' : '') + '">' + esc(sl) + '</a>').join('') + '</div>' : '')).join('');
 }
 // Barra horizontal (encima del panel de Despacho) con los mismos destinos
 export function roleTopNav(me, active) {
