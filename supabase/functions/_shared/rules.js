@@ -20,7 +20,7 @@ export const PERMISSIONS = [
   'deliveries.update', 'deliveries.capture_signature',
   'internal_routes.use', 'internal_routes.manage',
   'locations.view', 'locations.manage',
-  'signatures.view', 'audit.view', 'settings.manage',
+  'signatures.view', 'audit.view', 'settings.manage', 'carriers.manage',
   'can_approve_internal_route_changes',
   'can_view_commercial_transport_reports', 'can_manage_commercial_transport_reports',
   'routes.manage_all_drafts', 'identity_docs.view', 'collections.manage', 'vehicles.manage', 'credit_notes.manage',
@@ -28,7 +28,7 @@ export const PERMISSIONS = [
   'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicle_mileage.edit', 'vehicle_mileage.rules_manage', 'vehicle_mileage.resolve_alerts',
   'columns.view', 'columns.manage_defaults', 'columns.manage_templates', 'columns.apply_global',
   'routes.edit', 'routes.cancel', 'routes.reassign', 'routes.view_team', 'routes.view_own',
-  'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team',
+  'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team', 'drafts.manage_all',
   'requests.create', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team', 'requests.reassign',
   'users.assign_supervisor', 'users.manage_permissions', 'vehicles.view', 'vehicles.service_manage', 'backup.manage'
 ];
@@ -43,7 +43,7 @@ export const ROLE_PERMISSIONS = {
     'internal_routes.manage', 'locations.view', 'signatures.view', 'collections.manage', 'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team',
     'requests.create', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team',
     'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicle_mileage.resolve_alerts', 'vehicles.view'],
-  OPERARIO_DEPOSITO: ['routes.create', 'routes.publish', 'routes.view_own', 'locations.view', 'drafts.create', 'drafts.view_own', 'requests.create', 'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicles.view'],
+  OPERARIO_DEPOSITO: ['routes.create', 'routes.edit', 'routes.publish', 'routes.assign', 'routes.view_all', 'routes.view_own', 'locations.view', 'drafts.create', 'drafts.view_own', 'drafts.manage_all', 'requests.create', 'columns.view', 'columns.manage_defaults', 'columns.manage_templates', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicles.view', 'vehicles.service_manage', 'carriers.manage'],
   TRANSPORTISTA: ['routes.view_assigned', 'deliveries.update', 'deliveries.capture_signature'],
   TRANSPORTISTA_INTERNO: ['routes.view_assigned', 'internal_routes.use', 'deliveries.update', 'deliveries.capture_signature'],
   SOLO_LECTURA: ['routes.view_all']
@@ -56,13 +56,13 @@ export const MODULES = ['DESPACHO', 'MIS_HOJAS', 'USUARIOS', 'INFORMES', 'APROBA
 export const MODULE_LABEL = { DESPACHO: 'Despacho general', MIS_HOJAS: 'Mis hojas publicadas', USUARIOS: 'Usuarios', INFORMES: 'Informes', APROBACIONES: 'Aprobaciones', CONFIGURACION: 'Configuración', AUDITORIA: 'Auditoría' };
 export const MODULE_PERMISSIONS = {
   DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view', 'routes.manage_all_drafts', 'collections.manage',
-    'routes.edit', 'routes.cancel', 'routes.reassign', 'routes.view_team', 'routes.view_own', 'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team',
+    'routes.edit', 'routes.cancel', 'routes.reassign', 'routes.view_team', 'routes.view_own', 'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team', 'drafts.manage_all',
     'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicles.view', 'requests.create'],
   MIS_HOJAS: ['routes.view_assigned', 'deliveries.update', 'deliveries.capture_signature', 'internal_routes.use'],
   USUARIOS: ['users.view', 'users.manage', 'users.assign_supervisor', 'users.manage_permissions'],
   INFORMES: ['can_view_commercial_transport_reports', 'can_manage_commercial_transport_reports'],
   APROBACIONES: ['can_approve_internal_route_changes', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team', 'requests.reassign'],
-  CONFIGURACION: ['settings.manage', 'vehicles.manage', 'locations.manage', 'credit_notes.manage', 'columns.manage_defaults', 'columns.manage_templates', 'columns.apply_global',
+  CONFIGURACION: ['settings.manage', 'carriers.manage', 'vehicles.manage', 'locations.manage', 'credit_notes.manage', 'columns.manage_defaults', 'columns.manage_templates', 'columns.apply_global',
     'vehicle_mileage.edit', 'vehicle_mileage.rules_manage', 'vehicle_mileage.resolve_alerts', 'vehicles.service_manage', 'backup.manage'],
   AUDITORIA: ['audit.view', 'identity_docs.view']
 };
