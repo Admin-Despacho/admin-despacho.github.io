@@ -137,7 +137,7 @@ export class SupabaseApi {
   async publishRouteRevision(p) { return this._rpc('publish_route_revision', { p }); }
   async reserveOrders(sheetKey, orders) { return this._rpc('reserve_orders', { p_sheet_key: sheetKey, p_orders: orders.map(String) }); }
   async releaseOrders(sheetKey, orders) { return this._rpc('release_orders', { p_sheet_key: sheetKey, p_orders: orders ? orders.map(String) : null }); }
-  async routeStatus(id) { const { data } = await this.sb.from('routes').select('id, number, operational_status, published_at, notified_at, viewed_at, started_at, completed_at').eq('id', id).maybeSingle(); return data; }
+  async routeStatus(id) { const { data } = await this.sb.from('routes').select('id, number, operational_status, dispatch_mode, dispatched_at, published_at, notified_at, viewed_at, started_at, completed_at').eq('id', id).maybeSingle(); return data; }
   async myRoutes() {
     const s = await this.getSession(); if (!s) throw Object.assign(new Error('Sesión inválida.'), { code: 'NO_AUTH' });
     let r; try { r = await this.sb.from('routes').select('*, carriers(name), route_stops(*)').eq('responsable_id', s.userId).order('published_at', { ascending: false }); } catch (e) { throw Object.assign(new Error('Sin conexión'), { code: 'OFFLINE' }); }
