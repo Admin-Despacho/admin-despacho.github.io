@@ -7,6 +7,7 @@ import { openAccount } from './online/account-ui.js';
 import { esc } from './online/util.js';
 import { hasPerm, ROLE_LABEL } from '../supabase/functions/_shared/rules.js';
 import { ensurePinGate, startPinLockWatcher } from './online/session-pin.js';
+import { initPushNotifications } from './online/push-notifications.js';
 
 const api = createApi();
 const $ = s => document.querySelector(s);
@@ -184,6 +185,8 @@ async function route() {
   await ensurePinGate(api, me, { onForceLogin: () => { history.replaceState(null, '', location.pathname); location.reload(); } });
   if (stopPinWatcher) stopPinWatcher();
   stopPinWatcher = startPinLockWatcher(api, me, { onForceLogin: () => { history.replaceState(null, '', location.pathname); location.reload(); } });
+  initPushNotifications(api, me).catch(() => null);
+  api.flushPushQueue && api.flushPushQueue().catch(() => null);
   window.OKD_LOGOUT = logout;
   ME = me; window.OKD_ME = { id: me.id, allDrafts: hasPerm(me, 'routes.manage_all_drafts') };
   if (hasPerm(me, 'routes.create')) {
