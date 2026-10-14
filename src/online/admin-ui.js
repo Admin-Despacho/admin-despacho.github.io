@@ -144,6 +144,8 @@ export async function openHistory(api, me) {
     try { d = await api.routeDetail(id); } catch (e) { box.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; return; }
     const r = d.route, active = ['PUBLICADA', 'EN_CURSO'].includes(r.operational_status), stops = (r.stops || []).slice().sort((a, b) => (a.sequence_number || a.seq) - (b.sequence_number || b.seq));
     const pend = (d.returns || []).filter(x => x.status === 'PENDING');
+    const postReq = (d.postPublishRequests || []).find(x => Number(x.route_version || 1) === Number(r.version || 1));
+    const canPostRevise = r.operational_status === 'PUBLICADA' && !r.started_at && me.role === 'OPERARIO_DEPOSITO' && hasPerm(me, 'requests.create');
     box.innerHTML = '<section class="step rp-step" id="hSheet"><h2><span class="n">' + esc(r.number) + '</span>HOJA ' + esc(r.number) + ' · ' + esc(r.carrier_name || r.carrier_id) + ' · ' + (ST[r.operational_status] || r.operational_status) + (AP[r.approval_status] ? ' · ' + AP[r.approval_status] : '') + '</h2>' +
       (r.vehicle_plate ? '<p class="rp-note">Vehículo ' + esc(r.vehicle_name || '') + ' · ' + esc(r.vehicle_plate) + ' · km ' + (r.km_start ?? '—') + ' → ' + (r.km_end ?? '—') + (r.km_start != null && r.km_end != null ? ' · ' + fmt(r.km_end - r.km_start) + ' km' : '') + '</p>' : '') +
       screenTable(r.sheet_snapshot && r.sheet_snapshot.screen_model) +
@@ -154,7 +156,9 @@ export async function openHistory(api, me) {
         '<td>' + (p.status === 'OK' ? '<button class="btn soft" type="button" data-pdf>PDF</button>' : '<button class="btn dark" type="button" data-retry>REINTENTAR PDF</button>') + '</td></tr>').join('') : '<tr><td colspan="6">Sin PDF registrado.</td></tr>') + '</tbody></table></div>' +
       (pend.length ? '<h3 class="dsub">DEVOLUCIÓN SOLICITADA</h3>' + pend.map(x => '<div class="pkrow" data-ret="' + x.id + '"><span>' + esc(x.reason) + ' · ' + dt(x.created_at) + '</span><span class="uact"><input class="ed" data-rnote placeholder="Resolución (versión/corrección)"><button class="btn soft" type="button" data-rres="RESOLVED">RESOLVER</button><button class="btn soft" type="button" data-rres="REJECTED">RECHAZAR</button></span></div>').join('') : '') +
       '<div class="uact hacts"><button class="btn soft" type="button" id="hExcel">EXCEL</button><button class="btn soft" type="button" id="hAudit">AUDITORÍA</button>' +
-      (active && me.role === 'OPERARIO_DEPOSITO' && hasPerm(me, 'requests.create') ? '<button class="btn dark" type="button" id="hRequestChange">SOLICITAR MODIFICACIÓN</button>' : '') +
+      (canPostRevise && (!postReq || ['REJECTED','CANCELLED'].includes(postReq.status)) ? '<button class="btn dark" type="button" id="hRequestChange">SOLICITAR MODIFICACIÓN</button>' : '') +
+      (canPostRevise && postReq && ['PENDING','OBSERVED'].includes(postReq.status) ? '<span class="ust INVITACION_PENDIENTE">CORRECCIÓN · ' + esc(postReq.status === 'OBSERVED' ? 'OBSERVADA' : 'PENDIENTE DE APROBACIÓN') + '</span>' : '') +
+      (canPostRevise && postReq && postReq.status === 'APPROVED' && !postReq.applied ? '<button class="btn go" type="button" id="hOpenRevision">CORREGIR HOJA · CREAR v' + ((r.version || 1) + 1) + '</button>' : '') +
       (active ? '<button class="btn soft" type="button" id="hResend">REENVIAR NOTIFICACIÓN</button>' + (hasPerm(me, 'routes.cancel') ? '<input class="ed" id="hCancelWhy" placeholder="Motivo de cancelación"><button class="btn danger" type="button" id="hCancel">CANCELAR</button>' : '') : '') + '</div><div id="hAuditBox"></div></section>';
     msgBox(box.querySelector('#hSheet'), m);
     const again = t => detail(id, t);
@@ -253,6 +257,15 @@ export async function openHistory(api, me) {
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); a.download = name; document.body.appendChild(a); a.click(); a.remove();
     }, 'Excel descargado (columnas de la plantilla publicada).', () => {});
     box.querySelector('#hAudit').onclick = () => { box.querySelector('#hAuditBox').innerHTML = '<ul class="alist">' + (d.audit.length ? d.audit.map(a => '<li>' + dt(a.at || a.created_at) + ' · ' + esc(a.action) + '</li>').join('') : '<li>Sin eventos.</li>') + '</ul>'; };
+    const rev = box.querySelector('#hOpenRevision'); if (rev) rev.onclick = async () => {
+      rev.disabled = true;
+      try {
+        const x = await api.beginPostPublishRevision(id);
+        sessionStorage.setItem('okd_open_revision', JSON.stringify(x));
+        location.hash = '#/despacho';
+      } catch (e) { again({ err: true, text: e.message }); }
+      finally { rev.disabled = false; }
+    };
     const rq = box.querySelector('#hRequestChange'); if (rq) rq.onclick = async () => {
       const reason = prompt('Indicá qué se publicó mal y qué necesitás modificar en la hoja ' + r.number + ':');
       if (!reason || !reason.trim()) return;
