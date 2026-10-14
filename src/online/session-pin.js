@@ -74,7 +74,7 @@ export async function ensurePinGate(api, me, opts={}) {
     const fail=t=>{ er.textContent=t; er.hidden=false; a.value=''; if(b)b.value=''; a.focus(); };
     const forceLogin=async()=>{
       try { await api.signOut(); } catch(e){}
-      try { localStorage.removeItem(key(me.id,'last')); } catch(e){}
+      try { localStorage.removeItem(key(me.id,'last')); localStorage.removeItem(key(me.id,'cfg')); } catch(e){}
       m.remove();
       if (opts.onForceLogin) opts.onForceLogin(); else location.reload();
       resolve({ enabled:true, forcedLogin:true });
