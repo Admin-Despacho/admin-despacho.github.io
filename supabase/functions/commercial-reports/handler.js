@@ -2,7 +2,7 @@
 // Ver/descargar: can_view_commercial_transport_reports · Generar/enviar/configurar: can_manage_commercial_transport_reports
 // Programado (cron): solo con el secreto CRON_SECRET en el header x-cron-secret.
 import { hasPerm } from '../_shared/rules.js';
-import { buildReport } from '../_shared/report-engine.js';
+import { buildReport, period } from '../_shared/report-engine.js';
 
 import { json, withCors } from '../_shared/http.js';
 const VIEW = 'can_view_commercial_transport_reports', MANAGE = 'can_manage_commercial_transport_reports';
@@ -37,6 +37,58 @@ async function handleRaw(req, deps) {
   const st = deps.store;
 
   switch (action) {
+    case 'third_party_preview': { const d = needView(); if (d) return d;
+      try {
+        const p = period(body.sel || { kind: '7D' }, deps.now());
+        const carriers = await st.loadThirdPartyCarriers();
+        const allowed = new Set(carriers.map(c => c.id));
+        const carrierId = body.carrier_id && allowed.has(body.carrier_id) ? body.carrier_id : null;
+        const routes = await st.loadThirdPartyRoutes();
+        const inPeriod = routes.filter(r => {
+          if (carrierId && r.carrier_id !== carrierId) return false;
+          if (r.operational_status !== 'COMPLETADA' || !r.completed_at) return false;
+          const t = Date.parse(r.completed_at);
+          return t >= p.fromTs && t < p.toTs;
+        });
+        const carrierById = new Map(carriers.map(c => [c.id, c]));
+        const buckets = new Map(carriers.map(c => [c.id, { carrier_id: c.id, carrier_name: c.name, routes: new Set(), orders: 0, bultos: 0, amount: 0, with_amount: 0, zero_amount: 0 }]));
+        const details = [];
+        let orders = 0, bultos = 0, amount = 0, withAmount = 0, zeroAmount = 0;
+        for (const r of inPeriod) {
+          const bucket = buckets.get(r.carrier_id); if (!bucket) continue;
+          bucket.routes.add(r.id);
+          for (const s of (r.stops || [])) {
+            const nums = Array.isArray(s.order_numbers) ? s.order_numbers.filter(Boolean) : [];
+            const orderCount = nums.length;
+            const hasAmount = s.merchandise_amount != null;
+            const value = hasAmount ? Number(s.merchandise_amount) || 0 : null;
+            orders += orderCount; bucket.orders += orderCount;
+            bultos += Number(s.bultos) || 0; bucket.bultos += Number(s.bultos) || 0;
+            if (value != null) {
+              amount += value; bucket.amount += value;
+              if (value > 0) { withAmount += orderCount; bucket.with_amount += orderCount; }
+              else { zeroAmount += orderCount; bucket.zero_amount += orderCount; }
+            }
+            details.push({
+              completed_at: r.completed_at, route_number: r.number, carrier_id: r.carrier_id,
+              carrier_name: (carrierById.get(r.carrier_id) || {}).name || r.carrier_id,
+              client_name: s.client_name, order_numbers: nums, bultos: Number(s.bultos) || 0,
+              outcome: s.outcome || null, merchandise_amount: value
+            });
+          }
+        }
+        const byCarrier = [...buckets.values()].filter(x => x.routes.size || !carrierId).map(x => ({
+          carrier_id: x.carrier_id, carrier_name: x.carrier_name, routes: x.routes.size, orders: x.orders,
+          bultos: x.bultos, amount: Math.round(x.amount * 100) / 100, with_amount: x.with_amount, zero_amount: x.zero_amount
+        })).sort((a,b) => b.orders - a.orders || a.carrier_name.localeCompare(b.carrier_name, 'es'));
+        details.sort((a,b) => String(b.completed_at).localeCompare(String(a.completed_at)) || a.route_number.localeCompare(b.route_number));
+        return json(200, { report: {
+          period: { start: p.start, end: p.end, days: p.days, label: p.label },
+          carrier_id: carrierId,
+          summary: { routes: new Set(inPeriod.map(r => r.id)).size, orders, bultos, amount: Math.round(amount * 100) / 100, with_amount: withAmount, zero_amount: zeroAmount },
+          by_carrier: byCarrier, details
+        }, carriers });
+      } catch (e) { return json(400, { error: e.message }); } }
     case 'preview': { const d = needView(); if (d) return d;
       try { return json(200, { report: buildReport({ routes: await st.loadRoutes(), costs: await st.loadCosts(), sel: body.sel, now: deps.now(), type: 'SCREEN' }) }); }
       catch (e) { return json(400, { error: e.message }); } }
