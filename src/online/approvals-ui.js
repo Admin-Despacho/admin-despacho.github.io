@@ -1,14 +1,20 @@
 // HOJAS INTERNAS PENDIENTES DE APROBACIÓN + CONFIGURACIÓN → NOTIFICACIONES → RUTAS INTERNAS (Fase 2B.2)
 import { esc } from './util.js';
 import { hasPerm, ROLE_LABEL } from '../../supabase/functions/_shared/rules.js';
+import { appFrame, isRc4 } from './rc4-ui.js';
 
 export class ApprovalsPanel {
   constructor(api, me) { this.api = api; this.me = me; this.el = document.getElementById('usersPanel'); this.msg = null; }
   async open() {
     this.el.hidden = false;
-    this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Aprobaciones</span></div><div class="sp"></div>' +
-      '<span class="who-chip">' + esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b></span><button class="tbtn" type="button" id="apClose">Volver al panel</button></header><div class="up-wrap" id="apWrap"></div>';
-    this.el.querySelector('#apClose').onclick = () => { if (location.hash) history.replaceState(null, '', location.pathname); this.el.hidden = true; this.el.innerHTML = ''; };
+    if (isRc4(this.me)) {
+      const w = appFrame(this.me, 'Aprobaciones de ruta interna', '#/aprobaciones', 'Revisión controlada de cambios e incidencias');
+      w.innerHTML = '<div class="up-wrap rc4-approvals-wrap" id="apWrap"></div>';
+    } else {
+      this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Aprobaciones</span></div><div class="sp"></div>' +
+        '<span class="who-chip">' + esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b></span><button class="tbtn" type="button" id="apClose">Volver al panel</button></header><div class="up-wrap" id="apWrap"></div>';
+      this.el.querySelector('#apClose').onclick = () => { if (location.hash) history.replaceState(null, '', location.pathname); this.el.hidden = true; this.el.innerHTML = ''; };
+    }
     await this.render();
   }
   async render() {
