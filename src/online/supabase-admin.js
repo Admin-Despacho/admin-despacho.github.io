@@ -21,7 +21,8 @@ export const SupabaseAdmin = {
     const pdfs = await sel(this.sb.from('route_pdfs').select('*').eq('route_id', id).order('route_version'));
     const audit = await sel(this.sb.from('audit_log').select('*').eq('target_id', id).order('at', { ascending: false }).limit(100)).catch(() => []);
     const returns = await sel(this.sb.from('route_return_requests').select('*').eq('route_id', id));
-    return { route: { ...r, carrier_name: r.carriers && r.carriers.name, stops: (r.route_stops || []).sort((a, b) => a.seq - b.seq) }, pdfs, audit, returns };
+    const postPublishRequests = await sel(this.sb.from('route_approval_requests').select('*').eq('route_id', id).eq('request_type', 'CAMBIO_POST_PUBLICACION').order('requested_at', { ascending: false })).catch(() => []);
+    return { route: { ...r, carrier_name: r.carriers && r.carriers.name, stops: (r.route_stops || []).sort((a, b) => a.seq - b.seq) }, pdfs, audit, returns, postPublishRequests };
   },
   async deliveryTrace(stopId) {
     const stop = await sel(this.sb.from('route_stops').select('*').eq('id', stopId).single());
