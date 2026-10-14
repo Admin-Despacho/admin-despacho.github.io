@@ -1,0 +1,1382 @@
+diff --git a/DELIVERY_MANIFEST.json b/DELIVERY_MANIFEST.json
+index 7ca6de0d105ed7934045b930fb59950215f8f8ba..8efc0aa2215d2e4870853a323015d72f3072efec 100644
+--- a/DELIVERY_MANIFEST.json
++++ b/DELIVERY_MANIFEST.json
+@@ -1,8 +1,8 @@
+ {
+  "name": "OK_DESPACHO_ONLINE",
+- "version": "0.7.5-rc3",
+- "generated_at": "2026-10-13T13:30:53.644Z",
+- "status": "RC3 — regresión local 971 PASS / 0 FAIL; NO desplegado; NO verificado en staging ni en celulares (ver TEST_RESULTS_RC3.md)",
++ "version": "0.8.1-rc4.1",
++ "generated_at": "2026-10-14T09:59:47.315Z",
++ "status": "RC4.1 — regresión local 1124 PASS / 0 FAIL; NO desplegado; NO verificado en staging, con correo real ni en celulares (ver TEST_RESULTS_RC4_1.md)",
+  "migrations": [
+   "supabase/migrations/20261008000100_fase1_usuarios_permisos.sql",
+   "supabase/migrations/20261009000100_fase1_1_seguridad_y_aprobaciones.sql",
+@@ -21,7 +21,9 @@
+   "supabase/migrations/20261022000100_rc2_1b_financiacion_noc.sql",
+   "supabase/migrations/20261023000100_rc2_1c_audit_close.sql",
+   "supabase/migrations/20261024000100_rc2_1d_robustez.sql",
+-  "supabase/migrations/20261025000100_rc3_noc_conciliacion.sql"
++  "supabase/migrations/20261025000100_rc3_noc_conciliacion.sql",
++  "supabase/migrations/20261026000100_rc4_roles_jerarquia_permisos.sql",
++  "supabase/migrations/20261027000100_rc4_1_scope_email.sql"
+  ],
+  "edge_functions": [
+   "admin-users",
+@@ -31,6 +33,7 @@
+   "passkeys"
+  ],
+  "tests": [
++  "tests/brand/check_branding_lock.mjs",
+   "tests/brand/run_brand.py",
+   "tests/brand/run_pwa_offline.py",
+   "tests/e2e/helpers.py",
+@@ -46,12 +49,15 @@
+   "tests/e2e/run_e2e_rc21c.py",
+   "tests/e2e/run_e2e_rc21d.py",
+   "tests/e2e/run_e2e_rc3.py",
++  "tests/e2e/run_e2e_rc4.py",
++  "tests/e2e/run_e2e_rc41.py",
+   "tests/make_test_results.py",
+   "tests/pdf/check_pdf.sh",
+   "tests/pdf/make_pdf.js",
+   "tests/pdf/make_route_pdf.js",
+   "tests/run_all.sh",
+   "tests/sql/check_inventory.mjs",
++  "tests/sql/check_role_matrix.mjs",
+   "tests/sql/concurrency.sh",
+   "tests/sql/fase1_1_test.sql",
+   "tests/sql/fase1_test.sql",
+@@ -71,6 +77,8 @@
+   "tests/sql/rc21d_test.sql",
+   "tests/sql/rc2_test.sql",
+   "tests/sql/rc3_test.sql",
++  "tests/sql/rc41_test.sql",
++  "tests/sql/rc4_test.sql",
+   "tests/sql/run.sh",
+   "tests/sql/supabase_stub.sql",
+   "tests/sql/zz_summary.sql",
+@@ -78,6 +86,7 @@
+   "tests/unit/demo-api.test.js",
+   "tests/unit/financing.test.js",
+   "tests/unit/manifest.test.js",
++  "tests/unit/rc4.test.js",
+   "tests/unit/report-engine.test.js",
+   "tests/unit/rules.test.js",
+   "tests/unit/session.test.js",
+@@ -92,7 +101,11 @@
+   "CAMBIOS_RC2_1C.md",
+   "CAMBIOS_RC2_1D.md",
+   "CHANGELOG_RC3.md",
++  "CHANGELOG_RC4.md",
++  "CHANGELOG_RC4_1.md",
+   "DEPLOY_CHECKLIST_RC3.md",
++  "DEPLOY_RC4.md",
++  "DEPLOY_RC4_1.md",
+   "GUIA_PARA_PUBLICAR_CON_CHATGPT.md",
+   "INFORME_FINAL_RC3.md",
+   "PENDIENTES_REALES.md",
+@@ -104,6 +117,8 @@
+   "TEST_RESULTS_RC2_1C.md",
+   "TEST_RESULTS_RC2_1D.md",
+   "TEST_RESULTS_RC3.md",
++  "TEST_RESULTS_RC4.md",
++  "TEST_RESULTS_RC4_1.md",
+   "VISUAL_PARITY_CHECK.md",
+   "docs/FASE2_PENDIENTES.md",
+   "docs/GUIA_CLOUDFLARE.md",
+@@ -132,11 +147,15 @@
+   "CAMBIOS_RC2_1C.md": "d95ede4cce367bfb6c8639e268d166ae019859804770b66f2ceba6bb28b0b09d",
+   "CAMBIOS_RC2_1D.md": "a2f5e1af99e952a011e5161a628241bb5557be185cc96a14a6da8f3b35fe1a09",
+   "CHANGELOG_RC3.md": "e32954afbe8c90d0b339edcb2de725b55be33d7a5a391526d5d5cd1ee5e545ad",
++  "CHANGELOG_RC4.md": "dcbac56b1a23457664d5353e5bf5b20dd54b62199883132ee1a459545c15e9ab",
++  "CHANGELOG_RC4_1.md": "319386f5c3daeb620411bad455508a67b02fa4f7e334d3f68cf194f6f0650887",
+   "DEPLOY_CHECKLIST_RC3.md": "10fa157bcef9dfb4bc16e5abda9119a975597c5f27e7da08fd97b24271e8af28",
++  "DEPLOY_RC4.md": "b7c587a3d5798d9ca84e82dc015d6cbe7324079c3ef8e4e949f957845d35d513",
++  "DEPLOY_RC4_1.md": "b6a2d9713f968055b7b9140e88e0aedcfc7915d972489739337211d8fb27e291",
+   "GUIA_PARA_PUBLICAR_CON_CHATGPT.md": "64720aa2cda9809266d29de7acc713d2e67ddb4d47057143d1866c78a40e879c",
+   "INFORME_FINAL_RC3.md": "da581198f13b18d6cc48efb59b63d57bfba90a1d1bde5be3e9b510956a2e5538",
+-  "PENDIENTES_REALES.md": "3a3d7b1faf4b7f0534d4006b03e165f93f59faba3596afd86f01ebb3ca0b8548",
+-  "README.md": "2813654cae04fe32ae0d0aa3bb17e5dee16d7b81b55a08a456f83841957aaf67",
++  "PENDIENTES_REALES.md": "cb6cd046b0ae0fdbb69194224ff3c7d97b891b14724780019e6f038ddd70cf16",
++  "README.md": "128493876e70f5c7c83b665290d4e07d4f9b0606e20ae33446fc2789c65d4a25",
+   "ROLLBACK_RC3.md": "a056d0befd67b5d9993a26bf509ecbdedb0fec4058ce562e9432093e2056b16e",
+   "TEST_RESULTS_RC2.md": "a6f6f1e1544e6e8111a4d928d278c6837f42eb053852bda012f3e319b8452d59",
+   "TEST_RESULTS_RC2_1.md": "e7c6995bd6f3b5f5a6877da069f147fe47627907ce66f70c4f031d12b724c193",
+@@ -144,11 +163,15 @@
+   "TEST_RESULTS_RC2_1C.md": "efd8da79fea427854f3abbae58cb9c59eeead6e9a181bb269b23950164fad7bc",
+   "TEST_RESULTS_RC2_1D.md": "e61d6d002ac8f2b9a97e70035609c36571c818e3ed2d83ab131b7008981b8393",
+   "TEST_RESULTS_RC3.md": "ddf9d8170a07c6715cec1057978aacd38e02db608f52108eadadc51144736d17",
++  "TEST_RESULTS_RC4.md": "d481c6fb941f5b218b5ea9881f3462cbc8a35cc01d376605645af1132b8b952e",
++  "TEST_RESULTS_RC4_1.md": "c56c968722007122220156eec35951ea6bbbca8fb6572ecc3b08376fb203ec81",
+   "VISUAL_PARITY_CHECK.md": "7e3777f1e2eb160741c64e8635ed2c166f1f011c5eec78bd0e026e970ae1cc86",
++  "assets/branding/ok_despacho_icon.png": "f166405c41dfc4af6a07b653b6380c2a140ad33cd9fbd3f203099df06d61901d",
++  "assets/branding/ok_despacho_splash.png": "b54965e56de1368ff97a501fe94f19da63d9051783fa053738b6e9ffd5439b92",
+   "docs/FASE2_PENDIENTES.md": "6044d2c957743d153cf70afae4080fb0daa2587a288e1280d89ffb689d996d17",
+   "docs/GUIA_CLOUDFLARE.md": "4e22f115187d2c90aa1a1a5100db31268097b0c302fe156774d84226a093ae90",
+   "docs/GUIA_EMAIL_PROVEEDOR.md": "7d623f889cf2560275852cbed33a8376fbbcbd4a22aea4f9b4fe6ade71fe650f",
+-  "docs/GUIA_SUPABASE.md": "eb2d047135c9aec8df5770404dbbf5d398e33d29d540c4b379feef6fd0515b9f",
++  "docs/GUIA_SUPABASE.md": "6979e3493ad8ae374ac247010cb7f28591ab8fe83ee2b2eda903ef69bbaaede5",
+   "docs/GUIA_VARIABLES.md": "8ef0f2127e0c52a21ea90787f4d0e1c6fa571c1588e88215689bdeb7c472aa68",
+   "docs/capturas/ejemplo_Informe_Cristian_Torres_Semanal_2026-10-10_DEMO.pdf": "83e58fb29206a8e7e0076f61903f92b619ac693228b48fad3bf01a261b2700d2",
+   "docs/capturas/offline_v15.png": "4034670113351cf138403fbc70849be0548e7680fc761ea548233e93034ed623",
+@@ -161,7 +184,7 @@
+   "docs/prototipo/OK_Despacho_Online_V16_Prototipo_Aceptacion.html": "a0b3a43f2d12346ec62bd8c6f0f21496f4f77e9a4aebbed423c6d22912349005",
+   "index.html": "5f43ea76e1d9a16bd8085f4843174dd2c5ccba161431211bd163ec07370e404c",
+   "package-lock.json": "f6e23fb9016c752b0ba6cf2b8b20c1c14ce32a11f9d209fc160f012c056bcc46",
+-  "package.json": "7d28fdd9461b7a33d95af988dd32861c4bdc395923176de013a7c21156327e10",
++  "package.json": "f9736e8a71095e9f2afff8e7325859fa061c07684aed6d62fc290fa9b9a6d164",
+   "public/_headers": "f379003c601ce430239c55bf43d2c007b6dfab7ee953ee0a674cba9192058d2b",
+   "public/icons/apple-touch-icon.png": "fa0ccdc59e72e04e7c13268a74c8ebc40c2a0368db6260180ec648a4e35401b8",
+   "public/icons/icon-16.png": "4f8f01dfce97a09f69dfdc09f50fad4fc2bfd565e8b7bf8e2974fa2e8305b93b",
+@@ -187,27 +210,30 @@
+   "scripts/restore_backup.mjs": "8da439978d604d7b1c182261302138a82754ecae5a68a586add84fe4f7229704",
+   "scripts/sw_precache_plugin.mjs": "2aad2d22487ade9f8bf2758bea07e97478fa0aff324909bfc78943239201ebb6",
+   "scripts/verify_manifest.mjs": "fc7aee46e307b7f408e8f563eea6fdfd4cf4d891bede8c55e4a9d38217245d86",
+-  "src/main.js": "30580d86015e3ead4e862e8f54010c544091567e51c21d07d2d8c10d8b5fb4a8",
++  "src/main.js": "c0f4ecb1eca26fcc2b82ed0efe66479031d676c16cf14612b9b989109af11c47",
+   "src/online/account-ui.js": "477650b76d943188a44ebdea5be2841ac0d0c59a6124489693fef9dc4470d47f",
+-  "src/online/admin-ui.js": "a5705e04d1dd92da616e5f8b213503504b556735b4c910c41de007e406ca6ed8",
++  "src/online/admin-ui.js": "fe96563a90c969031c2c3429fe7245848542cd5c805eced42a77472fdc2d94a3",
+   "src/online/api.js": "2d76594fcd966a0edf9817d3002d7fb97182fc662f26f549ba9df7859c240439",
+   "src/online/approvals-ui.js": "9dea6ac03e2090abf0d7944ffc3108b4bc2cfdf34891d6c0500a887233032fd8",
+   "src/online/auth-ui.js": "39fa06480501b20ffabb962009cdf31933335cf7c18813c8e7168997282d6929",
+-  "src/online/demo-admin.js": "1a9a963e210a2e1893943f10cf719002c2cab6fb5d7f77d8db90cd918bd485e8",
+-  "src/online/demo-api.js": "5e4a99211e8a533cf4e5844ad8efe1054726e48e2631988685bd94e6251b64ca",
+-  "src/online/driver-ui.js": "1dfbf287540414f4fe045d7d30691e570eb51f614cf1c9c634ae0b1535b4b1a5",
++  "src/online/demo-admin.js": "f3422c1174f66b915f6c576364bc7afb6bdf72fea4e1706e2f1dbb02a5382da5",
++  "src/online/demo-api.js": "67238aa0030a499e8ad8c05c54c0ccc5252dfe111424aaad893219978ae0b5f9",
++  "src/online/demo-rc4.js": "93779d19170818a0567a6c324294d07079a863dedaa4180ff8fd008b0ec94250",
++  "src/online/driver-ui.js": "e0614ed58d8d6b69aa539b4ac94cbd7a40783ee9d2be2ecac01ffcb17de7c178",
++  "src/online/rc4-ui.js": "d0ba40ee318f8212c9403691fe0274ee921f3ee64fa0c7318b62883328cde126",
+   "src/online/reports-ui.js": "252673415c09a0d58c73202c4757bb61cbda3d21826fce532d8b704c4b0e3b15",
+   "src/online/supabase-admin.js": "0d0c75180894063878b4df3c982ed874f376be21f5e41e516f7300231de58130",
+-  "src/online/supabase-api.js": "905612113bd108f80ef3ebe92aaa8113af65e9bb8d2513af129b09e255496759",
+-  "src/online/users-ui.js": "369850663175bfc9dde454e35ede5cb883632af11a5c4ba89a026599d543249d",
++  "src/online/supabase-api.js": "0ec783a2028de5688a256b108dbc8c0b28ffaf3b74d60759a3e2b2ed966414e5",
++  "src/online/supabase-rc4.js": "4e81330734e6c247806990ce42dd4f1b4603abc0d8df65ff4afc607069a2caec",
++  "src/online/users-ui.js": "748074b150c32324e91b53ea321b9d3c769c6a4db7623cf1a5cf46912abf0f6b",
+   "src/online/util.js": "fb19ce3ec5b1ea1cef19c3ae783d58ce83040dcf0b753ef12924421e751b5bc9",
+   "src/online/webauthn.js": "9e00c60e365b4eb39b5b30ee6380c157253eba79ceeea37688ecd8b9fe0ca860",
+   "src/online/zip.js": "c6636430c919224210804755a666f68b181a22cb549a5f36e993e734cc28d35e",
+   "src/styles/offline.css": "836e4b64dd676f903a9c2d75b6a4e410c1950e1edbf3f6ae77c61abfefed4fea",
+-  "src/styles/online.css": "4639d586e3b21a4d8e54a26f98189710719d032fc14b935b9ca44776f1b5b8bf",
++  "src/styles/online.css": "9798ad1b25afefb133b97508caca480af527ee400e4a4c8c6f3c30801a7e645a",
+   "supabase/config.toml": "b08d187e0d38d552d276ad7624ae33cbce9464bdd05b83be738b8509130c793b",
+   "supabase/functions/_shared/cors.test.js": "16d72708f2ae5c3eca567cf2073e3135b270632cd51e49c6ec6fcf6275fef1e2",
+-  "supabase/functions/_shared/customer-email.js": "87b3c054fee8a12f492855b755ab671ea2c6e93d94a6179f059e48a82558f124",
++  "supabase/functions/_shared/customer-email.js": "49f7693a9f55f1d0f95e47ef229ed8b74d9444f2515286074f73e3834dac9cb4",
+   "supabase/functions/_shared/http.js": "8f06b470196b80f0f4150cb2c21958f88dd5850d96dfc967f5ed65224bcdc257",
+   "supabase/functions/_shared/internal-route.js": "3a57af3f279a38cc5b12b9e734f531b90b9c4a3271dab4796e45693a86ed3c93",
+   "supabase/functions/_shared/report-demo-data.js": "d623339b5beeab37cf5701a3e2b9830363ea6612cb42b1de636d418f9d4eb2f1",
+@@ -217,22 +243,22 @@
+   "supabase/functions/_shared/report-pdf.js": "278d9390b95c529cff38415ee5f91da583ce1f1ee7afb10bdd7ba3c98ae78b93",
+   "supabase/functions/_shared/report-service.js": "e2913e27861568e193e3322951b55a99e3029c5415511bc6ad4ba0b54d08443c",
+   "supabase/functions/_shared/route-pdf.js": "c0793c579a96983c9ee28f2b8c11b97333636d2137d3e9565c48171cc908a585",
+-  "supabase/functions/_shared/rules.js": "c2dab0c02c7a2d623d20883d1e9323ff73c0a502a27e2e03ea9336cd73e4f708",
++  "supabase/functions/_shared/rules.js": "6acf62c40a2ed097e389ff1e29b5df50253522966f898fcf8fb26950c762582b",
+   "supabase/functions/admin-users/handler.js": "db6d142787ae10cac2ad21d0decb624dcdd4acc8aba129353399bf13c3bda31a",
+   "supabase/functions/admin-users/handler.test.js": "afa5252636964912a6b35616673bb7731497a829211f097464072b673e261e5a",
+   "supabase/functions/admin-users/index.ts": "5bb6ad7f336779a265518576a0cf395747f57b866bf3bf531bf42d8494719d97",
+   "supabase/functions/backup/handler.js": "512a66367d0935f9382970b3f3dfe2eaf65c6ba22b0920a6e61f405922670323",
+   "supabase/functions/backup/handler.test.js": "f7c0139d1edde62b3a242af01aabb7d53933c6b6b69471c8edec9f2ea8462193",
+   "supabase/functions/backup/index.ts": "db393a55fbcc5c9927ef2fb68175f07c76d89f2c379edb0b4bdf1bfd4d84321b",
+-  "supabase/functions/backup/inventory.js": "12d34c6a7433c85d1871500df6ee399514929a3197cd8064db7ac41a95d1a89d",
++  "supabase/functions/backup/inventory.js": "337951cea7be8f357771d7cbacce9c4fc94805178c2b77e0e66dbf8cf34d8fc9",
+   "supabase/functions/commercial-reports/handler.js": "0c381803696ccb54105894db96106037eb74484b162279a73c1944efc18b5fcb",
+   "supabase/functions/commercial-reports/handler.test.js": "5807a5259396c09ebae17653b6c2bf6015b846aea5ed1c2e974602ade1d145f8",
+   "supabase/functions/commercial-reports/index.ts": "aa3b8842b21f4c317b7ba3f82fa7475bab5623736421eb289d1897ad9238bbe0",
+   "supabase/functions/deno.json": "1cb4c65e200a9119602c3b39ca3fddfd6adae5462703d6907143a7e826e95e32",
+   "supabase/functions/deno.lock": "d2b8a3507dc4ee5028007c05302fd69dc9994b65fd9f4bdc45f788dd54c4b433",
+   "supabase/functions/internal-approvals/handler.js": "9810b7337f4bd55141b95f0f3d4bc80858066007c0a9882025d007401f9d08ef",
+-  "supabase/functions/internal-approvals/handler.test.js": "f876888e72134fa58f5b802741b0a151f811b4411a7459403b5855e09976814f",
+-  "supabase/functions/internal-approvals/index.ts": "259b1c1b8514dbe8ecef1104d542185522a8c66d6745242e1a8f6a00c295758f",
++  "supabase/functions/internal-approvals/handler.test.js": "259ee5d0e6ff30f83d4910592599465bfa3e87a9bc89f98ff0a4fec4b0470111",
++  "supabase/functions/internal-approvals/index.ts": "3e89d45cb57abc606fe0204c90d331ae9d4adc5b98601415df043234c6acb223",
+   "supabase/functions/passkeys/handler.js": "4b622125b5749194e8658e66371141e97c17e79ea805f1434d2d67c9a5ee2c8d",
+   "supabase/functions/passkeys/handler.test.js": "e17f5662df0b123767d81ef2927b657cf574d4785a0dc892706e46fab8ee5d2a",
+   "supabase/functions/passkeys/index.ts": "7467cc41180d0607416c1c8c02f2bb855a077e668f3033722916056af3340f8a",
+@@ -254,29 +280,36 @@
+   "supabase/migrations/20261023000100_rc2_1c_audit_close.sql": "bc57ec2d52013d01c9f12b45d62e48a593afb97f02ff29d9dc9fc6c5aff317a2",
+   "supabase/migrations/20261024000100_rc2_1d_robustez.sql": "b52d2c0636b3d1bfa0e9d012ef01408b0cf6e2ee9d2ad7372f221a9001cc27b9",
+   "supabase/migrations/20261025000100_rc3_noc_conciliacion.sql": "1fc2574da680b56f4d2f70ac662b0bb358620a52f029b763d6e905e303571bba",
++  "supabase/migrations/20261026000100_rc4_roles_jerarquia_permisos.sql": "a38333121cc95bb013022b1305546dd193bc6b840fad2c382d94234458b7fb9b",
++  "supabase/migrations/20261027000100_rc4_1_scope_email.sql": "e10987d2ea9bbdf57fe565eaa05bd97199d51aa0f0adbb5a97e96148621af205",
+   "supabase/sql/cron_commercial_reports.sql": "3b1dd518a20dd4f07644e8afa13f55018807852a508e37ce1420221f555281d0",
++  "tests/brand/branding.lock.json": "ee8b9bd2d7503dfaea9f8be5ffe9748bef7ce88d8799dd6c4269ae49ebfd0926",
++  "tests/brand/check_branding_lock.mjs": "68d75ab1c6ed7151fdbe3811042457de92dcab2740bbb98bd7b5177a5d051dba",
+   "tests/brand/run_brand.py": "4dc163ea3540a2cbed9e026aca3c0256b663b0c1cc721aab5d90e7d0f76591e3",
+   "tests/brand/run_pwa_offline.py": "5e136b3c6fe855f32739929a6f97b270802006b19061f3a058ffc802dd60f7a6",
+   "tests/e2e/helpers.py": "96a21b7279ef43b8c973ca93915bb101d175913eab1df37c64d5a2cac205d538",
+-  "tests/e2e/run_e2e.py": "ff86f934dbaae6bdcaea95919a3709c4c129d50b33a5f5fac83de4306218a51d",
++  "tests/e2e/run_e2e.py": "583ab58a391951ff64900805a304d332ec6eee187dfe0b06a65512cc9569a23b",
+   "tests/e2e/run_e2e_fase2a1.py": "22d27b4ae92ef719aaf30af9dd3e06e32d4e8db620312802acf5847c80dcc044",
+   "tests/e2e/run_e2e_fase2b1.py": "beb6c5e9d17e2a68b8d8a4576dbe54a7e3daf4975b806cebffe91e645cb735eb",
+   "tests/e2e/run_e2e_fase2b2.py": "101b1173be9b85f356881d91f10e0d5abdadcbce6d1d91730a723c681cc54f69",
+   "tests/e2e/run_e2e_fase2b3.py": "f717383e152119077d4950d7683073c830dee70994b4efc99a0a34689ed876b9",
+   "tests/e2e/run_e2e_rc11.py": "f0538c5aa6130c8c2a119ed7dffe6c4c4975f59e6331dae9765850766a6e1081",
+   "tests/e2e/run_e2e_rc12.py": "46a3ae0a36663782e4d013b5405469c2064174adf6dcb667ae094bd564b3c5f6",
+-  "tests/e2e/run_e2e_rc2.py": "0637b5619d672f45de7130ffa30fa14fdb6fe6a9f63b2ef40d276faa8c0aa01b",
++  "tests/e2e/run_e2e_rc2.py": "fb8dab80798cd57b76d5989cc68390f06ff5c5d3487cd7434225578c0887f8b2",
+   "tests/e2e/run_e2e_rc21b.py": "991f1e58f3f160894e20d0abbd6931f61a9a190445c1a4661c4cdc38cde79d65",
+   "tests/e2e/run_e2e_rc21c.py": "c7f73a482bb70f15bc9479ac68a6d36c259579a4d80345e3bf92bd4210fb5fd0",
+   "tests/e2e/run_e2e_rc21d.py": "6f196cb6d66a3d5dc22ff4900e3fe2041e3d79d644878922ed2be56650d59ad1",
+   "tests/e2e/run_e2e_rc3.py": "0be75ed93605c53126aaa10bbd8ee35a45a2da3794edb912a04f0934dadbc896",
++  "tests/e2e/run_e2e_rc4.py": "7297a71b62db94a35d93b1a716f8402150c5f92bc437c8ccbd430f088ce90d2e",
++  "tests/e2e/run_e2e_rc41.py": "6610d6b3b28182eb192a5ded93789cd8694e0d90e7d6d57b98c3fa31c9d40163",
+   "tests/make_test_results.py": "e0a20b2320a4f2d3df19af8b63fd4a532b8749ae6f8633604063944fe65eb27f",
+   "tests/pdf/check_pdf.sh": "0a077a3bacc28513a55e4efa027b35dd2f38401b4ab5f7bcebffaccdd4220789",
+   "tests/pdf/make_pdf.js": "eaeb1c1b9392e0920455ec996c36f63eedd15a9fe1f83ac4b3839d9f2cbb2382",
+   "tests/pdf/make_route_pdf.js": "6fa6873ed9a0130d8b73b11917bd181932b5822ffad8e24a0db6ea24e87a09b5",
+-  "tests/run_all.sh": "27c5e0e6a1d9df708d935aac170eb2ba7f49cc10d4e73056d574770ab6c85742",
++  "tests/run_all.sh": "3e47717e389f29a3c09fea5fa69835066a75fa3ed058a487f23a9b3df68996f0",
+   "tests/sql/check_inventory.mjs": "016a8d9efe3d24dd276ab26ee566fd8b1323f269cb983dc9e2a9bf8dfb54ad63",
+-  "tests/sql/concurrency.sh": "8cdde536e9bdb52c84d470a3467db98d370fe548a274368c14978e0e1af0aaa6",
++  "tests/sql/check_role_matrix.mjs": "64ed8a4dcd4d6f692dbc8114b353f7732f620bb5be744f7ec67e2ea7a3d9640e",
++  "tests/sql/concurrency.sh": "12e96578a0392c3bb03aa9f97e5c71e7dfe4acee14c0b4b7c517decd17dc3e18",
+   "tests/sql/fase1_1_test.sql": "fdf4107f6dd2b2788d03eb1e87f25e789e878638f6309682f9b687ddadc786bb",
+   "tests/sql/fase1_test.sql": "39ec5e38b383afae7d6394e2a05a1b7783ea8931252e43d1392b9c358b760d49",
+   "tests/sql/fase2a1_test.sql": "270a97c05230ac57e234dbe1f6aea3d0055dde502818296908835fab002b8ce4",
+@@ -295,13 +328,16 @@
+   "tests/sql/rc21d_test.sql": "f31251e0e236fdad28f28a854be3b5839fcc466d6573639242432051760e0e34",
+   "tests/sql/rc2_test.sql": "133a56398ddc4ce4b5496c89848abc9d8ca188db6cb83c52270a869c5c9eb0f6",
+   "tests/sql/rc3_test.sql": "67988e4e7117088fd7ef85f5a443596b3fbfed988a7291aaa368f8073fe7d262",
+-  "tests/sql/run.sh": "f110a126496cd96421235ae64b05ec08f845b08f422aa06ab871a4d82eb885aa",
++  "tests/sql/rc41_test.sql": "b1c08e86021cbbe79dd33c87c0965ab793dbd64b34132aa09d6db2395760f8c0",
++  "tests/sql/rc4_test.sql": "f3502f8371b551c658338e0ecca42cea81c8b910337f13eee62b42e2f855cd55",
++  "tests/sql/run.sh": "76670e5a884a9bf6f2f18dbe5f3dcf5342aad830058ec073fb4b911a66789272",
+   "tests/sql/supabase_stub.sql": "c6c4800e9da27405816064239544d160983afefb76a3ffb0a1ec3a8be32a5d7f",
+   "tests/sql/zz_summary.sql": "13c4fb938adcec73351619c7b0aa519637908eedd2b910232ad722fcfa348381",
+   "tests/unit/backup.test.js": "86cc4c01426789b9f9ebedb1c5051ddc00d6051009c9df37faa9f5224ca32121",
+   "tests/unit/demo-api.test.js": "bbbf6014939e8cf1855546874f3fbb5f5382529c556a507858b39d8540f0947c",
+   "tests/unit/financing.test.js": "2a4e666df682bf7cf071cd4774da0fb2f6b55baac6a9af0e98c24da39218c6bf",
+   "tests/unit/manifest.test.js": "c9f32f4462c3849f3471257934d27238025b69e2ffeff5968b63e543700aac66",
++  "tests/unit/rc4.test.js": "1c1e5f010cbec84d2059b8f93aaf9474253633778f55a57fd81bdadf4424dbdc",
+   "tests/unit/report-engine.test.js": "2d5fbbe164eb32b82f6fdb8407c73ad5e0356ec4226e7cb84c5eb229af31e7aa",
+   "tests/unit/rules.test.js": "14486a77deab3585e094718cb303d73b0a109000c8db5dbfd01a44095a69bde3",
+   "tests/unit/session.test.js": "23bcba4f45a910286d09676db01bc6534d9fdb26ae09199e6f086aac1c0c3e3e",
+diff --git a/PENDIENTES_REALES.md b/PENDIENTES_REALES.md
+index f0de389b9eabdd8cb0e2ed69273a133ec5c769e0..25e3d4fd747b0624dfaff90d7e216861e95116dc 100644
+--- a/PENDIENTES_REALES.md
++++ b/PENDIENTES_REALES.md
+@@ -1,7 +1,7 @@
+-# PENDIENTES REALES 0.7.5-rc3
++# PENDIENTES REALES 0.8.1-rc4.1
+ 
+ ## Verificar en staging (bloquean el paso a producción)
+-1. Reconciliar el historial de migraciones del staging (backup → `schema_migrations` → comparar → `migration repair`) y recién después aplicar `20261019000100`, `20261020000100` `20261021000100`, `20261022000100`, `20261023000100`, `20261024000100` y `20261025000100` de forma controlada. NO usar `db push` directo.
++1. Reconciliar el historial de migraciones del staging (backup → `schema_migrations` → comparar → `migration repair`) y recién después aplicar `20261019000100`, `20261020000100` `20261021000100`, `20261022000100`, `20261023000100`, `20261024000100`, `20261025000100`, `20261026000100` y `20261027000100` de forma controlada. NO usar `db push` directo.
+ 2. Desplegar las 5 Edge Functions (`admin-users commercial-reports internal-approvals passkeys backup`) y cargar los secrets.
+ 3. Confirmar o descartar la causa de "Sesión inválida" con la corrección actual (navegar módulos, dejar la pestaña inactiva más de 1 h y volver).
+ 4. Configurar SMTP propio en Supabase Auth y probar invitación, recuperación y reenvío.
+@@ -22,3 +22,9 @@
+ 1. Rutas relativas para poder publicar en una subcarpeta de Pages.
+ 2. Restauración guiada desde la app, limitada a proyectos marcados como prueba.
+ 3. Test de humo automático contra staging dentro de la GitHub Action.
++
++## RC4
++- Ejecutar las pruebas manuales de `DEPLOY_RC4.md` (sección 3) en staging.
++- Revisar qué usuarios DESPACHO deben quedar como Operario Depósito después de la migración y asignar superiores.
++- Pendiente de definir: ejecución automática de solicitudes aprobadas distintas de la corrección de km.
++- RC4.1: historial por equipo RESUELTO (alcance real en RLS). Falta verificarlo en staging junto con el envío real del Recibido Conforme (`DEPLOY_RC4_1.md` §3).
+diff --git a/README.md b/README.md
+index f9c53323942227095261896bbb88d914e8f09e12..9a4f648e652dc630c9d0022c8648ebee143e7ff9 100644
+--- a/README.md
++++ b/README.md
+@@ -1,8 +1,20 @@
+-# OK Despacho Online — 0.7.5-rc3
++# OK Despacho Online — 0.8.1-rc4.1
+ 
+-**Estado: RC3 — probado localmente (971 PASS / 0 FAIL), NO verificado en staging ni en celulares reales. No publicar en producción sin completar `DEPLOY_CHECKLIST_RC3.md`.**
++**Estado: RC4.1 — probado localmente (1124 PASS / 0 FAIL), NO verificado en staging, con correo real ni en celulares. Publicar siguiendo `DEPLOY_RC4.md` + `DEPLOY_RC4_1.md` (primero staging).**
+ Historial de cambios por versión en `CAMBIOS_*.md` y `CHANGELOG_RC3.md`; resultados en `TEST_RESULTS_RC3.md`; informe de esta versión en `INFORME_FINAL_RC3.md`.
+ 
++## RC4.1 · Alcance real de hojas y Recibido Conforme
++- Hojas visibles según `routes.view_own` / `routes.view_team` / `routes.view_all`, aplicado en RLS y RPC. El Superior ve su equipo por defecto.
++- Email del cliente en la segunda pantalla de entrega, guardado en el mismo perfil de identidad del DNI, con autocompletado e historial inmutable.
++- Recibido Conforme automático al confirmar una entrega total con email válido. Una falla del email nunca revierte la entrega.
++
++## RC4 · Roles, permisos y dashboards
++- **Admin General**: dashboard V4 con menú lateral; administra usuarios, superior asignado y permisos individuales (Usuarios → PERMISOS).
++- **Superior Despacho**: dashboard V2 con "+ NUEVA HOJA DE RUTA"; trabaja con su equipo y resuelve sus solicitudes.
++- **Operario Depósito**: prepara hojas, ve y carga kilometraje y pide autorización a su superior.
++- Todo se valida en el servidor (RLS + RPC). Matriz Rol × Permiso en `CHANGELOG_RC4.md`.
++- El branding aprobado está bloqueado: BRAND-LOCK falla si cambia cualquier ícono o la splash.
++
+ ## RC3 · Notas de Crédito, cancelación y conciliación con Cianbox
+ - **Cianbox informa el saldo contable; OK Despacho registra las aplicaciones operativas.** Una importación del Saldo Comprobante nunca borra una aplicación local.
+ - **Cancelar una hoja publicada no devuelve la NOC.** Sus aplicaciones quedan en "Hoja cancelada — revisar" para Administración.
+@@ -75,10 +87,10 @@ bash tests/sql/run.sh            # migración + RLS en PostgreSQL local (requier
+ npm run build && python3 tests/e2e/run_e2e.py   # E2E en Chromium (requiere playwright de Python)
+ bash tests/run_all.sh            # todo junto, resumen en tests/out/summary.txt
+ ```
+-Ver `TEST_RESULTS_RC3.md` para lo que se ejecutó y lo que quedó **NOT RUN**.
++Ver `TEST_RESULTS_RC4_1.md` para lo que se ejecutó y lo que quedó **NOT RUN**.
+ 
+ ## Publicar
+-**Primero staging** siguiendo `DEPLOY_CHECKLIST_RC3.md` (incluye la reconciliación del historial de migraciones; no usar `db push` directo en el staging actual). Rollback: `ROLLBACK_RC3.md`.
++**Primero staging** siguiendo `DEPLOY_RC4.md` (RC4) / `DEPLOY_CHECKLIST_RC3.md` (incluye la reconciliación del historial de migraciones; no usar `db push` directo en el staging actual). Rollback: `ROLLBACK_RC3.md`.
+ Guías: `docs/GUIA_SUPABASE.md`, `docs/GUIA_CLOUDFLARE.md` y `GUIA_PARA_PUBLICAR_CON_CHATGPT.md`.
+ 
+ ## Datos del Operario en la Fase 1
+diff --git a/docs/GUIA_SUPABASE.md b/docs/GUIA_SUPABASE.md
+index daa80075cec96cbd0d2671651230c57b3558f3f6..2ca4127749939bc5ac9d53876ce3dec9fc098544 100644
+--- a/docs/GUIA_SUPABASE.md
++++ b/docs/GUIA_SUPABASE.md
+@@ -55,6 +55,6 @@ El staging actual recibió migraciones aplicadas a mano: su historial (`supabase
+ 2. **Inspeccionar el historial**: `select version, name from supabase_migrations.schema_migrations order by version;` y `supabase migration list --linked`.
+ 3. **Comparar** esquema e historial con `supabase/migrations/` del repo: qué versiones figuran como aplicadas, cuáles se aplicaron a mano sin registrarse y si el esquema real coincide (`supabase db diff --linked`).
+ 4. **Reconciliar** el historial: marcar como aplicadas solo las migraciones cuyo efecto ya está en la base (`supabase migration repair --status applied <versión>`), y como no aplicadas las que no lo están (`--status reverted`). No repetir migraciones ya aplicadas a mano.
+-5. **Aplicar RC2 / RC2.1 / RC2.1b / RC2.1c / RC2.1d / RC3 de forma controlada**: aplicar una por una las migraciones pendientes (`20261019…`, `20261020…`, `20261021…`, `20261022…`, `20261023…`, `20261024…`, `20261025…`) revisando el resultado de cada una, primero en una copia de staging.
++5. **Aplicar RC2 / RC2.1 / RC2.1b / RC2.1c / RC2.1d / RC3 / RC4 / RC4.1 de forma controlada**: aplicar una por una las migraciones pendientes (`20261019…`, `20261020…`, `20261021…`, `20261022…`, `20261023…`, `20261024…`, `20261025…`, `20261026…`, `20261027…`) revisando el resultado de cada una, primero en una copia de staging.
+ 6. Recién con historial y esquema alineados, adoptar `supabase db push` como flujo normal.
+ En esta entrega no se ejecutó nada contra staging.
+diff --git a/package.json b/package.json
+index 6ca1c22cf7f8bf4b4a0c6c77835d7325737c45e8..b77d4012071e7cc8617e3f58f8a7b6362376668b 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "ok-despacho-online",
+-  "version": "0.7.5-rc3",
++  "version": "0.8.1-rc4.1",
+   "private": true,
+   "type": "module",
+   "description": "OK Despacho Online — Fase 1.1: login, usuarios y permisos, panel del Operario (lógica v15), seguridad de usuarios y base de aprobación de rutas internas.",
+diff --git a/scripts/sw_precache_plugin.mjs b/scripts/sw_precache_plugin.mjs
+index f8ad460a6288ecb746d218586083b1a8534252c4..52519d8bd873274d413594897100f9172894aae7 100644
+--- a/scripts/sw_precache_plugin.mjs
++++ b/scripts/sw_precache_plugin.mjs
+@@ -3,7 +3,8 @@
+ import { readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
+ import { join, relative } from 'node:path';
+ import { createHash } from 'node:crypto';
+-const SKIP = [/^sw\.js$/, /\.map$/, /^splash\.png$/]; // splash.png no se usa (la app usa splash.webp)
++const SKIP = [/^sw\.js$/, /\.map$/, /^splash\.png$/, // splash.png no se usa (la app usa splash.webp)
++  /^branding\/ok-accesorios-horizontal\.png$/]; // PNG del logo de email: el correo lo lleva inline (CID); la app no lo usa
+ export function listDist(dir, root = dir, out = []) {
+   for (const n of readdirSync(dir).sort()) { const p = join(dir, n), rel = relative(root, p).split('\\').join('/');
+     if (statSync(p).isDirectory()) listDist(p, root, out); else if (!SKIP.some(r => r.test(rel))) out.push(rel); }
+diff --git a/src/main.js b/src/main.js
+index 8673f98693ae09f1da943b422e5c07be7e25e68c..15d9b3c44dc547103a61072a3d9d7ec088bf33c3 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -43,18 +43,28 @@ async function loadLegacy() {
+ const canApprovals = me => hasPerm(me, 'can_approve_internal_route_changes');
+ const adminUi = () => import('./online/admin-ui.js');
+ const isAdminHome = me => hasPerm(me, 'users.view') || hasPerm(me, 'settings.manage');
++// RC4: Superior Despacho y Operario Depósito también tienen su dashboard propio
++const RC4_HOME = me => isAdminHome(me) || ['SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'].includes(me.role);
++const rc4Ui = () => import('./online/rc4-ui.js');
++const rc4Open = fn => async me => { const [r, a] = await Promise.all([rc4Ui(), adminUi()]); return r[fn](api, me, a.frameFor, a.plantillasSection); };
++const canReq = me => hasPerm(me, 'requests.create') || hasPerm(me, 'requests.view_team') || hasPerm(me, 'requests.approve_team') || me.role === 'ADMIN';
+ const MODULE_ROUTES = {
+-  '#/dashboard': { ok: isAdminHome, open: async me => (await adminUi()).openDashboard(api, me) },
++  '#/dashboard': { ok: RC4_HOME, open: async me => (await adminUi()).openDashboard(api, me) },
++  '#/nueva-hoja': { ok: me => hasPerm(me, 'routes.create'), open: async () => { closeOverlay(); history.replaceState(null, '', location.pathname + '#/despacho'); const b = document.getElementById('tabNew'); if (b) b.click(); } },
++  '#/solicitudes': { ok: canReq, open: rc4Open('openRequests') },
++  '#/notificaciones': { ok: me => hasPerm(me, 'routes.create') || canReq(me), open: rc4Open('openNotifications') },
++  '#/vehiculos': { ok: me => hasPerm(me, 'vehicle_mileage.view') || hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicles.manage'), open: rc4Open('openVehicles') },
++  '#/config-operativa': { ok: me => hasPerm(me, 'columns.view') || hasPerm(me, 'columns.manage_defaults') || hasPerm(me, 'vehicle_mileage.view'), open: rc4Open('openOperationalConfig') },
+   '#/despacho': { ok: me => hasPerm(me, 'routes.create'), open: () => closeOverlay() },
+   '#/borradores': { ok: me => hasPerm(me, 'routes.create'), open: async me => (await adminUi()).openDrafts(api, me) },
+-  '#/historial': { ok: me => hasPerm(me, 'routes.view_all'), open: async me => (await adminUi()).openHistory(api, me) },
++  '#/historial': { ok: me => hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team') || hasPerm(me, 'routes.view_own'), open: async me => (await adminUi()).openHistory(api, me) },
+   '#/aprobaciones': { ok: canApprovals, open: async me => { const { ApprovalsPanel } = await import('./online/approvals-ui.js'); await new ApprovalsPanel(api, me).open(); await withNav(me, '#/aprobaciones'); } },
+   '#/usuarios': { ok: me => hasPerm(me, 'users.view'), open: async me => { await new UsersPanel(api, me, null, logout).open(); await withNav(me, '#/usuarios'); } },
+-  '#/configuracion': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'vehicles.manage'), open: async me => (await adminUi()).openConfig(api, me) },
++  '#/configuracion': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'vehicles.manage'), open: async me => (await adminUi()).openConfig(api, me, new URLSearchParams(location.hash.split('?')[1] || '').get('sec')) },
+   '#/informes': { ok: me => hasPerm(me, 'can_view_commercial_transport_reports') || hasPerm(me, 'can_manage_commercial_transport_reports'), open: async me => { const { ReportsPanel } = await import('./online/reports-ui.js'); await new ReportsPanel(api, me, logout).open(); await withNav(me, '#/informes'); } },
+   '#/conciliacion-noc': { ok: me => hasPerm(me, 'credit_notes.manage'), open: async me => (await adminUi()).openNocRecon(api, me) },
+   '#/auditoria': { ok: me => hasPerm(me, 'audit.view'), open: async me => (await adminUi()).openAudit(api, me) },
+-  '#/backup': { ok: me => hasPerm(me, 'settings.manage'), open: async me => (await adminUi()).openBackup(api, me) },
++  '#/backup': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'backup.manage'), open: async me => (await adminUi()).openBackup(api, me) },
+   '#/mis-hojas': { ok: me => hasPerm(me, 'routes.view_assigned'), open: () => closeOverlay() }
+ };
+ // Inserta la barra de navegación debajo del encabezado del panel abierto
+@@ -124,7 +134,15 @@ async function route() {
+     // Reglas del servidor (financieras + asignación): se ESPERAN y el estado queda visible. Sin servidor se puede seguir preparando
+     // (contingencia identificada), pero no se publica hasta recuperar las reglas, recalcular y revisar con la versión vigente.
+     if (hasPerm(me, 'routes.create')) await syncServerConfig();
+-    if (!location.hash && isAdminHome(me)) location.hash = '#/dashboard';
++    // RC4: sin permiso de publicar (Operario Depósito) no se ofrece PUBLICAR; en su lugar, SOLICITAR AUTORIZACIÓN (el servidor igual rechazaría)
++    if (!hasPerm(me, 'routes.publish')) {
++      document.body.classList.add('no-publish');
++      const bp = document.getElementById('btnPublish');
++      if (bp && !document.getElementById('btnAskAuth') && hasPerm(me, 'requests.create')) {
++        const a = document.createElement('a'); a.id = 'btnAskAuth'; a.className = 'btn dark'; a.href = '#/solicitudes?nueva=1'; a.textContent = 'SOLICITAR AUTORIZACIÓN'; bp.after(a);
++      }
++    }
++    if (!location.hash && RC4_HOME(me)) location.hash = '#/dashboard';
+   } else {
+     show('#noPanel');
+     if (hasPerm(me, 'routes.view_assigned')) { const { DriverApp } = await import('./online/driver-ui.js'); new DriverApp(api, me, logout).start(); }
+diff --git a/src/online/admin-ui.js b/src/online/admin-ui.js
+index c63148408178b7f83ddd9e87e2d81e45f4dcb003..35f8b073997ac91f57c9ef153e1512bcd45d77b6 100644
+--- a/src/online/admin-ui.js
++++ b/src/online/admin-ui.js
+@@ -4,6 +4,7 @@ import { esc } from './util.js';
+ import { hasPerm, ROLE_LABEL } from '../../supabase/functions/_shared/rules.js';
+ import { DEFAULT_COLUMNS, moduleOfAction } from './demo-admin.js';
+ import { zipStore, b64ToBytes, sha256Hex } from './zip.js';
++import { isRc4, appFrame, roleTopNav, openDashboardAdmin, openDashboardSupervisor, openDashboardOperario, mileageBlock } from './rc4-ui.js';
+ 
+ const fmt = n => Number(n || 0).toLocaleString('es-AR');
+ const dt = iso => iso ? new Date(iso).toLocaleString('es-AR', { timeZone: 'America/Argentina/Mendoza', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+@@ -14,20 +15,22 @@ export const NAV = [
+   ['#/dashboard', 'DASHBOARD', me => hasPerm(me, 'users.view') || hasPerm(me, 'settings.manage')],
+   ['#/despacho', 'DESPACHO', me => hasPerm(me, 'routes.create')],
+   ['#/borradores', 'BORRADORES', me => hasPerm(me, 'routes.create')],
+-  ['#/historial', 'HOJAS PUBLICADAS', me => hasPerm(me, 'routes.view_all')],
++  ['#/historial', 'HOJAS PUBLICADAS', me => hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team') || hasPerm(me, 'routes.view_own')],
+   ['#/aprobaciones', 'APROBACIONES', me => hasPerm(me, 'can_approve_internal_route_changes')],
+   ['#/usuarios', 'USUARIOS', me => hasPerm(me, 'users.view')],
+   ['#/configuracion', 'CONFIGURACIÓN', me => hasPerm(me, 'settings.manage') || hasPerm(me, 'vehicles.manage')],
+   ['#/informes', 'INFORMES', me => hasPerm(me, 'can_view_commercial_transport_reports') || hasPerm(me, 'can_manage_commercial_transport_reports')],
+   ['#/conciliacion-noc', 'CONCILIACIÓN NOC', me => hasPerm(me, 'credit_notes.manage')],
+   ['#/auditoria', 'AUDITORÍA', me => hasPerm(me, 'audit.view')],
+-  ['#/backup', 'BACKUP', me => hasPerm(me, 'settings.manage')]
++  ['#/backup', 'BACKUP', me => hasPerm(me, 'settings.manage') || hasPerm(me, 'backup.manage')]
+ ];
+ export function navHtml(me, active) {
++  if (isRc4(me)) return roleTopNav(me, active);   // RC4: navegación por rol (Admin General / Superior / Operario)
+   return '<nav class="adnav" id="adNav">' + NAV.filter(n => n[2](me)).map(([h, l]) => '<a href="' + h + '" class="' + (h === active ? 'on' : '') + '" data-nav="' + h + '">' + l + '</a>').join('') + '</nav>';
+ }
+ // Marco común de los módulos: encabezado + navegación + contenido
+ function frame(me, title, active) {
++  if (isRc4(me)) return appFrame(me, title, active);   // RC4: menú lateral (diseño V4 / V2 aprobado)
+   const el = document.getElementById('usersPanel'); el.hidden = false;
+   el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>' + esc(title) + '</span></div><div class="sp"></div>' +
+     '<span class="who-chip">' + esc(me.full_name) + ' · <b>' + esc(ROLE_LABEL[me.role] || me.role) + '</b></span><button class="tbtn" type="button" id="adLogout">Cerrar sesión</button></header>' + navHtml(me, active) + '<div class="up-wrap ad-wrap" id="adBody"></div>';
+@@ -40,6 +43,9 @@ function download(name, text, type = 'application/json') { const a = document.cr
+ 
+ // ================= DASHBOARD =================
+ export async function openDashboard(api, me) {
++  if (me.role === 'ADMIN') return openDashboardAdmin(api, me);
++  if (me.role === 'SUPERVISOR_DESPACHO') return openDashboardSupervisor(api, me);
++  if (me.role === 'OPERARIO_DEPOSITO') return openDashboardOperario(api, me);
+   const w = frame(me, 'Dashboard', '#/dashboard');
+   let s = {}; try { s = await api.dashboardSummary(); } catch (e) { msgBox(w, { err: true, text: e.message }); }
+   const tiles = NAV.filter(n => n[0] !== '#/dashboard' && n[2](me)).map(([h, l]) => '<a class="dtile" href="' + h + '">' + l + '</a>').join('');
+@@ -243,6 +249,7 @@ const CFG = {
+     sec.querySelector('#tplSave').onclick = () => run(() => api.saveTemplate(cid, cols.map((c, i) => ({ ...c, order: i + 1 }))), 'Plantilla guardada como versión nueva. Las hojas ya publicadas conservan la suya.', m => { sec.dataset.cid = cid; again(m); });
+   },
+   async vehiculos(api, me, sec, again) {
++    if (hasPerm(me, 'vehicle_mileage.view') || hasPerm(me, 'vehicle_mileage.rules_manage')) { const kb = document.createElement('div'); kb.className = 'card kmrules-in-config'; kb.id = 'kmRules'; await mileageBlock(api, me, kb, again); sec.after(kb); }
+     const vs = await api.vehicleStatus(), users = (await api.listUsers().catch(() => [])).filter(u => u.role === 'TRANSPORTISTA_INTERNO' && u.status === 'ACTIVO');
+     const card = v => '<div class="vcard' + (v.service_due ? ' due' : '') + (v.active === false ? ' off' : '') + '" data-vid="' + v.id + '"><b>' + esc(v.name) + ' · ' + esc(v.plate) + '</b>' + (v.active === false ? ' <em>(inactivo)</em>' : '') +
+       '<div>Conductor habitual: ' + esc(v.habitual_driver_name || '—') + '</div><div>KM actual: <b>' + fmt(v.current_km) + '</b></div><div>Próximo service: <b>' + fmt(v.next_service_km) + '</b> (cada ' + fmt(v.service_interval_km) + ' km)</div>' +
+@@ -474,3 +481,7 @@ async function backupSection(api, me, sec, again) {
+   };
+ }
+ export async function openBackup(api, me) { const w = frame(me, 'Backup', '#/backup'); const sec = document.createElement('section'); sec.className = 'step rp-step'; sec.id = 'cfg-backup'; w.appendChild(sec); await backupSection(api, me, sec, () => openBackup(api, me)); }
++
++// RC4: secciones reutilizables desde Configuración operativa (el servidor valida el permiso igual)
++export const plantillasSection = (api, me, sec, again) => CFG.plantillas(api, me, sec, again);
++export const frameFor = (me, title, active) => frame(me, title, active);
+diff --git a/src/online/demo-admin.js b/src/online/demo-admin.js
+index e2991b3587019bb0401f99b7a687aa7b17f51ab1..ac6cac40a5279fb9c037d6ee30ba91edf1a1c453 100644
+--- a/src/online/demo-admin.js
++++ b/src/online/demo-admin.js
+@@ -31,15 +31,15 @@ export const DemoAdmin = {
+   },
+   async listDrafts() {
+     this._refresh(); const me = await this.me(); this._need(me, 'routes.create');
+-    const all = hasPerm(me, 'routes.manage_all_drafts'), RS = this.db.reservations || {};
+-    return Object.values(this.db.drafts || {}).filter(d => d.status === 'BORRADOR' && (all || d.owner_id === me.id)).map(d => ({
++    const RS = this.db.reservations || {};
++    return Object.values(this.db.drafts || {}).filter(d => d.status === 'BORRADOR' && this._canViewDraftOf(me, d.owner_id)).map(d => ({
+       id: d.id, client_sheet_key: d.client_sheet_key, name: d.name || 'Hoja', carrier_name: d.carrier_name || '', delivery_count: d.delivery_count || 0, orders: d.orders || [],
+       owner_id: d.owner_id, owner_name: (this._user(d.owner_id) || {}).full_name, status: d.status, created_at: d.created_at, updated_at: d.updated_at || d.created_at,
+       reserved: Object.keys(RS).filter(o => RS[o].sheet_key === d.client_sheet_key && RS[o].status === 'BORRADOR').sort() })).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+   },
+   async draftContent(sheetKey) {
+     this._refresh(); const me = await this.me(); this._need(me, 'routes.create'); const d = (this.db.drafts || {})[sheetKey]; if (!d) return null;
+-    if (d.owner_id !== me.id && !hasPerm(me, 'routes.manage_all_drafts')) throw err('FORBIDDEN_DRAFT', 'FORBIDDEN_DRAFT', 403);
++    if (!this._canViewDraftOf(me, d.owner_id)) throw err('FORBIDDEN_DRAFT', 'FORBIDDEN_DRAFT', 403);
+     return { name: d.name, status: d.status, content: d.content || null };
+   },
+   async deleteDraft(sheetKey) {
+@@ -55,8 +55,8 @@ export const DemoAdmin = {
+ 
+   // ===== Historial =====
+   async searchRoutes(f = {}) {
+-    this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all');
+-    const C = this._carriers(); let list = (this.db.routes2 || []).slice();
++    this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all', 'routes.view_team', 'routes.view_own');
++    const C = this._carriers(); let list = (this.db.routes2 || []).filter(r => this._canViewRoute(me, r));   // RC4.1: mismo alcance que la RLS
+     const has = (a, b) => String(a || '').toLowerCase().includes(String(b || '').toLowerCase());
+     if (f.number) list = list.filter(r => has(r.number, f.number));
+     if (f.carrier) list = list.filter(r => r.carrier_id === f.carrier);
+@@ -75,8 +75,9 @@ export const DemoAdmin = {
+       stops: r.stops.length, bultos: r.stops.reduce((a, s) => a + (Number(s.bultos) || 0), 0), zones: [...new Set(r.stops.map(s => s.zone).filter(Boolean))] })) };
+   },
+   async routeDetail(id) {
+-    this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all');
++    this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all', 'routes.view_team', 'routes.view_own');
+     const r = (this.db.routes2 || []).find(x => x.id === id); if (!r) throw err('No existe.', 'NOT_FOUND', 404);
++    this._routeScope(me, r);
+     const pdfs = Object.values(this.db.routePdfs || {}).filter(p => p.route_id === id).sort((a, b) => a.route_version - b.route_version)
+       .map(p => ({ ...p, generated_by_name: (this._user(p.generated_by) || {}).full_name }));
+     const audit = (this.db.audit || []).filter(a => a.target === id || a.target_id === id);
+@@ -85,6 +86,7 @@ export const DemoAdmin = {
+   },
+   async resendNotification(id) {
+     this._refresh(); const me = await this.me(); this._need(me, 'routes.publish');
++    { const any0 = (this.db.routes2 || []).find(x => x.id === id); if (any0) this._routeScope(me, any0); }
+     const r = this.db.routes2.find(x => x.id === id && ['PUBLICADA', 'EN_CURSO'].includes(x.operational_status)); if (!r) throw err('Solo hojas publicadas o en curso.', 'BAD_STATE', 409);
+     this.db.notifs = (this.db.notifs || []).filter(n => !(n.route_id === id && n.type === 'RECORDATORIO_HOJA'));
+     this.db.notifs.push({ id: 'nt-' + (++this.db.seq), user_id: r.responsable_id, route_id: id, type: 'RECORDATORIO_HOJA', title: 'HOJA ' + r.number + ' PUBLICADA', body: 'Recordatorio de Despacho', created_at: new Date().toISOString(), read_at: null });
+@@ -105,7 +107,7 @@ export const DemoAdmin = {
+     return T || { id: null, carrier_id: carrierId, version: 0, columns: DEFAULT_COLUMNS.map(c => ({ ...c })) };
+   },
+   async saveTemplate(carrierId, columns) {
+-    this._refresh(); const me = await this.me(); this._need(me, 'settings.manage');
++    this._refresh(); const me = await this.me(); this._need(me, 'settings.manage', 'columns.manage_defaults', 'columns.manage_templates');
+     if (!Array.isArray(columns) || !columns.length) throw err('Plantilla vacía.', 'BAD_TEMPLATE', 400);
+     if (columns.some(c => c.required && c.visible === false)) throw err('Una columna obligatoria no se puede ocultar.', 'REQUIRED_HIDDEN', 400);
+     const T = this.db.templates = this.db.templates || [];
+diff --git a/src/online/demo-api.js b/src/online/demo-api.js
+index f8cb1d3d9762ca8340d4f99f9eab6a0704ec511d..655e5d2cfd0932110f52575f67551ebb5adc193f 100644
+--- a/src/online/demo-api.js
++++ b/src/online/demo-api.js
+@@ -4,6 +4,7 @@ import { validateUserAction, compatibleResponsables, hasPerm, canBeResponsable,
+ import { reorderError, applyReorder, currentStop, approvalRecipients, sendQueuedEmails, routeDiff } from '../../supabase/functions/_shared/internal-route.js';
+ import { sendCustomerEmails } from '../../supabase/functions/_shared/customer-email.js';
+ import { DemoAdmin } from './demo-admin.js';
++import { DemoRC4 } from './demo-rc4.js';
+ 
+ 
+ const KEY = 'okd_online_demo_v2';
+@@ -124,7 +125,7 @@ export class DemoApi {
+     if (cur && cur.status === 'OK') return cur;
+     this.db.routePdfs[key] = { ...(cur || { route_id: routeId, route_version: version, attempts: 0 }), status: 'PDF_ERROR', error: msg, attempts: (cur ? cur.attempts : 0) + 1 }; this._save(); return this.db.routePdfs[key];
+   }
+-  async routePdfSnapshot(routeId) { this._refresh(); const me = await this.me(); if (!hasPerm(me, 'routes.publish')) throw err('Sin permiso.', 'FORBIDDEN', 403); const r = this.db.routes2.find(x => x.id === routeId); return { number: r.number, version: r.version || 1, pdf_model: r.sheet_snapshot.pdf_model }; }
++  async routePdfSnapshot(routeId) { this._refresh(); const me = await this.me(); { const rr = (this.db.routes2 || []).find(x => x.id === routeId); if (rr) this._routeScope(me, rr); } if (!hasPerm(me, 'routes.publish')) throw err('Sin permiso.', 'FORBIDDEN', 403); const r = this.db.routes2.find(x => x.id === routeId); return { number: r.number, version: r.version || 1, pdf_model: r.sheet_snapshot.pdf_model }; }
+   async downloadRoutePdf(routeId, version) {
+     this._refresh(); const me = await this.me(); const r = this.db.routes2.find(x => x.id === routeId);
+     if (!(hasPerm(me, 'routes.view_all') || (r && r.responsable_id === me.id))) throw err('ACCESO NO AUTORIZADO', 'FORBIDDEN', 403);
+@@ -289,7 +290,7 @@ export class DemoApi {
+     const D = this.db.drafts = this.db.drafts || {};
+     let d = D[sheetKey];
+     if (!d) { if (!create) return null; d = D[sheetKey] = { id: 'dr-' + (++this.db.seq), client_sheet_key: sheetKey, owner_id: me.id, status: 'BORRADOR', route_id: null, created_at: new Date().toISOString() }; }
+-    if (d.owner_id !== me.id && !hasPerm(me, 'routes.manage_all_drafts')) throw err('FORBIDDEN_DRAFT: el borrador pertenece a otro operador', 'FORBIDDEN_DRAFT', 403);
++    if (!this._canManageDraftOf(me, d.owner_id)) throw err('FORBIDDEN_DRAFT: el borrador pertenece a otro operador', 'FORBIDDEN_DRAFT', 403);
+     if (needDraft && d.status !== 'BORRADOR') throw err('DRAFT_PUBLISHED: la hoja ya fue publicada; no se modifica como borrador', 'DRAFT_PUBLISHED', 409);
+     return d;
+   }
+@@ -365,21 +366,40 @@ export class DemoApi {
+     const d = (this.db.identity || {})[cuil]; if (!d) return null; const o = this.db.storage[d.storage_path];
+     const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(o.b64), c => c.charCodeAt(0))], { type: o.mime })); setTimeout(() => URL.revokeObjectURL(url), 60000); return url; // vence en 60 s
+   }
+-  async cuilHasDni(cuil) { this._refresh(); return !!((this.db.identity || {})[String(cuil || '').replace(/\D/g, '')]); }
++  async cuilHasDni(cuil) { this._refresh(); const d = (this.db.identity || {})[String(cuil || '').replace(/\D/g, '')]; return !!(d && d.storage_path); }
++  // RC4.1: autocompletar la segunda pantalla (solo el chofer de la parada o Admin; nunca la foto del DNI). CUIL → DNI → cliente.
++  async deliveryIdentityLookup(stopId, cuil, dni) {
++    this._refresh(); const me = await this.me();
++    const r = (this.db.routes2 || []).find(x => x.stops.some(s => s.id === stopId)); if (!r) throw err('NOT_FOUND', 'NOT_FOUND', 404);
++    if (!(r.responsable_id === me.id || me.role === 'ADMIN')) throw err('FORBIDDEN', 'FORBIDDEN', 403);
++    const st = r.stops.find(s => s.id === stopId), I = this.db.identity || {}, c = String(cuil || '').replace(/\D/g, ''), d = String(dni || '').replace(/\D/g, '');
++    let p = c && I[c] ? { ...I[c], cuil: c, source: 'CUIL' } : null;
++    if (!p && d) { const k = Object.keys(I).filter(x => I[x].dni === d).sort((a, b) => String(I[b].updated_at).localeCompare(String(I[a].updated_at)))[0]; if (k) p = { ...I[k], cuil: k, source: 'DNI' }; }
++    if (p) return { source: p.source, cuil: p.cuil, dni: p.dni || null, full_name: p.full_name || null, email: p.email || null, has_dni_photo: !!p.storage_path };
++    if (st.client_key) { const e = Object.values(this.db.evidence || {}).filter(x => x.client_key === st.client_key && x.receiver_email).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
++      if (e) return { source: 'CLIENTE', cuil: e.cuil || null, dni: e.receiver_dni || null, full_name: e.receiver_name, email: e.receiver_email, has_dni_photo: !!(e.cuil && I[e.cuil] && I[e.cuil].storage_path) }; }
++    return null;
++  }
+   _onTheWay(r) {
+     const cur = currentStop(r.stops); if (!cur || !cur.customer_email) return;
+     this._queueCustomer(r, cur, 'ON_THE_WAY');
+   }
+-  _queueCustomer(r, st, kind) {
++  _queueCustomer(r, st, kind, recipient) {
+     const J = this.db.customerJobs = this.db.customerJobs || [], key = r.id + '|' + st.id + '|' + kind;
+-    if (!J.some(j => j.idempotency_key === key)) J.push({ id: 'cj-' + (++this.db.seq), route_id: r.id, stop_id: st.id, kind, recipient: String(st.customer_email).trim().toLowerCase(), idempotency_key: key, status: 'QUEUED', retry_count: 0 });
++    if (!J.some(j => j.idempotency_key === key)) J.push({ id: 'cj-' + (++this.db.seq), route_id: r.id, stop_id: st.id, kind, recipient: String(recipient || st.customer_email).trim().toLowerCase(), idempotency_key: key, status: 'QUEUED', retry_count: 0, attempts: [] });
+   }
+   async sendCustomerQueued(onlyIds) {
+     this.db.outboxCustomer = this.db.outboxCustomer || [];
+     const store = { listJobs: async q => (this.db.customerJobs || []).filter(j => q.statuses.includes(j.status) && (!q.ids || q.ids.includes(j.id))),
+-      stopFor: async j => this.db.routes2.find(r => r.id === j.route_id).stops.find(x => x.id === j.stop_id), updateJob: async (id, p) => Object.assign(this.db.customerJobs.find(j => j.id === id), p) };
+-    const provider = { send: async m => { if (typeof window !== 'undefined' && window.OKD_MAIL_FAIL) throw new Error('Proveedor de email caído (simulado)'); this.db.outboxCustomer.push({ to: m.to, subject: m.subject, html: m.html }); return { id: 'c' + this.db.outboxCustomer.length }; } };
+-    const out = await sendCustomerEmails({ store, provider, onlyIds }); this._save(); return out;
++      stopFor: async j => this.db.routes2.find(r => r.id === j.route_id).stops.find(x => x.id === j.stop_id),
++      receiptFor: async j => { const rc = (this.db.receipts || {})[j.stop_id]; if (!rc) throw new Error('no existe el comprobante'); return rc; },
++      // mismo historial de intentos que el trigger del servidor
++      updateJob: async (id, p) => { const j = this.db.customerJobs.find(x => x.id === id); Object.assign(j, p, { last_attempt_at: new Date().toISOString() });
++        j.attempts = (j.attempts || []).concat([{ at: j.last_attempt_at, status: j.status, provider_id: j.provider_id || null, error: j.error || null, retry: j.retry_count || 0 }]); } };
++    const provider = { send: async m => { if (typeof window !== 'undefined' && window.OKD_MAIL_FAIL) throw new Error('Proveedor de email caído (simulado)'); this.db.outboxCustomer.push({ to: m.to, subject: m.subject, html: m.html, idempotency_key: m.idempotencyKey, attachments: (m.attachments || []).map(x => ({ filename: x.filename, content_type: x.content_type, content_id: x.content_id, bytes: Math.floor(String(x.content || '').length * 3 / 4) - ((String(x.content || '').match(/=+$/) || [''])[0].length) })) }); return { id: 'c' + this.db.outboxCustomer.length }; } };
++    // mismo logo inline (CID) que la Edge Function; el módulo se carga aparte solo cuando hay que enviar
++    const [lm, rb] = await Promise.all([import('../../supabase/functions/_shared/ok-accesorios-logo.js'), import('../../supabase/functions/_shared/resend-body.js')]);
++    const out = await sendCustomerEmails({ store, provider, onlyIds, inlineLogo: rb.inlineLogoFrom(lm) }); this._save(); return out;
+   }
+   async setStopOutcome(stopId, outcome, note, reason, opId, extra) {
+     this._net(); this._refresh();
+@@ -395,6 +415,12 @@ export class DemoApi {
+     if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome)) {
+       if (!String(ev.receiver_name || '').trim() || !ev.signature_png_b64) throw err('EVIDENCE_REQUIRED: nombre del receptor y firma obligatorios', 'EVIDENCE_REQUIRED', 400);
+       if (cristian) { cuil = String(ev.cuil || '').replace(/\D/g, ''); if (cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
++      else { cuil = String(ev.cuil || '').replace(/\D/g, '') || null; if (cuil && cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
++      // RC4.1: email del receptor (segunda pantalla), opcional; si viene debe ser válido
++      var vEmail = String(ev.email || '').trim().toLowerCase() || null;
++      if (vEmail && !(/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(vEmail) && vEmail.length <= 254)) throw err('EMAIL_INVALID: el email no es válido', 'EMAIL_INVALID', 400);
++      var vDni = String(ev.dni || '').replace(/\D/g, '') || (cuil ? cuil.slice(2, 10) : null);
++      if (vDni && !/^[0-9]{7,8}$/.test(vDni)) throw err('DNI_INVALID: el DNI debe tener 7 u 8 dígitos', 'DNI_INVALID', 400);
+       if (ev.dni_photo_b64) throw err('DNI_STORAGE_REQUIRED: la foto del DNI se sube a Storage privado', 'DNI_STORAGE_REQUIRED', 400);
+       if (cristian && ev.dni_storage_path) { const o = (this.db.storage || {})[ev.dni_storage_path];
+         if (!new RegExp('^' + cuil + '/[0-9a-f-]{36}\\.(jpg|png)$').test(ev.dni_storage_path) || !o || o.owner !== me.id) throw err('DNI_UPLOAD_INVALID', 'DNI_UPLOAD_INVALID', 400); }
+@@ -409,9 +435,24 @@ export class DemoApi {
+     if (['COBRANZA', 'AMBAS'].includes(st.task)) Object.assign(st, { collection_status: col.status, collected_amount: col.amount != null ? Number(col.amount) : null, payment_mode: col.mode || null, collection_note: col.note || null });
+     if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome)) {
+       st.receiver_name = String(ev.receiver_name).trim(); // el nombre sí; firma y CUIL/DNI solo en evidencia privada
+-      this.db.evidence = this.db.evidence || {}; this.db.evidence[st.id] = { receiver_name: st.receiver_name, signature_png_b64: ev.signature_png_b64, cuil, created_by: me.id, at: new Date().toISOString() };
+-      if (cristian && ev.dni_storage_path) { this.db.identity = this.db.identity || {}; if (!this.db.identity[cuil]) this.db.identity[cuil] = { storage_path: ev.dni_storage_path, mime: this.db.storage[ev.dni_storage_path].mime, registered_by: me.id, registered_at: new Date().toISOString() }; }
+-      if (st.customer_email) this._queueCustomer(r, st, outcome === 'ENTREGADO' ? 'DELIVERED' : 'PARTIAL');
++      this.db.evidence = this.db.evidence || {};
++      if (!this.db.evidence[st.id]) this.db.evidence[st.id] = { receiver_name: st.receiver_name, signature_png_b64: ev.signature_png_b64, cuil, created_by: me.id, at: new Date().toISOString(), receiver_email: vEmail, receiver_dni: vDni, client_key: st.client_key || null };
++      this.db.identity = this.db.identity || {};
++      if (cristian && ev.dni_storage_path) { const id0 = this.db.identity[cuil]; if (!id0 || !id0.storage_path) this.db.identity[cuil] = Object.assign(id0 || {}, { storage_path: ev.dni_storage_path, mime: this.db.storage[ev.dni_storage_path].mime, registered_by: me.id, registered_at: new Date().toISOString() }); }
++      // Perfil reutilizable (misma capa de identidad): nombre, DNI, email y cliente
++      if (cuil) { const p0 = this.db.identity[cuil] = this.db.identity[cuil] || { registered_by: me.id, registered_at: new Date().toISOString() };
++        if (vEmail && vEmail !== p0.email) Object.assign(p0, { email: vEmail, email_updated_at: new Date().toISOString(), email_updated_by: me.id });
++        Object.assign(p0, { full_name: st.receiver_name || p0.full_name, dni: vDni || p0.dni, client_key: st.client_key || p0.client_key, updated_at: new Date().toISOString() }); }
++      // Recibido Conforme: entrega total + email válido → comprobante único + envío (la falla del email nunca revierte la entrega)
++      let receipt = false;
++      if (outcome === 'ENTREGADO' && vEmail) {
++        this.db.receipts = this.db.receipts || {};
++        if (!this.db.receipts[st.id]) { const num = 'RC-' + r.number + '-' + String(st.seq || 0).padStart(3, '0');
++          this.db.receipts[st.id] = { stop_id: st.id, route_id: r.id, receipt_number: num, recipient_email: vEmail, generated_by: me.id, generated_at: new Date().toISOString(),
++            snapshot: { receipt_number: num, route_number: r.number, client_name: st.client_name, order_numbers: st.order_numbers, receiver_name: st.receiver_name, delivered_at: new Date().toISOString(), carrier_id: r.carrier_id } }; }
++        this._queueCustomer(r, st, 'RECIBIDO_CONFORME', vEmail); receipt = true;
++      }
++      if (st.customer_email && !receipt) this._queueCustomer(r, st, outcome === 'ENTREGADO' ? 'DELIVERED' : 'PARTIAL');
+     }
+     if (opId) this.db.ops[opId] = stopId;
+     this._onTheWay(r); this._save(); await this.sendCustomerQueued(); return st;
+@@ -463,7 +504,7 @@ export class DemoApi {
+       if (kmEnd == null || kmEnd === '') throw err('KM_REQUIRED: cargá el kilometraje final', 'KM_REQUIRED', 400);
+       if (Number(kmEnd) < v.current_km) throw err('KM_LOWER: el kilometraje no puede bajar (último ' + v.current_km + ')', 'KM_LOWER', 400);
+       if (r.km_start != null && Number(kmEnd) < r.km_start) throw err('KM_LOWER: el km final no puede ser menor al inicial', 'KM_LOWER', 400);
+-      v.current_km = Number(kmEnd); r.km_end = Number(kmEnd); r.km_ended_at = new Date().toISOString(); this._serviceCheck(v);
++      v.current_km = Number(kmEnd); r.km_end = Number(kmEnd); r.km_ended_at = new Date().toISOString(); this._serviceCheck(v); this._checkTripRange(r);
+     }
+     const summary = {}; r.stops.forEach(s => { summary[s.outcome] = (summary[s.outcome] || 0) + 1; });
+     const mods = (r.events || []).length;
+@@ -535,7 +576,7 @@ export class DemoApi {
+     this._audit(me, 'VEHICLE_SAVED', v.id, null, { plate }); this._save(); return v;
+   }
+   async correctVehicleKm(id, km, reason) {
+-    this._refresh(); const me = await this.me(); if (!hasPerm(me, 'vehicles.manage')) throw err('Sin permiso.', 'FORBIDDEN', 403);
++    this._refresh(); const me = await this.me(); if (!hasPerm(me, 'vehicles.manage') && !hasPerm(me, 'vehicle_mileage.edit')) throw err('Sin permiso.', 'FORBIDDEN', 403);
+     if (!String(reason || '').trim()) throw err('Indicá el motivo de la corrección.', 'REASON_REQUIRED', 400);
+     const v = this.db.vehicles.find(x => x.id === id); const before = v.current_km; v.current_km = Number(km);
+     this._audit(me, 'VEHICLE_KM_CORRECTED', id, { km: before }, { km: Number(km), reason }); this._save();
+@@ -567,9 +608,10 @@ export class DemoApi {
+   // ===== Cancelar hoja activa (Administración): libera los pedidos; el correlativo no se reutiliza =====
+   async activeRoutes() { this._refresh(); return (this.db.routes2 || []).filter(r => ['PUBLICADA', 'EN_CURSO'].includes(r.operational_status)).map(r => ({ id: r.id, number: r.number, carrier_name: r.carrier_name, responsable_name: r.responsable_name, operational_status: r.operational_status })); }
+   async cancelRoute(id, reason) {
+-    this._refresh(); const me = await this.me(); if (!hasPerm(me, 'routes.manage_all_drafts')) throw err('Sin permiso.', 'FORBIDDEN', 403);
++    this._refresh(); const me = await this.me(); if (!hasPerm(me, 'routes.manage_all_drafts') && !hasPerm(me, 'routes.cancel')) throw err('Sin permiso.', 'FORBIDDEN', 403);
+     if (!String(reason || '').trim()) throw err('Indicá el motivo.', 'REASON_REQUIRED', 400);
+     const r = this.db.routes2.find(x => x.id === id && ['PUBLICADA', 'EN_CURSO'].includes(x.operational_status)); if (!r) throw err('Solo hojas publicadas o en curso.', 'BAD_STATE', 409);
++    { const any0 = this.db.routes2.find(x => x.id === id); if (any0) this._routeScope(me, any0); }   // RC4.1: fuera de alcance → FORBIDDEN_ROUTE
+     r.operational_status = 'CANCELADA'; Object.values(this.db.drafts || {}).filter(d => d.route_id === id).forEach(d => { d.status = 'CANCELADA'; });
+     // RC3: cancelar ≠ revertir NOC. Importes intactos; las aplicaciones consumidas quedan en revisión administrativa
+     (this.db.nocApps || []).filter(a => a.route_id === id && a.status === 'CONSUMED').forEach(a => {
+@@ -686,3 +728,4 @@ export class DemoApi {
+ 
+ // RC2: borradores, historial, configuración, auditoría, backup y dashboard (mismas reglas que la base)
+ Object.assign(DemoApi.prototype, DemoAdmin);
++Object.assign(DemoApi.prototype, DemoRC4);
+diff --git a/src/online/driver-ui.js b/src/online/driver-ui.js
+index ddfcc115b06d1eacd2b87c6b3cd7cf886055918e..7a4476366c628b70d0b80acb5dd69d578b059bbf 100644
+--- a/src/online/driver-ui.js
++++ b/src/online/driver-ui.js
+@@ -245,7 +245,9 @@ export class DriverApp {
+     const delivered = o === 'ENTREGADO' || o === 'ENTREGA_PARCIAL', cristian = ['CT-ESTE', 'CT-ALR'].includes(r.carrier_id), cob = ['COBRANZA', 'AMBAS'].includes(st.task);
+     form.innerHTML = '<b class="drv-ft">' + OUT[o] + '</b>' +
+       (delivered ? '<input class="ed" data-f="recv" placeholder="Nombre de quien recibe (obligatorio)"><div class="sigbox"><canvas width="300" height="120" data-sig></canvas><button type="button" class="linkbtn" data-sigclr>Borrar firma</button></div>' +
+-        (cristian ? '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') : '') +
++        (cristian ? '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') +
++        // RC4.1: email del cliente en esta MISMA pantalla (identidad + evidencia + contacto); opcional. Con email válido y entrega total se envía el Recibido Conforme.
++        '<input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Email del cliente (opcional · Recibido Conforme)"><span class="drv-mailhint" data-mailhint></span>' : '') +
+       (cob ? '<div class="drv-cob"><b>COBRANZA</b>' + (st.expected_amount != null ? ' · esperado $ ' + Number(st.expected_amount).toLocaleString('es-AR') : '') +
+         '<select class="ed" data-f="cst"><option value="">Resultado de la cobranza…</option><option value="COBRADO">COBRADO</option><option value="COBRO_PARCIAL">COBRO PARCIAL</option><option value="NO_COBRADO">NO COBRADO</option></select>' +
+         '<input class="ed" data-f="camt" inputmode="decimal" placeholder="Importe cobrado"><select class="ed" data-f="cmode"><option value="">Modo de pago…</option><option>EFECTIVO</option><option>TRANSFERENCIA</option><option>CHEQUE</option></select><input class="ed" data-f="cnote" placeholder="Observación / motivo de la cobranza"></div>' : '') +
+@@ -260,11 +262,22 @@ export class DriverApp {
+       cv.onpointermove = e => { if (!down) return; ctx.lineTo(...pos(e)); ctx.stroke(); drawn = true; };
+       cv.onpointerup = () => { down = false; };
+       form.querySelector('[data-sigclr]').onclick = () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; }; }
++    // Autocompletar con el perfil reutilizable (CUIL → DNI → cliente). Sin conexión, simplemente no se completa.
++    const em = form.querySelector('[data-f="email"]'), hint = form.querySelector('[data-mailhint]'), rv = form.querySelector('[data-f="recv"]');
++    const fill = async cuil => {
++      if (!em || !this.api.deliveryIdentityLookup) return;
++      const p = await this.api.deliveryIdentityLookup(st.id, cuil || null).catch(() => null);
++      if (!p) return;
++      if (p.email && (!em.value || em.dataset.auto === '1')) { em.value = p.email; em.dataset.auto = '1'; hint.textContent = 'Email recuperado del cliente (podés corregirlo)'; }
++      if (p.full_name && rv && !rv.value) rv.value = p.full_name;
++    };
++    if (em) { em.oninput = () => { em.dataset.auto = ''; hint.textContent = ''; }; fill(null); }
+     // DNI: si el CUIL ya tiene DNI no se pide foto
+     let dni = null; const cu = form.querySelector('[data-f="cuil"]');
+     if (cu) cu.onchange = async () => {
+       const n = cu.value.replace(/\D/g, ''), box2 = form.querySelector('[data-dni]');
+       if (n.length !== 11) { box2.textContent = 'El CUIL debe tener 11 dígitos.'; return; }
++      fill(n);
+       const has = await this.api.cuilHasDni(n).catch(() => false);
+       box2.innerHTML = has ? '✓ DNI YA REGISTRADO' : 'CUIL nuevo · foto del DNI (opcional, JPEG/PNG hasta 5 MB) <input type="file" accept="image/jpeg,image/png" capture="environment" data-dnifile>';
+       const fi = box2.querySelector('[data-dnifile]');
+@@ -284,6 +297,9 @@ export class DriverApp {
+         if (!drawn) return fail('Falta la firma de quien recibe.');
+         extra.evidence = { receiver_name: recv, signature_png_b64: cv.toDataURL('image/png').split(',')[1] };
+         if (cristian) { const n = cu.value.replace(/\D/g, ''); if (n.length !== 11) return fail('El CUIL debe tener 11 dígitos.'); extra.evidence.cuil = n; if (dni) extra.evidence.dni_upload = dni; }
++        const mail = em ? em.value.trim().toLowerCase() : '';
++        if (mail && !/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(mail)) return fail('El email del cliente no es válido (podés dejarlo vacío).');
++        if (mail) extra.evidence.email = mail;
+       }
+       if (cob) {
+         const cst = form.querySelector('[data-f="cst"]').value, amt = form.querySelector('[data-f="camt"]').value.replace(/\./g, '').replace(',', '.'), note = form.querySelector('[data-f="cnote"]').value.trim();
+diff --git a/src/online/supabase-api.js b/src/online/supabase-api.js
+index f43a4385fe9d257806a79a296850a56560dab732..8c3a686b00adb8d02f9a33e03a21862cc0bec66c 100644
+--- a/src/online/supabase-api.js
++++ b/src/online/supabase-api.js
+@@ -147,6 +147,7 @@ export class SupabaseApi {
+   async setStopOutcome(stop, outcome, note, reason, opId, extra) { const r = await this._rpc('set_stop_outcome', { p_stop: stop, p_outcome: outcome, p_note: note || null, p_reason: reason || null, p_op_id: opId, p_extra: extra || null }); this.sendCustomerQueued().catch(() => null); return r; }
+   async finalizeRoute(id, kmEnd) { return this._rpc('finalize_route', { p_route: id, p_km_end: kmEnd ?? null }); }
+   async arriveStop(stop, location, opId) { return this._rpc('arrive_stop', { p_stop: stop, p_location: location, p_op_id: opId }); }
++  async deliveryIdentityLookup(stopId, cuil, dni) { return this._rpc('delivery_identity_lookup', { p_stop: stopId, p_cuil: cuil || null, p_dni: dni || null }); }
+   async cuilHasDni(cuil) { return this._rpc('cuil_has_dni', { p_cuil: cuil }); }
+   // DNI en Storage privado: subir (chofer) y URL firmada de 60 s (solo identity_docs.view). Nunca URL pública.
+   async uploadIdentityDoc(cuil, file) {
+@@ -240,4 +241,6 @@ export class SupabaseApi {
+ 
+ // RC2: borradores, historial, configuración, auditoría, backup y dashboard
+ import { SupabaseAdmin } from './supabase-admin.js';
++import { SupabaseRC4 } from './supabase-rc4.js';
+ Object.assign(SupabaseApi.prototype, SupabaseAdmin);
++Object.assign(SupabaseApi.prototype, SupabaseRC4);
+diff --git a/src/online/users-ui.js b/src/online/users-ui.js
+index b79e3d7757c91eaf39672ed87be85d67d4054bd7..73c845d6f8dc45d9c108a642aebf3e8ed90a740a 100644
+--- a/src/online/users-ui.js
++++ b/src/online/users-ui.js
+@@ -1,6 +1,9 @@
+ // Admin → USUARIOS. Misma estética que la versión offline (cabecera oscura, tabla negra con línea cyan).
+ import { esc, fmtDate, fmtDay } from './util.js';
+-import { ROLES, ROLE_LABEL, hasPerm, compatibleResponsables, MODULES, MODULE_LABEL, roleModules } from '../../supabase/functions/_shared/rules.js';
++import { ROLES, ROLE_LABEL, hasPerm, compatibleResponsables, MODULES, MODULE_LABEL, roleModules, ROLE_PERMISSIONS, SENSITIVE_PERMISSIONS } from '../../supabase/functions/_shared/rules.js';
++import { PERM_GROUPS, PERM_LABEL } from './rc4-ui.js';
++// RC4: roles que tienen superior asignado y qué roles pueden ser su superior
++const SUP_ROLES = { OPERARIO_DEPOSITO: ['SUPERVISOR_DESPACHO', 'ADMIN'], SUPERVISOR_DESPACHO: ['ADMIN'] };
+ import { openAccount } from './account-ui.js';
+ 
+ const STATUS_LABEL = { ACTIVO: 'ACTIVO', DESHABILITADO: 'DESHABILITADO', ARCHIVADO: 'ARCHIVADO', INVITACION_PENDIENTE: 'INVITACIÓN PENDIENTE' };
+@@ -73,9 +76,11 @@ export class UsersPanel {
+         if (u.status === 'ACTIVO') act += b('reset_password', u.id, 'RESTABLECER CONTRASEÑA') + b('revoke_sessions', u.id, 'CERRAR SESIONES ABIERTAS') + (self ? '' : b('disable', u.id, 'DESHABILITAR'));
+         if (u.status === 'DESHABILITADO' || u.status === 'ARCHIVADO') act += b('reactivate', u.id, 'REACTIVAR');
+         if (!self && u.status !== 'ARCHIVADO') act += b('remove', u.id, 'ELIMINAR / ARCHIVAR', 'danger');
++        if (!self && u.status !== 'ARCHIVADO' && hasPerm(this.me, 'users.manage_permissions')) act += b('perms', u.id, 'PERMISOS');
+         act += '</div>';
+       }
+-      return '<tr class="' + (u.status === 'ARCHIVADO' ? 'dim' : '') + '" data-uid="' + u.id + '"><td><b>' + esc(u.full_name) + '</b>' + (self ? ' <span style="color:var(--muted);font-size:11.5px">(vos)</span>' : '') + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.phone || '—') + '</td><td>' + esc(ROLE_LABEL[u.role] || u.role) + '</td><td>' + esc(carr) + '</td>' +
++      return '<tr class="' + (u.status === 'ARCHIVADO' ? 'dim' : '') + '" data-uid="' + u.id + '"><td><b>' + esc(u.full_name) + '</b>' + (self ? ' <span style="color:var(--muted);font-size:11.5px">(vos)</span>' : '') +
++        (u.supervisor_user_id ? '<br><small class="usup" style="color:var(--muted)">Superior: ' + esc((this.users.find(x => x.id === u.supervisor_user_id) || {}).full_name || '—') + '</small>' : '') + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.phone || '—') + '</td><td>' + esc(ROLE_LABEL[u.role] || u.role) + '</td><td>' + esc(carr) + '</td>' +
+         '<td><span class="ust ' + u.status + '">' + esc(STATUS_LABEL[u.status] || u.status) + '</span></td><td>' + esc(fmtDate(u.last_sign_in_at)) + '</td><td>' + esc(fmtDay(u.created_at)) + '</td>' + (canManage ? '<td>' + act + '</td>' : '') + '</tr>';
+     }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No hay usuarios con esos filtros.</td></tr>';
+     this.el.querySelectorAll('#upBody [data-act]').forEach(btn => btn.addEventListener('click', () => this.doAction(btn.dataset.act, btn.dataset.id)));
+@@ -90,6 +95,7 @@ export class UsersPanel {
+     const ask = t => confirm(t);
+     switch (act) {
+       case 'edit': return this.openEdit(u);
++      case 'perms': return this.openPermissions(u);
+       case 'disable':
+         if (!ask('¿Deshabilitar a ' + u.full_name + '? No podrá iniciar sesión ni operar y se cierran sus sesiones abiertas. Su historial se conserva.')) return;
+         return this.withActiveRoutes(u, 'disable', u.full_name + ' quedó DESHABILITADO.');
+@@ -148,6 +154,26 @@ export class UsersPanel {
+       m.id = 'activeRoutesModal';
+     }
+   }
++  // RC4: permisos individuales como checkboxes (base del rol + otorgados − quitados). El servidor valida y audita cada cambio.
++  async openPermissions(u) {
++    let eff = []; try { eff = await this.api.userEffectivePermissions(u.id); } catch (e) { this.say(e.message, true); await this.reload(); return; }
++    const base = new Set(ROLE_PERMISSIONS[u.role] || []), effSet = new Set(eff), admin = this.me.role === 'ADMIN';
++    const sup = this.users.find(x => x.id === u.supervisor_user_id);
++    const body = '<p class="permhead" id="permHead"><b>' + esc(u.full_name) + '</b> · ' + esc(ROLE_LABEL[u.role] || u.role) + ' · Superior: ' + esc(sup ? sup.full_name : '—') + '</p>' +
++      '<p style="margin:0 0 8px;font-size:12px;color:var(--muted)">Tildado = permiso efectivo. <i>(rol)</i> = incluido en el rol. Los sensibles solo los otorga Admin General. Nadie modifica sus propios permisos.</p>' +
++      PERM_GROUPS.map(([g, ps]) => '<fieldset class="permgrp"><legend>' + esc(g) + '</legend>' + ps.map(p => '<label class="chk permchk"><input type="checkbox" data-perm="' + p + '"' + (effSet.has(p) ? ' checked' : '') +
++        (!admin && SENSITIVE_PERMISSIONS.includes(p) && !effSet.has(p) ? ' disabled' : '') + '> ' + esc(PERM_LABEL[p] || p) + (base.has(p) ? ' <i>(rol)</i>' : '') + (SENSITIVE_PERMISSIONS.includes(p) ? ' <small>· sensible</small>' : '') + '</label>').join('') + '</fieldset>').join('') +
++      '<label>Motivo (queda en auditoría)<input id="permWhy" placeholder="Ej.: encargado de plantillas"></label>';
++    const m = this.modal('PERMISOS DE ' + esc(u.full_name.toUpperCase()), body, async mm => {
++      const why = mm.querySelector('#permWhy').value || null, changes = [];
++      mm.querySelectorAll('[data-perm]').forEach(i => { const p = i.dataset.perm, on = i.checked; if (on === effSet.has(p)) return;
++        changes.push([p, on ? (base.has(p) ? 'ROLE' : 'GRANT') : (base.has(p) ? 'REVOKE' : 'ROLE')]); });
++      for (const [p, st] of changes) await this.api.setUserPermission(u.id, p, st, why);
++      this.say(changes.length ? 'Permisos de ' + u.full_name + ' actualizados (' + changes.length + ' cambio' + (changes.length > 1 ? 's' : '') + ', auditados).' : 'Sin cambios.');
++      await this.reload();
++    }, 'GUARDAR PERMISOS');
++    m.id = 'permModal';
++  }
+   modal(title, bodyHtml, onSave, saveLabel) {
+     const m = document.createElement('div'); m.className = 'umodal';
+     m.innerHTML = '<div class="udialog" role="dialog" aria-modal="true"><header><b>' + esc(title) + '</b></header><div class="body">' + bodyHtml + '<div class="up-msg err" id="umErr" hidden></div></div><footer><button class="btn ghost" type="button" id="umCancel">Cancelar</button>' + (onSave ? '<button class="btn dark" type="button" id="umSave">' + esc(saveLabel || 'GUARDAR') + '</button>' : '') + '</footer></div>';
+@@ -175,7 +201,7 @@ export class UsersPanel {
+       '<label>Rol<select id="nuRole"' + (self ? ' disabled title="No podés cambiar tu propio rol"' : '') + '>' + ROLES.map(r => '<option value="' + r + '"' + (r === role ? ' selected' : '') + '>' + esc(ROLE_LABEL[r]) + '</option>').join('') + '</select></label>' +
+       '<div id="nuCarrWrap"><span style="font-size:12.5px;color:var(--muted)">Transportista / empresa (obligatorio para el rol Transportista)</span>' + this.carrierChecks(u ? u.carriers : [], self) + '</div>' +
+       '<div id="nuAccess" class="nu-access"></div>' +
+-      '<label id="nuSupWrap">Superior que aprueba cambios de ruta interna<select id="nuSup"><option value="">— sin superior (avisa a Administración) —</option>' + sups.map(x => '<option value="' + x.id + '"' + (u && u.supervisor_user_id === x.id ? ' selected' : '') + '>' + esc(x.full_name) + '</option>').join('') + '</select></label>' +
++      '<label id="nuSupWrap"><span id="nuSupLbl">Superior que aprueba cambios de ruta interna</span><select id="nuSup"><option value="">— sin superior (avisa a Administración) —</option>' + sups.map(x => '<option value="' + x.id + '"' + (u && u.supervisor_user_id === x.id ? ' selected' : '') + '>' + esc(x.full_name) + '</option>').join('') + '</select></label>' +
+       (isNew ? '<label class="chk"><input type="checkbox" id="nuActive" checked> Activo</label><p style="margin:0;font-size:12px;color:var(--muted)">Se envía una invitación al email para que la persona cree su contraseña.</p>'
+         : '<p style="margin:0;font-size:12px;color:var(--muted)">Si cambiás el email, se cambia también el email de acceso.</p>'),
+       async mm => {
+@@ -184,6 +210,7 @@ export class UsersPanel {
+         const data = { full_name: mm.querySelector('#nuName').value, email: mm.querySelector('#nuEmail').value, phone: mm.querySelector('#nuPhone').value };
+         if (isNew) {
+           const nu = await this.api.action('create', { ...data, role: r, carriers: r === 'TRANSPORTISTA' ? carriers : [], active: mm.querySelector('#nuActive').checked, disabled_modules: this.disabledFrom(mm, r) });
++          const ns = SUP_ROLES[r] ? mm.querySelector('#nuSup').value : ''; if (ns && nu && nu.id) await this.api.setUserSupervisor(nu.id, ns);
+           this.say('Usuario creado: ' + nu.full_name + '. ' + (nu.status === 'INVITACION_PENDIENTE' ? 'Se envió la invitación a ' + nu.email + '.' : 'Quedó deshabilitado.'));
+         } else {
+           const payload = { user_id: u.id, ...data };
+@@ -191,13 +218,22 @@ export class UsersPanel {
+           if (r === 'TRANSPORTISTA_INTERNO') payload.supervisor_user_id = mm.querySelector('#nuSup').value || null;
+           payload.disabled_modules = this.disabledFrom(mm, r);
+           await this.api.action('edit', payload);
++          if (SUP_ROLES[r] && hasPerm(this.me, 'users.assign_supervisor') && !self) { const ns = mm.querySelector('#nuSup').value || null; if (ns !== (u.supervisor_user_id || null)) await this.api.setUserSupervisor(u.id, ns); }
+           this.say('Usuario actualizado: ' + data.full_name + '.');
+         }
+         await this.reload();
+       });
+     m.id = 'editModal';
+     const roleSel = m.querySelector('#nuRole');
+-    const sync = () => { m.querySelector('#nuCarrWrap').hidden = roleSel.value !== 'TRANSPORTISTA'; m.querySelector('#nuSupWrap').hidden = roleSel.value !== 'TRANSPORTISTA_INTERNO'; /* Superior: SOLO Transportista Interno */ this.renderAccess(m, roleSel.value, u ? u.disabled_modules || [] : []); };
++    const supOpts = r => SUP_ROLES[r] ? this.users.filter(x => SUP_ROLES[r].includes(x.role) && x.status === 'ACTIVO' && (!u || x.id !== u.id)) : sups;
++    const sync = () => {
++      const r = roleSel.value, withSup = r === 'TRANSPORTISTA_INTERNO' || (SUP_ROLES[r] && hasPerm(this.me, 'users.assign_supervisor'));
++      m.querySelector('#nuCarrWrap').hidden = r !== 'TRANSPORTISTA'; m.querySelector('#nuSupWrap').hidden = !withSup;
++      m.querySelector('#nuSupLbl').textContent = SUP_ROLES[r] ? 'Superior asignado (' + SUP_ROLES[r].map(x => ROLE_LABEL[x]).join(' o ') + ')' : 'Superior que aprueba cambios de ruta interna';
++      const sel = m.querySelector('#nuSup'), cur = sel.value || (u && u.supervisor_user_id) || '';
++      sel.innerHTML = '<option value="">' + (SUP_ROLES[r] ? '— sin superior (las solicitudes van a Admin General) —' : '— sin superior (avisa a Administración) —') + '</option>' + supOpts(r).map(x => '<option value="' + x.id + '"' + (x.id === cur ? ' selected' : '') + '>' + esc(x.full_name) + ' · ' + esc(ROLE_LABEL[x.role] || x.role) + '</option>').join('');
++      this.renderAccess(m, r, u ? u.disabled_modules || [] : []);
++    };
+     roleSel.addEventListener('change', sync); sync();
+   }
+   // Acceso por rol (RC1.1): el rol carga los módulos; Administración solo puede RESTRINGIR (nunca agregar)
+diff --git a/src/styles/online.css b/src/styles/online.css
+index 94a7edd760778f7ac870ef5e4929aaf462db5f45..ba5ca569025a1af1a374959a85c09c75f523a744 100644
+--- a/src/styles/online.css
++++ b/src/styles/online.css
+@@ -236,3 +236,54 @@ table.utable{border-collapse:separate;border-spacing:0;width:100%;min-width:1180
+ .rcst.CANCELLED_ROUTE_REVIEW{background:var(--err-bg);color:var(--err)}.rcst.CIANBOX_DIFFERENCE{background:var(--warn-bg);color:var(--warn)}.rcst.PENDING_CIANBOX{background:var(--cyan-soft);color:var(--teal)}
+ .rcst.RECONCILED{background:var(--ok-bg);color:var(--ok)}.rcst.REVERSED{background:var(--mist);color:var(--muted)}.rcst.OK{background:var(--mist);color:var(--ink)}
+ .finrev{border:1.5px solid var(--err);background:var(--err-bg);color:var(--err);border-radius:10px;padding:7px 12px;margin:8px 0;font-size:12.5px}
++/* ===== RC4 · Dashboards por rol (tomado de OK_Despacho_Dashboard_Admin_General_V4 / Superior_Despacho_V2) ===== */
++#usersPanel:has(> .rc4app){padding:0;background:#eef3f5}
++.rc4app{--bg:#eef3f5;--panel:#fff;--ink:#07151b;--muted:#667680;--line:#d9e3e8;--cyan:#10d7e7;--cyan2:#00b6c7;--soft:#f7fafb;--shadow:0 10px 28px rgba(7,21,27,.08);--radius:18px;
++  min-height:100vh;display:grid;grid-template-columns:250px minmax(0,1fr);background:var(--bg);color:var(--ink);font-family:Inter,Segoe UI,Arial,sans-serif}
++.rc4side{background:#06141b;color:#fff;padding:24px 18px;position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column}
++.rc4side .brand{display:flex;gap:12px;align-items:center;margin-bottom:24px}.rc4side .logo{width:54px;height:54px;border-radius:14px;object-fit:contain}
++.rc4side .brand b{font-size:18px;letter-spacing:1.5px}.rc4side .brand small{display:block;color:#9db0b8;margin-top:3px}
++.rc4side .nav a{display:flex;align-items:center;gap:10px;color:#cad7dc;text-decoration:none;padding:11px 14px;border-radius:12px;margin:3px 0;font-size:14px}
++.rc4side .nav a.active,.rc4side .nav a:hover{background:#0d2630;color:#fff}.rc4side .dot{width:9px;height:9px;border-radius:50%;background:var(--cyan);flex:none}
++.rc4side .nav .sub{margin:-2px 0 4px 26px}.rc4side .nav .sub a{padding:6px 12px;font-size:12.5px;color:#9db0b8}
++.rc4side .footer{margin-top:auto;padding-top:18px;color:#8ba1aa;font-size:12px}
++.rc4main{padding:22px 26px 40px;min-width:0}
++.rc4main .topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
++.rc4main .title h1{font-size:28px;margin:0;font-family:inherit;letter-spacing:0}.rc4main .title p{margin:5px 0 0;color:var(--muted)}
++.rc4main .topact{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
++.rc4main .userchip{background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 14px;box-shadow:var(--shadow);font-size:13px}.rc4main .userchip span{color:var(--muted)}
++.rc4main .tbtn{background:#06141b;color:#fff;border:0;border-radius:12px;padding:10px 12px;font-weight:700;cursor:pointer}
++.rc4main .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}
++.rc4main .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;min-width:0}
++.rc4main .kpi{grid-column:span 3}.rc4main .kpi .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px}.rc4main .kpi .value{font-size:30px;font-weight:800;margin-top:8px}.rc4main .kpi .value.small{font-size:22px}.rc4main .kpi .mini{font-size:12px;color:var(--muted);margin-top:4px}
++.rc4main .span8{grid-column:span 8}.rc4main .span7{grid-column:span 7}.rc4main .span6{grid-column:span 6}.rc4main .span5{grid-column:span 5}.rc4main .span4{grid-column:span 4}.rc4main .span12{grid-column:span 12}
++.rc4main .section-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.rc4main .section-title h2{font-size:17px;margin:0;font-family:inherit;letter-spacing:0}
++.rc4main .tag{font-size:11px;background:#e9fbfd;color:#007a87;border:1px solid #b9eff3;padding:5px 8px;border-radius:999px;font-weight:700;white-space:nowrap}
++.rc4main .tscroll{overflow-x:auto}
++.rc4main .table{width:100%;border-collapse:collapse}.rc4main .table th,.rc4main .table td{padding:11px 10px;border-bottom:1px solid #e7eef1;text-align:left;font-size:13px;vertical-align:top}.rc4main .table th{color:#61717a;font-size:11px;text-transform:uppercase}
++.rc4main .table tr.dim td{opacity:.6}
++.rc4main .status{font-size:11px;border-radius:999px;padding:4px 8px;font-weight:700;white-space:nowrap}.rc4main .ok{background:#e8f7ef;color:#0d7a54}.rc4main .warn{background:#fff4dd;color:#9a6500}.rc4main .bad{background:#fdecea;color:#a12a20}.rc4main .info{background:#e8f8fb;color:#0b7680}
++.rc4main .alerts{display:grid;gap:10px}.rc4main .alert{display:flex;justify-content:space-between;align-items:center;padding:12px 13px;background:var(--soft);border:1px solid var(--line);border-radius:12px;text-decoration:none;color:inherit}
++.rc4main .alert.hot{border-color:#f1c27d;background:#fff8ea}.rc4main .alert b{font-size:13px}.rc4main .alert span{font-size:12px;color:var(--muted)}
++.rc4main .btn{border:0;border-radius:12px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}.rc4main .btn.primary{background:var(--cyan);color:#06141b}.rc4main .btn.dark{background:#06141b;color:#fff}.rc4main .btn.soft{background:#edf3f5;color:#112028;border:1px solid var(--line)}.rc4main .btn.wide{display:block;text-align:center;margin-top:12px}
++.rc4main .permission{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid #e8eef1}.rc4main .permission:last-child{border-bottom:0}.rc4main .permission .txt b{font-size:13px}.rc4main .permission .txt small{display:block;color:var(--muted);margin-top:3px}
++.rc4main .switch{position:relative;width:44px;height:24px;flex:none}.rc4main .switch input{display:none}.rc4main .slider{position:absolute;inset:0;background:#cad4d9;border-radius:999px}.rc4main .slider:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.2)}.rc4main .switch input:checked + .slider{background:var(--cyan2)}.rc4main .switch input:checked + .slider:before{transform:translateX(20px)}
++.rc4main .config-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.rc4main .config-box{padding:14px;border:1px solid var(--line);border-radius:14px;background:#fbfdfe}.rc4main .config-box.off{opacity:.55}.rc4main .config-box h3{font-size:13px;margin:0 0 6px;font-family:inherit}.rc4main .config-box p{font-size:12px;color:var(--muted);margin:0 0 10px}
++.rc4main .small-btn{padding:8px 10px;border-radius:9px;border:1px solid #c9d7dc;background:#fff;font-weight:700;font-size:12px;color:inherit;text-decoration:none;display:inline-block}
++.rc4main .hero{background:linear-gradient(120deg,#07151b,#10323c);color:#fff}.rc4main .hero p{color:#b7c9cf}.rc4main .hero .tag{background:#0c3d49;border-color:#165768;color:#7af0f7}
++.rc4main .hero .table th{color:#a8c0c8}.rc4main .hero .table td{color:#fff;border-color:#1d3a44}.rc4main .hero .config-box{background:#0c2730;border-color:#1d3a44}.rc4main .hero .config-box p{color:#a8c0c8}
++.rc4main .heroact{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.rc4main .steps{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:10px;margin-top:16px}
++.rc4main .note{font-size:12px;color:var(--muted);line-height:1.5}
++.rc4main .kmcfg{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:12px}.rc4main .kmcfg>div,.rc4main .kmcfg>label{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:12.5px;display:flex;flex-direction:column;gap:4px}
++.rc4main .kmcfg span{color:var(--muted)}.rc4main .kmcfg.edit label{flex-direction:row;align-items:center;gap:8px;flex-wrap:wrap}
++.rc4main .reqform{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}.rc4main .reqform label{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:4px}.rc4main .reqform label.wide{flex:1 1 260px}
++.rc4main .reqform input,.rc4main .reqform select,.rc4main .ed{border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;background:#fff}
++.rc4main .uact{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
++.kmrules-in-config{margin-top:14px}
++@media(max-width:1000px){.rc4app{grid-template-columns:1fr}.rc4side{position:relative;height:auto}.rc4main .kpi,.rc4main .span4,.rc4main .span5,.rc4main .span6,.rc4main .span7,.rc4main .span8,.rc4main .span12{grid-column:span 12}.rc4main .config-grid,.rc4main .steps{grid-template-columns:1fr}}
++.permgrp{border:1px solid var(--line);border-radius:10px;padding:6px 10px 8px;margin:0 0 8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:2px 10px}
++.permgrp legend{font:700 11px var(--display);letter-spacing:.06em;padding:0 4px}.permchk{font-size:12.5px}.permchk i,.permchk small{color:var(--muted)}
++.rc4main b,.rc4main strong{font-family:inherit;font-size:inherit;font-weight:700;letter-spacing:inherit;line-height:inherit}
++.rc4main .kpi .value,.rc4main .title h1{font-family:inherit}
++body.no-publish #btnPublish{display:none!important}
++.drv-mailhint{display:block;font-size:11.5px;color:var(--teal);margin:-2px 0 4px}
+diff --git a/supabase/functions/_shared/customer-email.js b/supabase/functions/_shared/customer-email.js
+index 3189b75181866ee0f27cfb910e10eef3ad736746..0dd918024787e73029e4d14e8350007f471245ac 100644
+--- a/supabase/functions/_shared/customer-email.js
++++ b/supabase/functions/_shared/customer-email.js
+@@ -2,6 +2,66 @@
+ // Nunca incluyen DNI, CUIL, GPS, firma ni notas internas. Sin hora estimada exacta.
+ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+ const F = 'font-family:Arial,Helvetica,sans-serif;';
++// RC4.1: Recibido Conforme (comprobante de entrega total). Usa la instantánea INMUTABLE del comprobante.
++// Diseño transaccional OK Accesorios: tablas + estilos inline (Gmail, Outlook, Apple Mail, móviles), sin CSS externo ni scripts.
++// Logo: ícono oficial ya publicado (<APP_URL>/icons/icon-192.png), sin modificar. Si el cliente bloquea imágenes queda el texto "OK ACCESORIOS".
++// Privacidad: nunca incluye DNI, CUIL, firma, GPS, foto de DNI ni notas internas.
++export const SITE_URL = 'https://www.okaccesorios.com.ar';
++export function receiptEmail({ receipt, stop, inlineLogo }) {
++  const s = receipt.snapshot || {}, orders = (s.order_numbers || stop.order_numbers || []).filter(Boolean).join(' + ');
++  const client = s.client_name || stop.client_name || '';
++  const when = s.delivered_at ? new Date(s.delivered_at).toLocaleString('es-AR', { timeZone: 'America/Argentina/Mendoza', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
++  const subject = 'OK Accesorios · Recibido conforme ' + s.receipt_number;
++  // Logo horizontal OFICIAL como imagen INLINE (CID): viaja dentro del mismo correo (no depende del sitio publicado ni de APP_URL).
++  // Algunos clientes pueden igualmente no mostrar imágenes inline: queda el alt "OK ACCESORIOS". Sin bytes del logo, solo el texto de marca.
++  const logo = inlineLogo && inlineLogo.content && inlineLogo.content_id ? 'cid:' + inlineLogo.content_id : '';
++  // Proporción exacta del original (1536×201). El logo es azul/naranja sobre transparente: va sobre una placa blanca para que se lea en el fondo azul oscuro (sin cambiar sus colores).
++  const LW = 1536, LH = 201;
++  // el texto alternativo (imágenes bloqueadas) se escala a la altura de cada logo para que no se corte
++  const img = w => { const h = Math.round(w * LH / LW), afs = Math.max(9, Math.min(16, Math.floor(h * 0.5)));
++    return '<img src="' + esc(logo) + '" width="' + w + '" height="' + h + '" alt="OK ACCESORIOS" style="display:block;width:' + w + 'px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none;' + F + 'font-size:' + afs + 'px;line-height:' + h + 'px;font-weight:bold;letter-spacing:1px;color:#1e3a8a;">'; };
++  const plate = (w, pad) => '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:100%;"><tr><td bgcolor="#ffffff" style="background:#ffffff;border-radius:10px;padding:' + pad + ';">' + img(w) + '</td></tr></table>';
++  const textBrand = fs => '<div style="' + F + 'font-size:' + fs + 'px;font-weight:bold;letter-spacing:2px;color:#ffffff;">OK <span style="color:#16d6e5;">ACCESORIOS</span></div>';
++  const brand = (w, pad, fs) => logo ? plate(w, pad) : textBrand(fs);
++  const site = '<a href="' + SITE_URL + '" target="_blank" rel="noopener" style="color:#16d6e5;text-decoration:underline;font-weight:bold;">' + SITE_URL + '</a>';
++  const rows = [['Comprobante', s.receipt_number], ['Cliente', client], ['Pedido', orders], ['Recibió', s.receiver_name], ['Fecha y hora', when], ['Estado', 'Recibido conforme']];
++  const row = ([k, v], last) => '<tr><td valign="top" style="' + F + 'padding:11px 14px;font-size:13px;color:#667680;width:36%;' + (last ? '' : 'border-bottom:1px solid #e7eef1;') + '">' + esc(k) + '</td>' +
++    '<td valign="top" style="' + F + 'padding:11px 14px;font-size:14px;color:#07151b;font-weight:bold;' + (last ? '' : 'border-bottom:1px solid #e7eef1;') + '">' +
++    (k === 'Estado' ? '<span style="color:#0d7a54;">&#10004; ' + esc(v) + '</span>' : esc(v || '—')) + '</td></tr>';
++  const html = '<!doctype html><html lang="es" xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
++    '<meta http-equiv="Content-Type" content="text/html; charset=utf-8"><meta name="x-apple-disable-message-reformatting"><title>' + esc(subject) + '</title></head>' +
++    '<body style="margin:0;padding:0;background:#eef2f4;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">' +
++    '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#eef2f4;">Tu pedido ' + esc(orders) + ' fue entregado correctamente.</div>' +
++    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eef2f4" style="background:#eef2f4;"><tr><td align="center" style="padding:20px 10px;">' +
++    '<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->' +
++    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #d8e1e5;border-radius:14px;" bgcolor="#ffffff">' +
++    // encabezado azul oscuro con logo y título
++    '<tr><td bgcolor="#0b1f2e" style="background:#0b1f2e;border-radius:14px 14px 0 0;padding:22px 24px 20px;border-bottom:4px solid #16d6e5;">' + brand(240, '10px 14px', 15) +
++    '<div style="' + F + 'font-size:30px;line-height:36px;font-weight:bold;color:#ffffff;margin-top:16px;">Recibido Conforme</div></td></tr>' +
++    // saludo
++    '<tr><td style="' + F + 'padding:22px 24px 6px;font-size:15px;line-height:23px;color:#07151b;">Hola <b>' + esc(client) + '</b>, registramos correctamente la entrega de tu pedido.</td></tr>' +
++    // bloque verde
++    '<tr><td style="padding:14px 24px 4px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#e8f7ef" style="background:#e8f7ef;border:1px solid #b7e4cc;border-left:5px solid #0f8a5f;border-radius:10px;">' +
++    '<tr><td style="' + F + 'padding:14px 16px;"><div style="font-size:16px;line-height:22px;font-weight:bold;color:#0d7a54;">&#10004; Entrega confirmada</div>' +
++    '<div style="font-size:14px;line-height:20px;color:#1f5f45;margin-top:3px;">Tu pedido fue entregado correctamente.</div></td></tr></table></td></tr>' +
++    // tarjeta de datos
++    '<tr><td style="padding:16px 24px 4px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #d9e3e8;border-radius:10px;border-collapse:separate;">' +
++    rows.map((r, i) => row(r, i === rows.length - 1)).join('') + '</table></td></tr>' +
++    '<tr><td style="' + F + 'padding:14px 24px 24px;font-size:13px;line-height:20px;color:#667680;">Este correo confirma la recepción conforme de la mercadería.</td></tr>' +
++    // pie: logo horizontal a la izquierda y sitio a la derecha; en pantallas angostas se apilan (bloques inline-block "fluidos"), Outlook usa dos celdas fijas
++    '<tr><td bgcolor="#07151b" style="background:#07151b;border-radius:0 0 14px 14px;padding:14px 18px;font-size:0;line-height:0;" align="left">' +
++    '<!--[if mso]><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td valign="middle" width="190"><![endif]-->' +
++    '<div style="display:inline-block;vertical-align:middle;max-width:190px;width:100%;padding:4px 0;">' + brand(160, '7px 10px', 12) + '</div>' +
++    '<!--[if mso]></td><td valign="middle" align="right"><![endif]-->' +
++    '<div style="display:inline-block;vertical-align:middle;width:100%;max-width:372px;padding:4px 0;text-align:right;' + F + 'font-size:13px;line-height:18px;">' + site + '</div>' +
++    '<!--[if mso]></td></tr></table><![endif]-->' +
++    '</td></tr></table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>';
++  const text = 'RECIBIDO CONFORME\n\nHola ' + client + ', registramos correctamente la entrega de tu pedido.\n\nEntrega confirmada: tu pedido fue entregado correctamente.\n\n' +
++    rows.map(([k, v]) => k + ': ' + (v || '—')).join('\n') + '\n\nEste correo confirma la recepción conforme de la mercadería.\n\nOK Accesorios · ' + SITE_URL;
++  // el logo va como adjunto inline con el MISMO content_id que el src="cid:…" del HTML
++  const attachments = logo ? [{ filename: inlineLogo.filename, content: inlineLogo.content, content_type: inlineLogo.content_type, content_id: inlineLogo.content_id }] : undefined;
++  return attachments ? { subject, html, text, attachments } : { subject, html, text };
++}
+ export function customerEmail({ kind, stop }) {
+   const orders = (stop.order_numbers || []).filter(Boolean).join(' + ');
+   const subject = kind === 'ON_THE_WAY' ? 'OK Accesorios · Tu pedido va en camino' : kind === 'PARTIAL' ? 'OK Accesorios · Entregamos parte de tu pedido' : 'OK Accesorios · Tu pedido fue entregado';
+@@ -15,10 +75,13 @@ export function customerEmail({ kind, stop }) {
+   return { subject, html, text: subject + '\n' + body.replace(/<[^>]+>/g, '') };
+ }
+ /** store: { listJobs(q), stopFor(job), updateJob(id, patch) } — idempotente por job; una falla no revierte la entrega */
+-export async function sendCustomerEmails({ store, provider, onlyIds }) {
++export async function sendCustomerEmails({ store, provider, onlyIds, inlineLogo }) {   const out = [];
+   for (const j of await store.listJobs({ statuses: ['QUEUED', 'ERROR'], ids: onlyIds })) {
+-    const mail = customerEmail({ kind: j.kind, stop: await store.stopFor(j) });
++    const stop = await store.stopFor(j);
++    let mail;
++    try { mail = j.kind === 'RECIBIDO_CONFORME' ? receiptEmail({ receipt: await store.receiptFor(j), stop, inlineLogo }) : customerEmail({ kind: j.kind, stop }); }
++    catch (e) { await store.updateJob(j.id, { status: 'ERROR', error: 'COMPROBANTE: ' + String(e.message || e), retry_count: (j.retry_count || 0) + 1 }); out.push({ id: j.id, status: 'ERROR' }); continue; }
+     try { const r = await provider.send({ to: j.recipient, idempotencyKey: j.idempotency_key, ...mail }); await store.updateJob(j.id, { status: 'SENT', sent_at: new Date().toISOString(), provider_id: r && r.id, error: null }); out.push({ id: j.id, status: 'SENT' }); }
+     catch (e) { await store.updateJob(j.id, { status: 'ERROR', error: String(e.message || e), retry_count: (j.retry_count || 0) + 1 }); out.push({ id: j.id, status: 'ERROR' }); }
+   }
+diff --git a/supabase/functions/_shared/rules.js b/supabase/functions/_shared/rules.js
+index 53cba5314ace6c3015ae481b4d84ddd1e555ce76..e5eae948656827a33c004c12dbcb9632512a0f46 100644
+--- a/supabase/functions/_shared/rules.js
++++ b/supabase/functions/_shared/rules.js
+@@ -2,10 +2,14 @@
+ // Edge Functions (Deno). La base de datos aplica las MISMAS reglas en SQL (migración Fase 1):
+ // la pantalla nunca es la única defensa.
+ 
+-export const ROLES = ['ADMIN', 'DESPACHO', 'TRANSPORTISTA', 'TRANSPORTISTA_INTERNO', 'SOLO_LECTURA'];
++// RC4: DESPACHO queda por compatibilidad (los usuarios existentes migran a SUPERVISOR_DESPACHO); no se ofrece para usuarios nuevos.
++export const ROLES = ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO', 'DESPACHO', 'TRANSPORTISTA', 'TRANSPORTISTA_INTERNO', 'SOLO_LECTURA'];
++export const ASSIGNABLE_ROLES = ROLES.filter(r => r !== 'DESPACHO');
+ 
+ export const ROLE_LABEL = {
+-  ADMIN: 'Administración',
++  ADMIN: 'Admin General',
++  SUPERVISOR_DESPACHO: 'Superior Despacho',
++  OPERARIO_DEPOSITO: 'Operario Depósito',
+   DESPACHO: 'Despacho',
+   TRANSPORTISTA: 'Transportista',
+   TRANSPORTISTA_INTERNO: 'Transportista interno',
+@@ -21,12 +25,29 @@ export const PERMISSIONS = [
+   'signatures.view', 'audit.view', 'settings.manage',
+   'can_approve_internal_route_changes',
+   'can_view_commercial_transport_reports', 'can_manage_commercial_transport_reports',
+-  'routes.manage_all_drafts', 'identity_docs.view', 'collections.manage', 'vehicles.manage', 'credit_notes.manage'
++  'routes.manage_all_drafts', 'identity_docs.view', 'collections.manage', 'vehicles.manage', 'credit_notes.manage',
++  // RC4: permisos granulares
++  'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicle_mileage.edit', 'vehicle_mileage.rules_manage', 'vehicle_mileage.resolve_alerts',
++  'columns.view', 'columns.manage_defaults', 'columns.manage_templates', 'columns.apply_global',
++  'routes.edit', 'routes.cancel', 'routes.reassign', 'routes.view_team', 'routes.view_own',
++  'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team',
++  'requests.create', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team', 'requests.reassign',
++  'users.assign_supervisor', 'users.manage_permissions', 'vehicles.view', 'vehicles.service_manage', 'backup.manage'
+ ];
++// Solo Admin General puede otorgarlos (mismo criterio que public.is_sensitive_permission)
++export const SENSITIVE_PERMISSIONS = ['users.manage', 'users.manage_permissions', 'users.assign_supervisor', 'settings.manage', 'credit_notes.manage', 'audit.view', 'backup.manage',
++  'identity_docs.view', 'can_manage_commercial_transport_reports', 'routes.manage_all_drafts', 'columns.apply_global'];
+ 
+ export const ROLE_PERMISSIONS = {
+   ADMIN: PERMISSIONS.slice(),
+-  DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view'],
++  // RC4.1: el Superior ve SU EQUIPO por defecto (routes.view_team); "todas las hojas" (routes.view_all) solo por permiso individual de Admin
++  SUPERVISOR_DESPACHO: ['routes.create', 'routes.edit', 'routes.publish', 'routes.cancel', 'routes.assign', 'routes.reassign', 'routes.view_team', 'routes.view_own',
++    'internal_routes.manage', 'locations.view', 'signatures.view', 'collections.manage', 'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team',
++    'requests.create', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team',
++    'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicle_mileage.resolve_alerts', 'vehicles.view'],
++  OPERARIO_DEPOSITO: ['routes.create', 'routes.view_own', 'locations.view', 'drafts.create', 'drafts.view_own', 'requests.create', 'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicles.view'],
++  DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view',
++    'columns.view', 'vehicle_mileage.view', 'vehicles.view', 'drafts.create', 'drafts.view_own', 'requests.create'],
+   TRANSPORTISTA: ['routes.view_assigned', 'deliveries.update', 'deliveries.capture_signature'],
+   TRANSPORTISTA_INTERNO: ['routes.view_assigned', 'internal_routes.use', 'deliveries.update', 'deliveries.capture_signature'],
+   SOLO_LECTURA: ['routes.view_all']
+@@ -38,21 +59,28 @@ export const STATUS = ['ACTIVO', 'DESHABILITADO', 'ARCHIVADO', 'INVITACION_PENDI
+ export const MODULES = ['DESPACHO', 'MIS_HOJAS', 'USUARIOS', 'INFORMES', 'APROBACIONES', 'CONFIGURACION', 'AUDITORIA'];
+ export const MODULE_LABEL = { DESPACHO: 'Despacho general', MIS_HOJAS: 'Mis hojas publicadas', USUARIOS: 'Usuarios', INFORMES: 'Informes', APROBACIONES: 'Aprobaciones', CONFIGURACION: 'Configuración', AUDITORIA: 'Auditoría' };
+ export const MODULE_PERMISSIONS = {
+-  DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view', 'routes.manage_all_drafts', 'collections.manage'],
++  DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view', 'routes.manage_all_drafts', 'collections.manage',
++    'routes.edit', 'routes.cancel', 'routes.reassign', 'routes.view_team', 'routes.view_own', 'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team',
++    'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicles.view', 'requests.create'],
+   MIS_HOJAS: ['routes.view_assigned', 'deliveries.update', 'deliveries.capture_signature', 'internal_routes.use'],
+-  USUARIOS: ['users.view', 'users.manage'],
++  USUARIOS: ['users.view', 'users.manage', 'users.assign_supervisor', 'users.manage_permissions'],
+   INFORMES: ['can_view_commercial_transport_reports', 'can_manage_commercial_transport_reports'],
+-  APROBACIONES: ['can_approve_internal_route_changes'],
+-  CONFIGURACION: ['settings.manage', 'vehicles.manage', 'locations.manage', 'credit_notes.manage'],
++  APROBACIONES: ['can_approve_internal_route_changes', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team', 'requests.reassign'],
++  CONFIGURACION: ['settings.manage', 'vehicles.manage', 'locations.manage', 'credit_notes.manage', 'columns.manage_defaults', 'columns.manage_templates', 'columns.apply_global',
++    'vehicle_mileage.edit', 'vehicle_mileage.rules_manage', 'vehicle_mileage.resolve_alerts', 'vehicles.service_manage', 'backup.manage'],
+   AUDITORIA: ['audit.view', 'identity_docs.view']
+ };
+ export const moduleOf = perm => MODULES.find(m => MODULE_PERMISSIONS[m].includes(perm)) || null;
+ export const roleModules = role => MODULES.filter(m => MODULE_PERMISSIONS[m].some(p => (ROLE_PERMISSIONS[role] || []).includes(p)));
+-export const userModules = user => (user && user.status === 'ACTIVO') ? roleModules(user.role).filter(m => !(user.disabled_modules || []).includes(m)) : [];
++export const effectivePermissions = user => PERMISSIONS.filter(p => hasPerm(user, p));
++export const userModules = user => (user && user.status === 'ACTIVO') ? MODULES.filter(m => MODULE_PERMISSIONS[m].some(p => hasPerm(user, p))) : [];
+ 
++// Permiso efectivo = (rol + otorgados) − quitados − módulos restringidos (igual que public.user_has_perm)
+ export function hasPerm(user, perm) {
+   if (!user || user.status !== 'ACTIVO') return false;
+-  if (!(ROLE_PERMISSIONS[user.role] || []).includes(perm)) return false;
++  const ov = (user.permission_overrides || {})[perm];
++  if (ov === false) return false;
++  if (ov !== true && !(ROLE_PERMISSIONS[user.role] || []).includes(perm)) return false;
+   const m = moduleOf(perm);
+   return !(m && (user.disabled_modules || []).includes(m));
+ }
+diff --git a/supabase/functions/backup/inventory.js b/supabase/functions/backup/inventory.js
+index dbab9fbeddf8b652614c0f2ab45855de6a30e88f..93a9bd8bde9ddd570bd4f7009cabf7493b20b4b6 100644
+--- a/supabase/functions/backup/inventory.js
++++ b/supabase/functions/backup/inventory.js
+@@ -5,14 +5,14 @@ export const BACKUP_TABLES = [
+   'roles', 'permissions', 'role_permissions', 'module_permissions', 'carriers', 'app_settings', 'financial_rules', 'dispatch_settings', 'notification_settings',
+   'internal_route_notification_settings', 'report_settings', 'transport_cost_settings', 'sheet_templates', 'client_locations',
+   // identidades (profiles.id → auth.users: ver scripts/restore_backup.mjs)
+-  'profiles', 'user_carriers', 'user_passkeys', 'webauthn_challenges',
++  'profiles', 'user_carriers', 'user_passkeys', 'webauthn_challenges', 'user_permission_overrides',
+   // vehículos
+-  'vehicles', 'vehicle_services', 'vehicle_service_alerts',
++  'mileage_settings', 'vehicles', 'vehicle_services', 'vehicle_service_alerts', 'vehicle_mileage_alerts',
+   // importaciones y financiación
+   'source_imports', 'financial_document_groups', 'financial_document_parts', 'financing_plans',
+   // hojas
+   'routing_rules', 'route_sequences', 'route_number_counters', 'routes', 'route_drafts', 'route_stops', 'route_change_events', 'route_approval_requests', 'route_return_requests',
+-  'route_financing_snapshots', 'order_reservations', 'shipping_amount_confirmations', 'stop_outcome_ops', 'stop_evidence', 'customer_identity_docs', 'route_pdfs',
++  'route_financing_snapshots', 'order_reservations', 'shipping_amount_confirmations', 'stop_outcome_ops', 'stop_evidence', 'delivery_receipts', 'customer_identity_docs', 'route_pdfs',
+   // NOC
+   'credit_notes', 'credit_note_applications', 'credit_note_events',
+   // informes y emails
+diff --git a/supabase/functions/internal-approvals/handler.js b/supabase/functions/internal-approvals/handler.js
+index 9fa551b932bbbbc480ae89b9cee0c9576305e3c1..1cca26fd1613f18e9a1d2d15f5880e4dd9bdf21f 100644
+--- a/supabase/functions/internal-approvals/handler.js
++++ b/supabase/functions/internal-approvals/handler.js
+@@ -4,7 +4,7 @@ import { sendQueuedEmails } from '../_shared/internal-route.js';
+ import { sendCustomerEmails } from '../_shared/customer-email.js';
+ 
+ import { json, withCors } from '../_shared/http.js';
+-/** deps: { cronSecret, getUserFromJwt, getProfile, store (ver sendQueuedEmails), provider, appUrl, getSettings, setSettings(s), audit } */
++/** deps: { cronSecret, getUserFromJwt, getProfile, store (ver sendQueuedEmails), provider, appUrl, inlineLogo (logo del Recibido Conforme por CID), getSettings, setSettings(s), audit } */
+ export const handle = withCors(handleRaw);
+ async function handleRaw(req, deps) {
+   if (req.method === 'OPTIONS') return json(200, { ok: true });
+@@ -26,7 +26,7 @@ async function handleRaw(req, deps) {
+   }
+   if (action === 'send_customer_queued' || action === 'retry_customer') {
+     if (me && !(hasPerm(me, 'settings.manage') || hasPerm(me, 'routes.view_all'))) return json(403, { error: 'Sin permiso.' });
+-    return json(200, { results: await sendCustomerEmails({ store: deps.customerStore, provider: deps.provider, onlyIds: action === 'retry_customer' ? body.job_ids : undefined }) });
++    return json(200, { results: await sendCustomerEmails({ store: deps.customerStore, provider: deps.provider, inlineLogo: deps.inlineLogo, onlyIds: action === 'retry_customer' ? body.job_ids : undefined }) });
+   }
+   // Email diario de PDFs de hojas (default 18:00 Mendoza): cola idempotente hoja+versión+destinatario; adjunta el PDF guardado
+   if (action === 'send_sheet_emails') {
+diff --git a/supabase/functions/internal-approvals/handler.test.js b/supabase/functions/internal-approvals/handler.test.js
+index 97b39b309007b2d4e2d9fcbd476a002fc5a2c75b..ea24bcb7354722a5d693709e06085978cbf275de 100644
+--- a/supabase/functions/internal-approvals/handler.test.js
++++ b/supabase/functions/internal-approvals/handler.test.js
+@@ -76,3 +76,112 @@ Deno.test('RC2-17 reenviar invitación sin crear otro usuario de Auth (fallback
+   const r2 = await h(new Request('https://x', { method: 'POST', headers: { authorization: 'Bearer t' }, body: JSON.stringify({ action: 'resend_invite', user_id: 'inv' }) }), d2);
+   eq(r2.status, 429); eq((await r2.json()).code, 'EMAIL_RATE_LIMIT');
+ });
++
++Deno.test('RC4.1 Recibido Conforme: desde el comprobante guardado, sin DNI/CUIL; falla del proveedor → ERROR con reintento; reintento OK con la misma clave idempotente', async () => {
++  const { receiptEmail, sendCustomerEmails } = await import('../_shared/customer-email.js');
++  const receipt = { receipt_number: 'RC-01-000123-001', snapshot: { receipt_number: 'RC-01-000123-001', client_name: 'Cliente Mail', order_numbers: ['95001'], receiver_name: 'Laura Gómez', delivered_at: '2026-10-13T15:00:00Z' } };
++  const m = receiptEmail({ receipt, stop: { client_name: 'Cliente Mail', order_numbers: ['95001'] } });
++  ok(m.subject.includes('RC-01-000123-001') && m.html.includes('Laura Gómez') && m.html.includes('95001') && !/cuil|dni/i.test(m.html));
++  const jobs = [{ id: 'r1', kind: 'RECIBIDO_CONFORME', recipient: 'cliente@viejo.com', idempotency_key: 'route|stop|RECIBIDO_CONFORME', status: 'QUEUED', retry_count: 0 }];
++  const updates = [], keys = []; let fail = true;
++  const store = { listJobs: async () => jobs.filter(j => j.status !== 'SENT'), stopFor: async () => ({ client_name: 'Cliente Mail', order_numbers: ['95001'] }), receiptFor: async () => receipt,
++    updateJob: async (id, patch) => { updates.push(patch); Object.assign(jobs[0], patch); } };
++  const provider = { send: async x => { keys.push(x.idempotencyKey); if (fail) throw new Error('proveedor caído'); return { id: 'msg-1' }; } };
++  await sendCustomerEmails({ store, provider });
++  eq(jobs[0].status, 'ERROR'); eq(jobs[0].retry_count, 1); ok(jobs[0].error.includes('proveedor caído'));
++  fail = false; await sendCustomerEmails({ store, provider });
++  eq(jobs[0].status, 'SENT'); eq(jobs[0].provider_id, 'msg-1'); eq(keys, ['route|stop|RECIBIDO_CONFORME', 'route|stop|RECIBIDO_CONFORME']);
++  await sendCustomerEmails({ store, provider }); eq(keys.length, 2);   // ya enviado: no se vuelve a mandar
++});
++Deno.test('RC4.1 Sin comprobante guardado: el job queda en ERROR (no se inventa uno) y la entrega no se toca', async () => {
++  const { sendCustomerEmails } = await import('../_shared/customer-email.js');
++  const jobs = [{ id: 'r2', kind: 'RECIBIDO_CONFORME', recipient: 'a@b.com', idempotency_key: 'k2', status: 'QUEUED', retry_count: 0 }];
++  const store = { listJobs: async () => jobs.filter(j => j.status !== 'SENT'), stopFor: async () => ({ client_name: 'X' }), receiptFor: async () => { throw new Error('no existe'); }, updateJob: async (id, p) => Object.assign(jobs[0], p) };
++  let sent = 0; await sendCustomerEmails({ store, provider: { send: async () => { sent++; return { id: 'x' }; } } });
++  eq(jobs[0].status, 'ERROR'); ok(jobs[0].error.startsWith('COMPROBANTE')); eq(sent, 0);
++});
++
++Deno.test('RC4.1 · Diseño Recibido Conforme: asunto, logo oficial, datos, link al sitio, privacidad, acentos, móvil y sin imágenes', async () => {
++  const { receiptEmail, SITE_URL } = await import('../_shared/customer-email.js');
++  const receipt = { receipt_number: 'RC-01-000123-001', snapshot: { receipt_number: 'RC-01-000123-001', client_name: 'Ferretería Ñandú', order_numbers: ['95001', '95002'], receiver_name: 'José Pérez',
++    delivered_at: '2026-10-13T15:05:00Z', carrier_id: 'CT-ESTE' } };
++  const stop = { client_name: 'Ferretería Ñandú', order_numbers: ['95001', '95002'], receiver_cuil: '20301112223', receiver_dni: '30111222', lat: -32.89, lon: -68.84, outcome_note: 'NOTA INTERNA' };
++  const L = await import('../_shared/ok-accesorios-logo.js'); const { inlineLogoFrom } = await import('../_shared/resend-body.js');
++  const m = receiptEmail({ receipt, stop, inlineLogo: inlineLogoFrom(L) });
++  // 1. asunto
++  eq(m.subject, 'OK Accesorios · Recibido conforme RC-01-000123-001');
++  // 2. logo HORIZONTAL oficial en encabezado y pie (nunca el ícono cuadrado de la app), con proporción exacta 1536×201 y alt textual
++  eq((m.html.match(/<img src="cid:ok-accesorios-logo"/g) || []).length, 2); ok(m.html.includes('alt="OK ACCESORIOS"'));
++  ok(!/icon-192|icon-512|apple-touch|\/logo\.png/.test(m.html));
++  ok(m.html.includes('width="240" height="31"') && m.html.includes('width="160" height="21"') && m.html.includes('max-width:100%;height:auto'));   // 240×201/1536 = 31,4 · 160×201/1536 = 20,9
++  // 3. textos y datos dinámicos
++  for (const t of ['Recibido Conforme', 'Hola <b>Ferretería Ñandú</b>, registramos correctamente la entrega de tu pedido.', 'Entrega confirmada', 'Tu pedido fue entregado correctamente.',
++    'RC-01-000123-001', '95001 + 95002', 'José Pérez', '13/10/2026', '12:05', 'Recibido conforme', 'Este correo confirma la recepción conforme de la mercadería.']) ok(m.html.includes(t), t);
++  for (const k of ['Comprobante', 'Cliente', 'Pedido', 'Recibió', 'Fecha y hora', 'Estado']) ok(m.html.includes('>' + k + '<'), k);
++  // 4. sitio web visible y clickeable, con https, en el pie (sin el lema anterior)
++  eq(SITE_URL, 'https://www.okaccesorios.com.ar'); ok(m.html.includes('<a href="https://www.okaccesorios.com.ar"') && m.html.includes('>https://www.okaccesorios.com.ar</a>'));
++  ok(!/SIEMPRE CERCA/i.test(m.html + m.text)); ok(m.text.includes('https://www.okaccesorios.com.ar'));
++  // 5. móvil / compatibilidad: viewport, ancho fluido con tope 600, tablas, estilos inline, sin CSS externo, <style>, scripts ni flex/grid
++  ok(m.html.includes('name="viewport"') && m.html.includes('max-width:600px;width:100%') && m.html.includes('<!--[if mso]>') && m.html.includes('role="presentation"'));
++  ok(!/<style|<link|<script|display:\s*(flex|grid)|position:\s*(absolute|fixed)/i.test(m.html));
++  // 6. acentos y codificación
++  ok(m.html.includes('<meta charset="utf-8">') && m.html.includes('Recibió') && m.html.includes('recepción') && m.html.includes('Ñandú'));
++  // 7. sin datos sensibles (aunque la parada los traiga)
++  ok(!/\bcuil\b|\bdni\b|\bfirma\b|signature|\bgps\b|latitud|-32\.89|-68\.84|30111222|20301112223|NOTA INTERNA/i.test(m.html + m.text));
++  // 8. imágenes bloqueadas / sin URL pública: queda el texto de marca, sin <img>
++  const n = receiptEmail({ receipt, stop });
++  ok(!n.html.includes('<img') && n.html.includes('OK <span style="color:#16d6e5;">ACCESORIOS</span>'));
++  ok(!n.attachments);   // sin bytes del logo no hay adjunto ni <img>
++  // caracteres peligrosos escapados
++  const x = receiptEmail({ receipt: { receipt_number: 'R', snapshot: { receipt_number: 'R', client_name: '<script>x</script>', receiver_name: 'A & B' } }, stop: {} });
++  ok(!x.html.includes('<script>x') && x.html.includes('&lt;script&gt;') && x.html.includes('A &amp; B'));
++});
++Deno.test('RC4.1 · Diseño: el envío no cambia (misma clave idempotente, un solo envío, mismo destinatario)', async () => {
++  const { sendCustomerEmails } = await import('../_shared/customer-email.js'); const L = await import('../_shared/ok-accesorios-logo.js'); const { inlineLogoFrom } = await import('../_shared/resend-body.js');
++  const receipt = { receipt_number: 'RC-9', snapshot: { receipt_number: 'RC-9', client_name: 'C', order_numbers: ['1'], receiver_name: 'R', delivered_at: '2026-10-13T15:00:00Z' } };
++  const jobs = [{ id: 'z1', kind: 'RECIBIDO_CONFORME', recipient: 'c@c.com', idempotency_key: 'r|s|RECIBIDO_CONFORME', status: 'QUEUED', retry_count: 0 }];
++  const sent = []; const store = { listJobs: async () => jobs.filter(j => j.status !== 'SENT'), stopFor: async () => ({}), receiptFor: async () => receipt, updateJob: async (id, p) => Object.assign(jobs[0], p) };
++  await sendCustomerEmails({ store, provider: { send: async x => { sent.push(x); return { id: 'm1' }; } }, inlineLogo: inlineLogoFrom(L) });
++  await sendCustomerEmails({ store, provider: { send: async x => { sent.push(x); return { id: 'm2' }; } }, inlineLogo: inlineLogoFrom(L) });
++  eq(sent.length, 1); eq(sent[0].idempotencyKey, 'r|s|RECIBIDO_CONFORME'); eq(sent[0].to, 'c@c.com'); eq(jobs[0].status, 'SENT'); ok(sent[0].html.includes('cid:ok-accesorios-logo') && !sent[0].html.includes('icon-192'));
++});
++
++Deno.test('RC4.1 · CID: HTML y payload a Resend con el logo oficial inline, mismo content_id, image/png, sin URL externa, fallback y texto plano', async () => {
++  const { receiptEmail, sendCustomerEmails } = await import('../_shared/customer-email.js'); const L = await import('../_shared/ok-accesorios-logo.js'); const { resendBody, inlineLogoFrom } = await import('../_shared/resend-body.js');
++  const receipt = { receipt_number: 'RC-01-000123-001', snapshot: { receipt_number: 'RC-01-000123-001', client_name: 'Ferretería Ñandú', order_numbers: ['95001'], receiver_name: 'José Pérez', delivered_at: '2026-10-13T15:05:00Z' } };
++  const m = receiptEmail({ receipt, stop: {}, inlineLogo: inlineLogoFrom(L) });
++  // 1. el HTML usa cid:ok-accesorios-logo (encabezado y pie)
++  eq((m.html.match(/src="cid:ok-accesorios-logo"/g) || []).length, 2);
++  // 2. ninguna URL del logo: ni /branding/ok-accesorios-horizontal.png ni <img src="http…">
++  ok(!m.html.includes('/branding/ok-accesorios-horizontal.png') && !/<img[^>]+src="https?:/i.test(m.html) && !m.html.includes('icon-192'));
++  // 3-6. payload real a Resend (el mismo que arma la Edge Function)
++  const sent = []; const jobs = [{ id: 'c1', kind: 'RECIBIDO_CONFORME', recipient: 'cliente@viejo.com', idempotency_key: 'r1|s1|RECIBIDO_CONFORME', status: 'QUEUED', retry_count: 0 }];
++  const store = { listJobs: async () => jobs.filter(j => j.status !== 'SENT'), stopFor: async () => ({}), receiptFor: async () => receipt, updateJob: async (id, p) => Object.assign(jobs[0], p) };
++  let fail = true;
++  const provider = { send: async x => { const body = resendBody(x, 'OK Accesorios <avisos@okaccesorios.com.ar>'); sent.push({ x, body }); if (fail) throw new Error('Resend 500: caído'); return { id: 'msg-cid' }; } };
++  await sendCustomerEmails({ store, provider, inlineLogo: inlineLogoFrom(L) });         // falla
++  fail = false; await sendCustomerEmails({ store, provider, inlineLogo: inlineLogoFrom(L) });   // reintento OK
++  await sendCustomerEmails({ store, provider, inlineLogo: inlineLogoFrom(L) });         // ya enviado: no se repite
++  eq(sent.length, 2);                                                                   // 9. no duplica: un intento fallido + uno OK
++  const b = sent[1].body, a = b.attachments;
++  ok(Array.isArray(a) && a.length === 1);                                               // 3. el logo va inline en el payload
++  eq(a[0].content_id, 'ok-accesorios-logo'); ok(b.html.includes('src="cid:' + a[0].content_id + '"'));   // 4. mismo CID que el HTML
++  eq(a[0].content_type, 'image/png');                                                   // 5. MIME
++  eq(a[0].filename, 'ok-accesorios-horizontal.png');                                     // 6. nombre de archivo
++  // 7. bytes idénticos al PNG oficial congelado (y al hash del BRAND-LOCK)
++  const bytes = Uint8Array.from(atob(a[0].content), c => c.charCodeAt(0));
++  const file = await Deno.readFile(new URL('../../../public/branding/ok-accesorios-horizontal.png', import.meta.url));
++  eq(bytes.length, file.length); eq(bytes.length, L.LOGO_BYTES); ok(bytes.every((v, i) => v === file[i]));
++  const hex = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), x => x.toString(16).padStart(2, '0')).join('');
++  const lock = JSON.parse(await Deno.readTextFile(new URL('../../../tests/brand/branding.lock.json', import.meta.url))).sha256;
++  eq(hex, L.LOGO_SHA256); eq(hex, lock['public/branding/ok-accesorios-horizontal.png']);
++  // 8 / 10. reintento con la MISMA clave idempotente y el MISMO destinatario
++  eq(sent[0].x.idempotencyKey, 'r1|s1|RECIBIDO_CONFORME'); eq(sent[1].x.idempotencyKey, 'r1|s1|RECIBIDO_CONFORME');
++  eq(b.to, ['cliente@viejo.com']); eq(sent[0].body.to, ['cliente@viejo.com']); eq(jobs[0].status, 'SENT'); eq(jobs[0].provider_id, 'msg-cid');
++  // 11. fallback ALT y 12. texto plano completo (sin imágenes)
++  ok(b.html.includes('alt="OK ACCESORIOS"')); ok(b.text.includes('RECIBIDO CONFORME') && b.text.includes('RC-01-000123-001') && b.text.includes('https://www.okaccesorios.com.ar') && !b.text.includes('cid:'));
++  // los otros emails al cliente siguen sin adjuntos (sin cambios)
++  const other = resendBody({ to: 'x@y.com', subject: 's', html: 'h', text: 't' }, 'f'); ok(!('attachments' in other)); eq(Object.keys(other), ['from', 'to', 'subject', 'html', 'text']);
++  // tamaño real del logo en cada correo
++  ok(L.LOGO_BYTES === 127934 && a[0].content.length === 170580);
++});
+diff --git a/supabase/functions/internal-approvals/index.ts b/supabase/functions/internal-approvals/index.ts
+index 3d280ef06b0ce0184beda166ca8ab7a3762f61d8..dba64bc7e34979f488e20d31b6536e6256b04622 100644
+--- a/supabase/functions/internal-approvals/index.ts
++++ b/supabase/functions/internal-approvals/index.ts
+@@ -2,6 +2,8 @@
+ import { createClient } from 'npm:@supabase/supabase-js@2';
+ import { json } from '../_shared/http.js';
+ import { handle } from './handler.js';
++import { resendBody, inlineLogoFrom } from '../_shared/resend-body.js';
++import * as logoModule from '../_shared/ok-accesorios-logo.js';
+ const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
+ const must = <T>(r: { data: T; error: any }) => { if (r.error) throw new Error(r.error.message); return r.data; };
+ const store = {
+@@ -17,6 +19,8 @@ const store = {
+ const customerStore = {
+   async listJobs(f: any) { let q = admin.from('customer_email_jobs').select('*').in('status', f.statuses); if (f.ids) q = q.in('id', f.ids); return must(await q) as any[]; },
+   async stopFor(j: any) { return must(await admin.from('route_stops').select('client_name, order_numbers').eq('id', j.stop_id).single()); },
++  // RC4.1: el Recibido Conforme se arma SIEMPRE desde el comprobante guardado (nunca se regenera ni se duplica)
++  async receiptFor(j: any) { return must(await admin.from('delivery_receipts').select('receipt_number, snapshot').eq('stop_id', j.stop_id).single()); },
+   async updateJob(id: string, patch: any) { must(await admin.from('customer_email_jobs').update(patch).eq('id', id)); }
+ };
+ const sheetStore = {
+@@ -28,11 +32,12 @@ const sheetStore = {
+ };
+ const provider = { async send(m: any) {
+   const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { authorization: 'Bearer ' + Deno.env.get('RESEND_API_KEY'), 'content-type': 'application/json', 'idempotency-key': m.idempotencyKey },
+-    body: JSON.stringify({ from: Deno.env.get('REPORT_FROM'), to: [m.to], subject: m.subject, html: m.html, text: m.text }) });
++    body: JSON.stringify(resendBody(m, Deno.env.get('REPORT_FROM'))) });
+   const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error('Resend ' + r.status + ': ' + (j.message ?? 'error')); return { id: j.id };
+ } };
+ const deps = {
+   cronSecret: Deno.env.get('CRON_SECRET') ?? '', appUrl: (Deno.env.get('APP_URL') ?? '').replace(/\/$/, ''), store, customerStore, sheetStore, provider,
++  inlineLogo: inlineLogoFrom(logoModule),   // RC4.1: logo del Recibido Conforme embebido por CID (no depende de APP_URL)
+   async queueSheetEmails() { must(await admin.rpc('queue_sheet_emails', { p_day: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Mendoza' }).format(new Date()) })); },
+   async getUserFromJwt(jwt: string) { const { data } = await admin.auth.getUser(jwt); return data?.user ? { id: data.user.id } : null; },
+   async getProfile(id: string) { return must(await admin.from('profiles').select('*').eq('id', id).maybeSingle()); },
+diff --git a/tests/e2e/run_e2e.py b/tests/e2e/run_e2e.py
+index 4e0e878bdd344a1c0b7fb055043a69d5e8636853..4d865946793f66fa7f49862e4199a53c35308a0a 100644
+--- a/tests/e2e/run_e2e.py
++++ b/tests/e2e/run_e2e.py
+@@ -56,7 +56,7 @@ async def main():
+             nav_txt = await pg.inner_text('#usersPanel #adNav') if await pg.locator('#usersPanel #adNav').count() else ''
+             await pg.evaluate('()=>{location.hash="#/despacho"}'); await pg.wait_for_timeout(900)
+             hdr = await pg.inner_text('#operario .top')
+-            res('E04', 'Admin entra al DASHBOARD y desde la navegación al panel del Operario (v15) con usuario y Cerrar sesión', op and 'Administración' in hdr and 'USUARIOS' in nav_txt and 'DESPACHO' in nav_txt and await pg.is_visible('#btnLogout') and await pg.is_visible('#operario #adNav'), hdr.replace('\n', ' · '))
++            res('E04', 'Admin entra al DASHBOARD y desde la navegación al panel del Operario (v15) con usuario y Cerrar sesión', op and 'Admin General' in hdr and 'Usuarios y permisos' in nav_txt and 'Despacho' in nav_txt and await pg.is_visible('#btnLogout') and await pg.is_visible('#operario #adNav'), hdr.replace('\n', ' · '))
+             v15 = await pg.evaluate('()=>!!(window.OKD && window.OKD.RouteStore)')
+             res('E05', 'La lógica v15 se carga intacta (motor, hoja, exportación)', v15 and await pg.is_visible('#btnSearch') and await pg.is_visible('#btnExport') and await pg.is_visible('#btnPdf'))
+             await pg.screenshot(path=os.path.join(OUT, 'online_operario.png'))
+diff --git a/tests/e2e/run_e2e_rc2.py b/tests/e2e/run_e2e_rc2.py
+index 55444b79114e9c8037e4d8a37846587bc80aa90e..b8ac9f0a0fee23c4f759f1d8e424fa70cbc750e8 100644
+--- a/tests/e2e/run_e2e_rc2.py
++++ b/tests/e2e/run_e2e_rc2.py
+@@ -35,13 +35,14 @@ async def main():
+             ad = await ctx.new_page(); ps(ad); await ad.goto(URL); await ad.evaluate('()=>localStorage.clear()'); await login(ad, 'admin@okdespacho.demo')
+             await ad.wait_for_timeout(1500)
+             navs = await ad.eval_on_selector_all('#usersPanel #adNav a', 'e=>e.map(x=>x.textContent)')
+-            res('RC2-22', 'Admin entra al DASHBOARD con accesos y alertas', ad.url.endswith('#/dashboard') and navs[:1] == ['DASHBOARD'] and all(x in navs for x in ['DESPACHO', 'BORRADORES', 'HOJAS PUBLICADAS', 'APROBACIONES', 'USUARIOS', 'CONFIGURACIÓN', 'INFORMES', 'AUDITORÍA', 'BACKUP']) and await ad.locator('.dalert').count() == 9, str(navs))
++            res('RC2-22', 'Admin entra al DASHBOARD (Admin General V4) con accesos y alertas', ad.url.endswith('#/dashboard') and navs[:1] == ['Dashboard'] and all(x in navs for x in ['Hojas de ruta', 'Despacho', 'Borradores', 'Hojas publicadas', 'Solicitudes', 'Aprobaciones de ruta interna', 'Transportistas', 'Vehículos / Service', 'NOC', 'Informes', 'Emails', 'Auditoría', 'Usuarios y permisos', 'Backup / Archivo', 'Configuración'])
++              and await ad.locator('#dashAlerts .alert').count() == 6 and await ad.locator('.kpi').count() == 4, str(navs))
+             for h in ['#/usuarios', '#/configuracion', '#/despacho', '#/historial', '#/usuarios']: await nav(ad, h)
+             await ad.reload(); await ad.wait_for_timeout(2500)
+             res('RC2-01', 'Sesión estable: Usuarios → Configuración → Despacho → Historial → Usuarios → recargar', not await ad.is_visible('#loginEmail') and await ad.is_visible('#usersPanel') and await ad.locator('#upNew').count() == 1 and ad.url.endswith('#/usuarios'))
+             # Configuración separada de Aprobaciones
+             await nav(ad, '#/configuracion'); secs = await ad.eval_on_selector_all('#cfgNav button', 'e=>e.map(x=>x.textContent)')
+-            await nav(ad, '#/aprobaciones'); ap = await ad.inner_text('#usersPanel')
++            await nav(ad, '#/aprobaciones'); ap = await ad.evaluate('()=>{const p=document.getElementById("usersPanel").cloneNode(true); p.querySelectorAll("#adNav").forEach(n=>n.remove()); return p.innerText}')
+             res('RC2-02', 'CONFIGURACIÓN con sus 9 secciones (+ D2 REGLAS DE ASIGNACIÓN y D3 FINANCIACIÓN PROPIA de RC2.1c); APROBACIONES solo hojas internas pendientes', len(secs) == 11 and any('D2.' in x for x in secs) and any('D3.' in x for x in secs) and 'VEHÍCULOS' not in ap and 'PDF' not in ap.replace('PENDIENTES', '') and 'HOJAS INTERNAS PENDIENTES DE APROBACIÓN' in ap, str(secs))
+             # Vehículo
+             await nav(ad, '#/configuracion'); await ad.click('[data-sec="vehiculos"]'); await ad.wait_for_timeout(500)
+diff --git a/tests/run_all.sh b/tests/run_all.sh
+index e207b98eadf997389c18224b5c9664d54e2101bb..0babbee0a8d6a086236912721d8c1c5667d94d82 100755
+--- a/tests/run_all.sh
++++ b/tests/run_all.sh
+@@ -24,3 +24,7 @@ step "BRANDING PWA"; python3 tests/brand/run_brand.py >tests/out/brand.log 2>&1;
+ step "E2E RC2.1d"; python3 tests/e2e/run_e2e_rc21d.py >tests/out/e2e_rc21d.log 2>&1; tail -1 tests/out/e2e_rc21d.log | tee -a "$S"
+ step "PWA OFFLINE"; python3 tests/brand/run_pwa_offline.py >tests/out/pwa.log 2>&1; tail -1 tests/out/pwa.log | tee -a "$S"
+ step "E2E RC3 NOC/conciliación"; python3 tests/e2e/run_e2e_rc3.py >tests/out/e2e_rc3.log 2>&1; tail -1 tests/out/e2e_rc3.log | tee -a "$S"
++step "BRANDING LOCK"; node tests/brand/check_branding_lock.mjs | tee -a "$S"
++step "E2E RC4 roles/permisos"; python3 tests/e2e/run_e2e_rc4.py >tests/out/e2e_rc4.log 2>&1; tail -1 tests/out/e2e_rc4.log | tee -a "$S"
++step "E2E RC4.1 alcance + email"; python3 tests/e2e/run_e2e_rc41.py >tests/out/e2e_rc41.log 2>&1; tail -1 tests/out/e2e_rc41.log | tee -a "$S"
++step "QA visual email Recibido Conforme"; python3 tests/e2e/run_email_visual_rc41.py >tests/out/email_visual.log 2>&1; tail -1 tests/out/email_visual.log | tee -a "$S"
+diff --git a/tests/sql/concurrency.sh b/tests/sql/concurrency.sh
+index 9caee66f35eb3fb3899780d0b7be47f332752dd5..31f86c3b9ae0953e645773085e58a5df43c8bf07 100755
+--- a/tests/sql/concurrency.sh
++++ b/tests/sql/concurrency.sh
+@@ -39,3 +39,14 @@ for act in KEEP REVERSE; do ( $PSQL -d okd -tA -c "begin; select tst.u('00000000
+ OKS=$(grep -l '"ok": true' /tmp/okd_conc_KEEP.txt /tmp/okd_conc_REVERSE.txt 2>/dev/null | wc -l); CONF=$(grep -l 'NOC_CONFLICT' /tmp/okd_conc_KEEP.txt /tmp/okd_conc_REVERSE.txt 2>/dev/null | wc -l)
+ $PSQL -d okd -c "insert into tst.results(name, ok, detail) select 'NOC-CONC-01 Dos administradores resuelven a la vez la misma NOC: una operación gana y la otra recibe conflicto controlado (estado consistente)',
+   $OKS = 1 and $CONF = 1 and (select (consumed_amount = 10000 and reversed_amount = 0) or (consumed_amount = 0 and reversed_amount = 10000) from public.credit_notes where comp = 'NOC [X] 0050-00000009'), '$OKS ok / $CONF conflicto'" >/dev/null
++
++# REQ-CONC-01: Superior y Admin resuelven A LA VEZ la misma solicitud → una resolución, la otra recibe conflicto controlado
++$PSQL -d okd -c "begin; select tst.u('b4000000-0000-0000-0000-000000000002'); set local role authenticated; select public.create_operational_request('{\"request_type\":\"OTRO\",\"reason\":\"concurrencia\",\"op_id\":\"rc4-conc\"}'); commit;" >/dev/null
++QID=$($PSQL -d okd -tA -c "select id from public.route_approval_requests where op_id = 'rc4-conc'")
++( $PSQL -d okd -tA -c "begin; select tst.u('b4000000-0000-0000-0000-000000000001'); set local role authenticated; select pg_sleep(0.2); select public.resolve_operational_request('$QID', 'APPROVED', 'ok sup'); commit;" >/tmp/okd_rq1.txt 2>&1 ) &
++( $PSQL -d okd -tA -c "begin; select tst.u('00000000-0000-0000-0000-00000000000a'); set local role authenticated; select pg_sleep(0.2); select public.resolve_operational_request('$QID', 'REJECTED', 'no admin'); commit;" >/tmp/okd_rq2.txt 2>&1 ) &
++wait
++RW=$(grep -L "ERROR" /tmp/okd_rq1.txt /tmp/okd_rq2.txt | wc -l); RC=$(grep -l "REQUEST_ALREADY_RESOLVED" /tmp/okd_rq1.txt /tmp/okd_rq2.txt | wc -l)
++$PSQL -d okd -c "insert into tst.results(name, ok, detail) select 'REQ-CONC-01 Superior y Admin resuelven a la vez la misma solicitud: una gana y la otra recibe conflicto controlado',
++  $RW = 1 and $RC = 1 and (select status in ('APPROVED','REJECTED') from public.route_approval_requests where op_id = 'rc4-conc')
++  and (select count(*) from public.audit_log where target_id = '$QID' and action in ('REQUEST_APPROVED','REQUEST_REJECTED')) = 1, '$RW ok / $RC conflicto'" >/dev/null
+diff --git a/tests/sql/run.sh b/tests/sql/run.sh
+index 925a5462c7f34753808eee43bad540596fa9f9d6..de501b72a4aed013fa585257ef4cfda0f5a99cdc 100755
+--- a/tests/sql/run.sh
++++ b/tests/sql/run.sh
+@@ -13,12 +13,16 @@ $PSQL -c "create database okd" >/dev/null
+ $PSQL -d okd -f "$HERE/supabase_stub.sql" >/dev/null
+ for f in "$ROOT"/supabase/migrations/*.sql; do $PSQL -d okd -f "$f" >/dev/null; done
+ $PSQL -d okd -f "$HERE/post_migration_grants.sql" >/dev/null
+-for t in fase1_test fase1_1_test fase2a_test fase2a1_test fase2b1_test fase2b11_test fase2b2_test fase2b3_test rc1_test rc11_test rc12_test rc2_test noc_test fin_test rc21c_test rc21d_test rc3_test; do $PSQL -d okd -f "$HERE/$t.sql" >/dev/null; done
++for t in fase1_test fase1_1_test fase2a_test fase2a1_test fase2b1_test fase2b11_test fase2b2_test fase2b3_test rc1_test rc11_test rc12_test rc2_test noc_test fin_test rc21c_test rc21d_test rc3_test rc4_test rc41_test; do $PSQL -d okd -f "$HERE/$t.sql" >/dev/null; done
+ bash "$HERE/concurrency.sh" "$PSQL"
+ # Inventario: toda tabla de public debe estar clasificada en el backup (FAIL si aparece una nueva sin clasificar)
+ $PSQL -d okd -tA -c "select table_name from information_schema.tables where table_schema='public' and table_type='BASE TABLE' order by 1" > /tmp/okd_tables.txt
+-INV="$(node "$HERE/check_inventory.mjs" /tmp/okd_tables.txt 2>&1)"; INVOK=$?
++INV="$(node "$HERE/check_inventory.mjs" /tmp/okd_tables.txt 2>&1)" && INVOK=0 || INVOK=1
+ $PSQL -d okd -c "insert into tst.results(name, ok, detail) values ('BKP-INV Backup cubre el inventario real de tablas (sin tablas sin clasificar)', $([ $INVOK -eq 0 ] && echo true || echo false), \$\$$INV\$\$)" >/dev/null
++# Matriz Rol × Permiso: base de datos = rules.js (pantalla/demo)
++$PSQL -d okd -tA -c "select role_code || '|' || permission_code from public.role_permissions order by 1" > /tmp/okd_roles.txt
++RM="$(node "$HERE/check_role_matrix.mjs" /tmp/okd_roles.txt 2>&1)" && RMOK=0 || RMOK=1
++$PSQL -d okd -c "insert into tst.results(name, ok, detail) values ('PERM-MATRIX Matriz Rol × Permiso idéntica en la base y en rules.js', $([ $RMOK -eq 0 ] && echo true || echo false), \$\$$RM\$\$)" >/dev/null
+ OUT="$($PSQL -d okd -f "$HERE/zz_summary.sql")"
+ echo "$OUT" | grep -E "^(PASS|FAIL|TOTAL)"
+ echo "$OUT" | grep -q "^FAIL" && exit 1 || exit 0
