@@ -98,6 +98,19 @@ async function mountLegacyRc4(me, active = '#/despacho') {
   ).join('');
   shell.querySelector('#rc4LegacyNav').innerHTML = nav;
   shell.querySelector('.footer').innerHTML = foot;
+
+  // Hoja de ruta: separar título/fecha de las acciones para que nunca se corten
+  // ni obliguen a desplazar horizontalmente el panel para publicar.
+  const sh = shell.querySelector('.rc4legacy-content .sheethead');
+  if (sh && !sh.querySelector('.sheet-actions')) {
+    const actions = document.createElement('div');
+    actions.className = 'sheet-actions';
+    ['btnManual','btnClear','btnPrint','btnPdf','btnExport','btnPublish'].forEach(id => {
+      const b = sh.querySelector('#' + id);
+      if (b) actions.appendChild(b);
+    });
+    sh.appendChild(actions);
+  }
 }
 
 // Inserta la barra de navegación debajo del encabezado del panel abierto
