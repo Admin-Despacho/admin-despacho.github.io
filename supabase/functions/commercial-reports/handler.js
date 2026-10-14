@@ -57,7 +57,12 @@ async function handleRaw(req, deps) {
     case 'settings_set': { const d = needManage(); if (d) return d;
       const s = body.settings || {};
       if (s.recipients && !s.recipients.every(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x))) return json(400, { error: 'Hay un email de destinatario inválido.' });
-      if (s.monthly_time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(s.monthly_time)) return json(400, { error: 'Hora mensual inválida (HH:MM).' });
+      if (s.schedule_mode && !['OFF','WEEKLY','BIWEEKLY','MONTHLY'].includes(s.schedule_mode)) return json(400, { error: 'Frecuencia automática inválida.' });
+      for (const k of ['weekly_time','biweekly_time','monthly_time']) if (s[k] && !/^([01]\d|2[0-3]):[0-5]\d$/.test(s[k])) return json(400, { error: 'Hora inválida (HH:MM).' });
+      if (s.biweekly_day_1 != null || s.biweekly_day_2 != null) {
+        const d1 = Number(s.biweekly_day_1), d2 = Number(s.biweekly_day_2);
+        if (!(d1 >= 1 && d1 <= 28 && d2 >= 1 && d2 <= 28 && d1 < d2)) return json(400, { error: 'Días quincenales inválidos: elegí dos días entre 1 y 28, en orden.' });
+      }
       const before = await st.getSettings(); await st.setSettings(s);
       await deps.audit({ actor_id: me.id, action: 'REPORT_SETTINGS_CHANGED', target_type: 'settings', target_id: 'commercial_reports', before, after: s });
       return json(200, { settings: await st.getSettings() }); }
