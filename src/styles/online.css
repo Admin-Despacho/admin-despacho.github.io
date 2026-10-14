@@ -598,3 +598,11 @@ body.no-publish #btnPublish{display:none!important}
   .third-summary{grid-template-columns:1fr}
   .third-total{flex-direction:column;align-items:flex-start}
 }
+
+
+/* RC4.1.17 · Ubicación legible en trazabilidad de entrega. */
+.geo-attribution{
+  margin:8px 2px 0;
+  font-size:11px;
+  color:#718189;
+}
