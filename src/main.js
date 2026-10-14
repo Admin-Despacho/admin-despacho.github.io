@@ -14,9 +14,16 @@ const $ = s => document.querySelector(s);
 const show = id => ['#auth', '#noPanel', '#operario'].forEach(s => { $(s).hidden = s !== id; });
 let legacyLoaded = false;
 
-async function loadText(url) { const r = await fetch(url); if (!r.ok) throw new Error('No se pudo cargar ' + url); return r.text(); }
+const legacyAssetUrl = url => {
+  // El constructor legacy vive fuera del bundle de Vite. Usar el nombre hash del bundle actual
+  // como cache-buster evita mezclar un main nuevo con un despacho-v15.js viejo tras un deploy.
+  const buildAsset = (() => { try { return new URL(import.meta.url).pathname.split('/').pop() || 'build'; } catch (e) { return 'build'; } })();
+  return url + (url.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(buildAsset);
+};
+async function loadText(url) { const u = legacyAssetUrl(url); const r = await fetch(u, { cache: 'reload' }); if (!r.ok) throw new Error('No se pudo cargar ' + url); return r.text(); }
 function loadScript(url) {
-  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = url; s.onload = res; s.onerror = () => rej(new Error('No se pudo cargar ' + url)); document.body.appendChild(s); });
+  const u = legacyAssetUrl(url);
+  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = u; s.onload = res; s.onerror = () => rej(new Error('No se pudo cargar ' + url)); document.body.appendChild(s); });
 }
 // Panel del Operario = versión offline v15 sin cambios de lógica (se carga recién con sesión válida)
 async function loadLegacy() {
