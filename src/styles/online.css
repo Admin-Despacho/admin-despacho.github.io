@@ -287,3 +287,14 @@ table.utable{border-collapse:separate;border-spacing:0;width:100%;min-width:1180
 .rc4main .kpi .value,.rc4main .title h1{font-family:inherit}
 body.no-publish #btnPublish{display:none!important}
 .drv-mailhint{display:block;font-size:11.5px;color:var(--teal);margin:-2px 0 4px}
+
+/* RC4 · El constructor operativo legacy vive dentro del mismo shell visual que el Dashboard. */
+.rc4legacy-shell{min-height:100vh}
+.rc4legacy-shell .rc4legacy-body{min-width:0;overflow:auto;background:var(--bg,#eef3f6)}
+.rc4legacy-shell .rc4legacy-content{min-width:0}
+.rc4legacy-shell .rc4legacy-content>.top,
+.rc4legacy-shell .rc4legacy-content>.adnav{display:none!important}
+.rc4legacy-shell .rc4legacy-content{padding-bottom:24px}
+@media (max-width:900px){
+  .rc4legacy-shell .rc4legacy-body{overflow-x:auto}
+}
