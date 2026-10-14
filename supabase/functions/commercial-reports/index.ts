@@ -17,6 +17,17 @@ const store = {
       .in('carrier_id', carriers.map((c) => c.id)).eq('operational_status', 'COMPLETADA')) as any[];
     return routes.map((r) => ({ ...r, stops: r.route_stops ?? [] }));
   },
+  async loadThirdPartyCarriers() {
+    const rows = must(await admin.from('carriers').select('id,name,kind,report_group,active').eq('kind', 'EXTERNO').eq('active', true).order('name')) as any[];
+    return rows.filter((c) => c.report_group !== 'CRISTIAN_TORRES');
+  },
+  async loadThirdPartyRoutes() {
+    const carriers = await this.loadThirdPartyCarriers();
+    if (!carriers.length) return [];
+    const routes = must(await admin.from('routes').select('id, number, carrier_id, operational_status, completed_at, route_stops(*)')
+      .in('carrier_id', carriers.map((c:any) => c.id)).eq('operational_status', 'COMPLETADA')) as any[];
+    return routes.map((r) => ({ ...r, stops: r.route_stops ?? [] }));
+  },
   async loadCosts() { return must(await admin.from('transport_cost_settings').select('monthly_cost, valid_from, valid_to').eq('carrier_group', 'CRISTIAN_TORRES').order('valid_from')) as any[]; },
   async addCost(monthly_cost: number, valid_from: string, by: string) { must(await admin.rpc('set_transport_cost', { p_group: 'CRISTIAN_TORRES', p_monthly_cost: monthly_cost, p_valid_from: valid_from, p_by: by })); },
   async getSettings() { const d = must(await admin.from('report_settings').select('*').eq('id', 'CRISTIAN_TORRES').maybeSingle()) as any; return d ?? {}; },
