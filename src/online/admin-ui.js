@@ -18,7 +18,7 @@ export const NAV = [
   ['#/historial', 'HOJAS PUBLICADAS', me => hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team') || hasPerm(me, 'routes.view_own')],
   ['#/aprobaciones', 'APROBACIONES', me => hasPerm(me, 'can_approve_internal_route_changes')],
   ['#/usuarios', 'USUARIOS', me => hasPerm(me, 'users.view')],
-  ['#/configuracion', 'CONFIGURACIÓN', me => hasPerm(me, 'settings.manage') || hasPerm(me, 'vehicles.manage')],
+  ['#/configuracion', 'CONFIGURACIÓN', me => hasPerm(me, 'settings.manage') || hasPerm(me, 'carriers.manage') || hasPerm(me, 'vehicles.manage') || hasPerm(me, 'vehicles.service_manage') || hasPerm(me, 'columns.manage_defaults') || hasPerm(me, 'columns.manage_templates')],
   ['#/informes', 'INFORMES', me => hasPerm(me, 'can_view_commercial_transport_reports') || hasPerm(me, 'can_manage_commercial_transport_reports')],
   ['#/conciliacion-noc', 'CONCILIACIÓN NOC', me => hasPerm(me, 'credit_notes.manage')],
   ['#/auditoria', 'AUDITORÍA', me => hasPerm(me, 'audit.view')],
@@ -309,7 +309,13 @@ export async function openHistory(api, me) {
 const SECTIONS = [['transportistas', 'A. TRANSPORTISTAS'], ['plantillas', 'B. PLANTILLAS / COLUMNAS'], ['vehiculos', 'C. VEHÍCULOS Y MANTENIMIENTO'], ['financieras', 'D. REGLAS FINANCIERAS'], ['asignacion', 'D2. REGLAS DE ASIGNACIÓN'], ['financiacion', 'D3. FINANCIACIÓN PROPIA'],
   ['emails', 'E. EMAILS Y NOTIFICACIONES'], ['pdf', 'F. PDF Y ENVÍOS'], ['ubicaciones', 'G. UBICACIONES'], ['backup', 'H. BACKUP'], ['general', 'I. PARÁMETROS GENERALES']];
 export async function openConfig(api, me, section) {
-  const allowed = SECTIONS.filter(([k]) => hasPerm(me, 'settings.manage') || k === 'vehiculos');
+  const allowed = SECTIONS.filter(([k]) => {
+    if (hasPerm(me, 'settings.manage')) return true;
+    if (k === 'transportistas') return hasPerm(me, 'carriers.manage');
+    if (k === 'plantillas') return hasPerm(me, 'columns.manage_defaults') || hasPerm(me, 'columns.manage_templates');
+    if (k === 'vehiculos') return hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicles.manage') || hasPerm(me, 'vehicles.service_manage') || hasPerm(me, 'vehicle_mileage.view') || hasPerm(me, 'vehicle_mileage.enter');
+    return false;
+  });
   let cur = section && allowed.some(s => s[0] === section) ? section : allowed[0][0];
   const w = frame(me, 'Configuración', '#/configuracion?sec=' + cur);
   w.innerHTML = '<div class="up-head"><h2>CONFIGURACIÓN</h2></div><div class="cfgnav" id="cfgNav">' + allowed.map(([k, l]) => '<button type="button" data-sec="' + k + '">' + l + '</button>').join('') + '</div><div id="cfgBody"></div>';
@@ -327,11 +333,23 @@ export async function openConfig(api, me, section) {
 const CFG = {
   async transportistas(api, me, sec, again) {
     const cs = await api.listCarriers();
+    const canManage = hasPerm(me, 'settings.manage') || hasPerm(me, 'carriers.manage');
     sec.innerHTML = '<h2><span class="n">A</span>TRANSPORTISTAS</h2><p class="rp-note">Código de correlativo de 2 dígitos (Cristian Este y Alrededores comparten 01). La secuencia es continua y nunca se reutiliza.</p>' +
+      (canManage ? '<div class="cfgform" id="carrierNew"><h3>NUEVO TRANSPORTISTA</h3><label>ID / código interno <input id="ncId" placeholder="Ej. UCO"></label><label>Nombre <input id="ncName" placeholder="Nombre del transportista"></label><label>Tipo <select id="ncKind"><option>EXTERNO</option><option>INTERNO</option></select></label><label>Código correlativo <input id="ncCode" maxlength="2" inputmode="numeric" placeholder="00"></label><label>Email <input id="ncEmail" type="email" placeholder="opcional"></label><button class="btn dark" type="button" id="ncSave">CREAR TRANSPORTISTA</button></div>' : '') +
       '<div class="utable-wrap"><table class="utable" id="carrTable"><thead><tr><th>ID</th><th>NOMBRE</th><th>TIPO</th><th>CÓDIGO</th><th>ACTIVO</th><th>EMAILS</th><th>RESPONSABLES</th><th></th></tr></thead><tbody>' +
       cs.map(c => '<tr data-cid="' + c.id + '"><td>' + esc(c.id) + '</td><td><input class="ed" data-f="name" value="' + esc(c.name) + '"></td><td><select data-f="kind"><option' + (c.kind === 'EXTERNO' ? ' selected' : '') + '>EXTERNO</option><option' + (c.kind === 'INTERNO' ? ' selected' : '') + '>INTERNO</option></select></td>' +
         '<td><input class="ed" data-f="code" size="3" value="' + esc(c.sequence_code || '') + '"></td><td><input type="checkbox" data-f="active"' + (c.active !== false ? ' checked' : '') + '></td><td><input class="ed" data-f="emails" value="' + esc((c.emails || []).join(', ')) + '"></td>' +
         '<td><button class="btn soft" type="button" data-resp>VER</button></td><td><button class="btn dark" type="button" data-save>GUARDAR</button></td></tr>').join('') + '</tbody></table></div><div id="carrResp"></div>';
+    const ncSave = sec.querySelector('#ncSave');
+    if (ncSave) ncSave.onclick = () => run(() => {
+      const id = sec.querySelector('#ncId').value.trim().toUpperCase();
+      const name = sec.querySelector('#ncName').value.trim();
+      const code = sec.querySelector('#ncCode').value.trim();
+      const email = sec.querySelector('#ncEmail').value.trim();
+      if (!id || !name) throw new Error('Completá ID y nombre del transportista.');
+      if (!/^\\d{2}$/.test(code)) throw new Error('El código correlativo debe tener exactamente 2 dígitos.');
+      return api.upsertCarrier({ id, name, kind: sec.querySelector('#ncKind').value, sequence_code: code, active: true, report_group: null, emails: email ? [email] : [], notes: null });
+    }, 'Transportista creado.', again);
     sec.querySelectorAll('tr[data-cid]').forEach(tr => {
       const g = k => tr.querySelector('[data-f="' + k + '"]'), c = cs.find(x => x.id === tr.dataset.cid);
       tr.querySelector('[data-save]').onclick = () => run(() => api.upsertCarrier({ id: c.id, name: g('name').value, kind: g('kind').value, sequence_code: g('code').value.trim(), active: g('active').checked, report_group: c.report_group, emails: g('emails').value.split(',').map(x => x.trim()).filter(Boolean), notes: c.notes }), 'Transportista guardado.', again);
