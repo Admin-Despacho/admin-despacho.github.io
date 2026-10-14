@@ -147,8 +147,8 @@ export async function openHistory(api, me) {
     box.innerHTML = '<section class="step rp-step" id="hSheet"><h2><span class="n">' + esc(r.number) + '</span>HOJA ' + esc(r.number) + ' · ' + esc(r.carrier_name || r.carrier_id) + ' · ' + (ST[r.operational_status] || r.operational_status) + (AP[r.approval_status] ? ' · ' + AP[r.approval_status] : '') + '</h2>' +
       (r.vehicle_plate ? '<p class="rp-note">Vehículo ' + esc(r.vehicle_name || '') + ' · ' + esc(r.vehicle_plate) + ' · km ' + (r.km_start ?? '—') + ' → ' + (r.km_end ?? '—') + (r.km_start != null && r.km_end != null ? ' · ' + fmt(r.km_end - r.km_start) + ' km' : '') + '</p>' : '') +
       screenTable(r.sheet_snapshot && r.sheet_snapshot.screen_model) +
-      '<div class="utable-wrap"><table class="utable"><thead><tr><th>#</th><th>CLIENTE</th><th>PEDIDOS</th><th>BULTOS</th><th>RESULTADO</th></tr></thead><tbody>' +
-      stops.map((s, i) => '<tr><td>' + (i + 1) + '</td><td>' + esc(s.client_name) + (s.provenance === 'DRIVER' ? ' <em>(agregada)</em>' : '') + '</td><td>' + esc((s.order_numbers || []).join(' + ')) + '</td><td>' + (s.bultos || 0) + '</td><td>' + esc(String(s.outcome || '').replace('_', ' ')) + (s.outcome_reason || s.outcome_note ? ' · ' + esc(s.outcome_reason || s.outcome_note) : '') + '</td></tr>').join('') + '</tbody></table></div>' +
+      '<div class="utable-wrap"><table class="utable"><thead><tr><th>#</th><th>CLIENTE</th><th>PEDIDOS</th><th>BULTOS</th><th>RESULTADO</th>' + (me.role === 'ADMIN' ? '<th>ENTREGA</th>' : '') + '</tr></thead><tbody>' +
+      stops.map((s, i) => '<tr data-stop="' + s.id + '"><td>' + (i + 1) + '</td><td>' + esc(s.client_name) + (s.provenance === 'DRIVER' ? ' <em>(agregada)</em>' : '') + '</td><td>' + esc((s.order_numbers || []).join(' + ')) + '</td><td>' + (s.bultos || 0) + '</td><td>' + esc(String(s.outcome || '').replace('_', ' ')) + (s.outcome_reason || s.outcome_note ? ' · ' + esc(s.outcome_reason || s.outcome_note) : '') + '</td>' + (me.role === 'ADMIN' ? '<td><button class="btn soft" type="button" data-delivery-detail>VER ENTREGA</button></td>' : '') + '</tr>').join('') + '</tbody></table></div><div id="deliveryTraceBox"></div>' +
       '<h3 class="dsub">PDF / VERSIONES</h3><div class="utable-wrap"><table class="utable" id="hPdfs"><thead><tr><th>VERSIÓN</th><th>ARCHIVO</th><th>GENERADO</th><th>POR</th><th>ESTADO</th><th></th></tr></thead><tbody>' +
       (d.pdfs.length ? d.pdfs.map(p => '<tr data-v="' + p.route_version + '"><td>v' + p.route_version + '</td><td>' + esc(p.file_name || '') + '</td><td>' + dt(p.generated_at) + '</td><td>' + esc(p.generated_by_name || '') + '</td><td>' + p.status + (p.error ? ' · ' + esc(p.error) : '') + '</td>' +
         '<td>' + (p.status === 'OK' ? '<button class="btn soft" type="button" data-pdf>PDF</button>' : '<button class="btn dark" type="button" data-retry>REINTENTAR PDF</button>') + '</td></tr>').join('') : '<tr><td colspan="6">Sin PDF registrado.</td></tr>') + '</tbody></table></div>' +
@@ -157,6 +157,50 @@ export async function openHistory(api, me) {
       (active ? '<button class="btn soft" type="button" id="hResend">REENVIAR NOTIFICACIÓN</button><input class="ed" id="hCancelWhy" placeholder="Motivo de cancelación"><button class="btn danger" type="button" id="hCancel">CANCELAR</button>' : '') + '</div><div id="hAuditBox"></div></section>';
     msgBox(box.querySelector('#hSheet'), m);
     const again = t => detail(id, t);
+    const signatureSrc = raw => {
+      if (!raw) return '';
+      const s = String(raw);
+      if (s.startsWith('\\x')) {
+        const hex = s.slice(2); let bin = '';
+        for (let i = 0; i < hex.length; i += 2) bin += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+        return 'data:image/png;base64,' + btoa(bin);
+      }
+      return 'data:image/png;base64,' + s;
+    };
+    const locationText = loc => {
+      if (!loc) return 'Sin registro';
+      if (loc.missing_reason) return 'Sin ubicación · ' + esc(loc.missing_reason);
+      if (loc.lat != null && loc.lon != null) return esc(Number(loc.lat).toFixed(6) + ', ' + Number(loc.lon).toFixed(6)) + (loc.accuracy != null ? ' · precisión ' + esc(Math.round(Number(loc.accuracy))) + ' m' : '');
+      return 'Sin registro';
+    };
+    if (me.role === 'ADMIN') box.querySelectorAll('[data-delivery-detail]').forEach(btn => btn.onclick = async () => {
+      const row = btn.closest('tr'), traceBox = box.querySelector('#deliveryTraceBox');
+      btn.disabled = true; btn.textContent = 'CARGANDO…';
+      try {
+        const tr = await api.deliveryTrace(row.dataset.stop), s = tr.stop || {}, ev = tr.evidence, rc = tr.receipt, mails = tr.emails || [];
+        const sig = ev && signatureSrc(ev.signature_png);
+        traceBox.innerHTML = '<section class="delivery-trace-panel"><div class="delivery-trace-head"><div><h3>TRAZABILIDAD DE ENTREGA</h3><p>' + esc(s.client_name || '') + ' · ' + esc((s.order_numbers || []).join(' + ') || 'Sin pedido') + '</p></div><button class="btn soft" type="button" data-close-trace>CERRAR</button></div>' +
+          '<div class="delivery-trace-grid">' +
+            '<div><span>Resultado</span><b>' + esc(String(s.outcome || 'PENDIENTE').replaceAll('_',' ')) + '</b></div>' +
+            '<div><span>Realizado por</span><b>' + esc(tr.outcome_by_name || '—') + '</b></div>' +
+            '<div><span>Llegada</span><b>' + (s.arrived_at ? dt(s.arrived_at) : 'Sin registro') + '</b></div>' +
+            '<div><span>Entrega / cierre</span><b>' + (s.outcome_at ? dt(s.outcome_at) : 'Sin registro') + '</b></div>' +
+            '<div class="wide"><span>Ubicación al llegar</span><b>' + locationText(s.arrive_location) + '</b></div>' +
+            '<div class="wide"><span>Ubicación al finalizar</span><b>' + locationText(s.finish_location) + '</b></div>' +
+            (s.location_warning ? '<div class="wide warning"><span>Alerta de ubicación</span><b>' + esc(s.location_warning) + '</b></div>' : '') +
+            (s.outcome_note || s.outcome_reason ? '<div class="wide"><span>Observación / motivo</span><b>' + esc(s.outcome_note || s.outcome_reason) + '</b></div>' : '') +
+            (s.collection_status && s.collection_status !== 'PENDIENTE' ? '<div><span>Cobranza</span><b>' + esc(s.collection_status.replaceAll('_',' ')) + '</b></div><div><span>Importe</span><b>' + (s.collected_amount != null ? fmtMoney(s.collected_amount) : '—') + '</b></div><div><span>Medio</span><b>' + esc(s.payment_mode || '—') + '</b></div>' : '') +
+          '</div>' +
+          '<div class="delivery-evidence"><div><h4>RECEPCIÓN</h4><p><b>Recibió:</b> ' + esc(ev && ev.receiver_name || 'Sin evidencia registrada') + '</p>' + (ev && ev.created_at ? '<p><b>Registrada:</b> ' + dt(ev.created_at) + '</p>' : '') + '</div>' +
+          '<div class="signature-card"><h4>FIRMA</h4>' + (sig ? '<img src="' + sig + '" alt="Firma de recepción">' : '<p>Sin firma disponible.</p>') + '</div></div>' +
+          (rc ? '<div class="receipt-card"><h4>RECIBIDO CONFORME</h4><p><b>Comprobante:</b> ' + esc(rc.receipt_number || '—') + ' · <b>Generado:</b> ' + (rc.generated_at ? dt(rc.generated_at) : '—') + '</p><p><b>Email:</b> ' + esc(rc.recipient_email || '—') + '</p></div>' : '') +
+          (mails.length ? '<div class="email-trace"><h4>EMAILS DE LA ENTREGA</h4>' + mails.map(m => '<div><b>' + esc(m.kind || '') + '</b><span>' + esc(m.status || '') + (m.sent_at ? ' · ' + dt(m.sent_at) : '') + (m.error ? ' · ' + esc(m.error) : '') + '</span></div>').join('') + '</div>' : '') +
+        '</section>';
+        traceBox.querySelector('[data-close-trace]').onclick = () => { traceBox.innerHTML = ''; };
+        traceBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (e) { traceBox.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; }
+      finally { btn.disabled = false; btn.textContent = 'VER ENTREGA'; }
+    });
     box.querySelectorAll('[data-pdf]').forEach(b => b.onclick = async () => { try { const v = +b.closest('tr').dataset.v, blob = await api.downloadRoutePdf(id, v); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Hoja_' + r.number + '_v' + v + '.pdf'; document.body.appendChild(a); a.click(); a.remove(); } catch (e) { again({ err: true, text: e.message }); } });
     box.querySelectorAll('[data-retry]').forEach(b => b.onclick = () => run(async () => {
       const v = +b.closest('tr').dataset.v, snap = await api.routePdfSnapshot(id);
