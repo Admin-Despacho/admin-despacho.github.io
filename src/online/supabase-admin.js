@@ -45,11 +45,17 @@ export const SupabaseAdmin = {
   async appSettings() { const r = await sel(this.sb.from('app_settings').select('value').eq('key', 'general').maybeSingle()); return (r && r.value) || {}; },
   async setAppSettings(v) { return this._rpc('set_app_setting', { p_key: 'general', p_value: { ...(await this.appSettings()), ...v } }); },
   async emailHistory() {
-    const lab = { INTERNAL_ROUTE_APPROVAL_REQUEST: 'Aprobación ruta interna', INTERNAL_ROUTE_OBSERVED: 'Aclaración', ON_THE_WAY: 'Va en camino', DELIVERED: 'Entregado', PARTIAL: 'Entrega parcial' };
+    const lab = { INTERNAL_ROUTE_APPROVAL_REQUEST: 'Aprobación ruta interna', INTERNAL_ROUTE_OBSERVED: 'Aclaración', ON_THE_WAY: 'Va en camino', DELIVERED: 'Entregado', PARTIAL: 'Entrega parcial', SERVICE_UPCOMING: 'Próximo service', SERVICE_REQUIRED: 'Service requerido' };
     const a = await sel(this.sb.from('approval_email_jobs').select('*').order('queued_at', { ascending: false }).limit(100));
     const c = await sel(this.sb.from('customer_email_jobs').select('*').order('queued_at', { ascending: false }).limit(100));
     const h = await sel(this.sb.from('sheet_email_jobs').select('*').order('queued_at', { ascending: false }).limit(100));
-    return [...a.map(j => ({ ...j, source: 'approval' })), ...c.map(j => ({ ...j, source: 'customer' })), ...h.map(j => ({ ...j, source: 'sheet', kind: 'SHEET_PDF' }))].map(j => ({ ...j, label: lab[j.kind] || (j.kind === 'SHEET_PDF' ? 'PDF de hoja' : j.kind) }));
+    const s = await sel(this.sb.from('vehicle_service_email_jobs').select('*').order('queued_at', { ascending: false }).limit(100)).catch(() => []);
+    return [
+      ...a.map(j => ({ ...j, source: 'approval' })),
+      ...c.map(j => ({ ...j, source: 'customer' })),
+      ...h.map(j => ({ ...j, source: 'sheet', kind: 'SHEET_PDF' })),
+      ...s.map(j => ({ ...j, source: 'service', kind: j.alert_level === 'REQUIRED' ? 'SERVICE_REQUIRED' : 'SERVICE_UPCOMING' }))
+    ].sort((x, y) => String(y.queued_at || '').localeCompare(String(x.queued_at || ''))).map(j => ({ ...j, label: lab[j.kind] || (j.kind === 'SHEET_PDF' ? 'PDF de hoja' : j.kind) }));
   },
   // NOC
   async applyCreditNote(p) { return this._rpc('apply_credit_note', { p }); },
