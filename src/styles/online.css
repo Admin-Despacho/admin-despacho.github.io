@@ -537,3 +537,64 @@ body.no-publish #btnPublish{display:none!important}
   .service-register-box{grid-template-columns:1fr}
   .service-register-box .btn{grid-column:auto}
 }
+
+
+/* RC4.1.16 · Informes de transportistas tercerizados. */
+.rp-mode-switch{
+  display:flex;
+  border:1px solid #c5d2d7;
+  border-radius:10px;
+  overflow:hidden;
+  background:#fff;
+}
+.rp-mode-switch button{
+  border:0;
+  background:#fff;
+  padding:9px 14px;
+  font-weight:800;
+  color:#62727a;
+  cursor:pointer;
+}
+.rp-mode-switch button.on{background:#071820;color:#fff}
+.third-carriers{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+.third-carriers button{
+  border:1px solid #c9d7dc;
+  background:#fff;
+  border-radius:9px;
+  padding:9px 14px;
+  font-weight:800;
+  cursor:pointer;
+}
+.third-carriers button.on{
+  background:#14c9dd;
+  border-color:#14c9dd;
+  color:#05242b;
+}
+.third-summary{
+  grid-template-columns:repeat(4,minmax(0,1fr));
+}
+.third-total{
+  display:flex;
+  justify-content:space-between;
+  gap:16px;
+  align-items:center;
+  margin-top:14px;
+  padding:14px 16px;
+  border:1px solid #d8e2e6;
+  border-radius:12px;
+  background:#f7fafb;
+}
+.third-total b{font-size:17px}
+@media(max-width:950px){
+  .third-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rp-mode-switch{width:100%}
+}
+@media(max-width:650px){
+  .third-summary{grid-template-columns:1fr}
+  .third-total{flex-direction:column;align-items:flex-start}
+}
