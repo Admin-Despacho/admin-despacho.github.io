@@ -864,48 +864,64 @@ const Publisher = {
   },
   async open() {
     const b = this.bridge(); if (!b) return;
-    if (RouteStore.published) { toast('Esta hoja ya está publicada (' + RouteStore.published.number + ').'); return; }
-    const rows = this.rows(); if (!rows.length) { toast('La hoja no tiene pedidos para publicar.'); return; }
+    if (RouteStore.published) { toast('Esta hoja ya está cerrada (' + RouteStore.published.number + ').'); return; }
+    const rows = this.rows(); if (!rows.length) { toast('La hoja no tiene pedidos para procesar.'); return; }
     const bad = this.problems();
     const carriers = await b.carriers();
     const names = [...new Set(rows.map(r => r.transportista))];
     const carrier = names.length === 1 ? carriers.find(c => Normalizer.name(c.name) === Normalizer.name(names[0])) : null;
+    const external = !!(carrier && carrier.kind === 'EXTERNO' && carrier.report_group !== 'CRISTIAN_TORRES');
     const m = document.createElement('div'); m.className = 'modal open'; m.id = 'publishModal';
     let resp = [];
-    if (carrier) { try { resp = await b.responsables(carrier.id); } catch (e) { resp = []; } }
+    if (carrier && !external) { try { resp = await b.responsables(carrier.id); } catch (e) { resp = []; } }
     const vehicles = carrier && carrier.kind === 'INTERNO' && b.vehicles ? (await b.vehicles().catch(() => [])).filter(v => v.active) : [];
-    const blockMsg = !carrier ? (names.length > 1 ? 'La hoja tiene pedidos de varios transportistas (' + names.join(', ') + '). Publicá una hoja por transportista.' : 'El transportista "' + (names[0] || '') + '" no está dado de alta.')
-      : !resp.length ? 'No hay usuarios activos compatibles con ' + carrier.name + '.' : bad.length ? 'Hay ' + bad.length + ' pedido(s) con revisión pendiente o sin monto: ' + bad.map(r => r.mainOrder || r.shipOrder).join(', ') + '.' : '';
-    m.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"><header><b>PUBLICAR HOJA</b></header><div class="body">' +
+    const blockMsg = !carrier ? (names.length > 1 ? 'La hoja tiene pedidos de varios transportistas (' + names.join(', ') + '). Prepará una hoja por transportista.' : 'El transportista "' + (names[0] || '') + '" no está dado de alta.')
+      : (!external && !resp.length) ? 'No hay usuarios activos compatibles con ' + carrier.name + '.'
+      : bad.length ? 'Hay ' + bad.length + ' pedido(s) con revisión pendiente o sin monto: ' + bad.map(r => r.mainOrder || r.shipOrder).join(', ') + '.' : '';
+    const title = external ? 'DESPACHAR E IMPRIMIR' : 'PUBLICAR HOJA';
+    m.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"><header><b>' + title + '</b></header><div class="body">' +
       '<p>Transportista: <b>' + esc(carrier ? carrier.name : (names.join(', ') || '—')) + '</b> · ' + rows.length + ' entregas</p>' +
-      (resp.length ? '<label>Responsable <select class="ed" id="pubResp">' + resp.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select></label>' : '') +
+      (external ? '<p>Al confirmar, la hoja quedará registrada como <b>despachada al transporte tercerizado</b>, contará en Informes → Otros transportistas y se abrirá la impresión.</p>' : '<p>Al confirmar, la hoja se publica primero y luego se genera el PDF según la configuración. No hace falta generar un PDF por separado.</p>') +
+      (!external && resp.length ? '<label>Responsable <select class="ed" id="pubResp">' + resp.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select></label>' : '') +
       (carrier && carrier.kind === 'INTERNO' && vehicles.length ? '<label>Vehículo <select class="ed" id="pubVeh"><option value="">— sin vehículo —</option>' + vehicles.map(v => '<option value="' + v.id + '">' + esc(v.name + ' · ' + v.plate) + '</option>').join('') + '</select></label>' : '') +
       (blockMsg ? '<p class="shiperr" id="pubBlock">' + esc(blockMsg) + '</p>' : '') + '<p class="shiperr" id="pubErr" hidden></p></div>' +
-      '<footer><button class="btn ghost" type="button" id="pubCancel">Cancelar</button><button class="btn go" type="button" id="pubGo"' + (blockMsg ? ' disabled' : '') + '>PUBLICAR</button></footer></div>';
+      '<footer><button class="btn ghost" type="button" id="pubCancel">Cancelar</button><button class="btn go" type="button" id="pubGo"' + (blockMsg ? ' disabled' : '') + '>' + title + '</button></footer></div>';
     document.body.appendChild(m);
     m.querySelector('#pubCancel').onclick = () => m.remove();
     m.querySelector('#pubGo').onclick = async ev => {
       ev.target.disabled = true;
       try {
-        const pl = await this.payload(carrier, m.querySelector('#pubResp').value); const veh = m.querySelector('#pubVeh'); if (veh && veh.value) pl.vehicle_id = veh.value;
-        pl.pdf_model = JSON.parse(JSON.stringify(ExportModel.build())); // el PDF sale SIEMPRE de este snapshot publicado
-        const r = await b.publish(pl);
-        RouteStore.published = { id: r.id, number: r.number, at: r.published_at, carrier: carrier.name, responsable: (resp.find(u => u.id === r.responsable_id) || {}).full_name || '' };
-        const revisedFrom = RouteStore.revision && RouteStore.revision.version; RouteStore.revision = null;
-        RouteStore.log({ tipo: revisedFrom ? 'hoja corregida y republicada' : 'hoja publicada', numero: r.number, version: r.version || 1, versionAnterior: revisedFrom || null }); await RouteStore.flush();
-        m.remove(); toast('Hoja ' + r.number + ' publicada · disponible en tiempo real para ' + RouteStore.published.responsable); SheetTabs.render();
-        await this.afterPublish(r, pl.pdf_model); this.render();
+        const respSel = m.querySelector('#pubResp');
+        const pl = await this.payload(carrier, respSel ? respSel.value : null);
+        const veh = m.querySelector('#pubVeh'); if (veh && veh.value) pl.vehicle_id = veh.value;
+        pl.pdf_model = JSON.parse(JSON.stringify(ExportModel.build()));
+        if (external) {
+          const r = await b.dispatchExternal(pl);
+          RouteStore.published = { id: r.id, number: r.number, at: r.dispatched_at || r.completed_at || r.published_at, carrier: carrier.name, responsable: '', mode: 'EXTERNAL' };
+          RouteStore.revision = null;
+          RouteStore.log({ tipo: 'hoja despachada a transporte tercerizado', numero: r.number, transportista: carrier.name, version: r.version || 1 }); await RouteStore.flush();
+          m.remove(); toast('Hoja ' + r.number + ' despachada a ' + carrier.name + ' · registrada en informes.'); SheetTabs.render();
+          await this.afterPublish(r, pl.pdf_model, false); await this.render();
+          const pb = document.getElementById('btnPrint'); if (pb) pb.click();
+        } else {
+          const r = await b.publish(pl);
+          RouteStore.published = { id: r.id, number: r.number, at: r.published_at, carrier: carrier.name, responsable: (resp.find(u => u.id === r.responsable_id) || {}).full_name || '', mode: 'APP' };
+          const revisedFrom = RouteStore.revision && RouteStore.revision.version; RouteStore.revision = null;
+          RouteStore.log({ tipo: revisedFrom ? 'hoja corregida y republicada' : 'hoja publicada', numero: r.number, version: r.version || 1, versionAnterior: revisedFrom || null }); await RouteStore.flush();
+          m.remove(); toast('Hoja ' + r.number + ' publicada · disponible en tiempo real para ' + RouteStore.published.responsable); SheetTabs.render();
+          await this.afterPublish(r, pl.pdf_model, true); this.render();
+        }
       } catch (e) { const er = m.querySelector('#pubErr'); er.textContent = e.message; er.hidden = false; ev.target.disabled = false; }
     };
   },
   // ===== PDF automático al publicar (RC1.2): se guarda en Storage privado; la descarga es aparte y nunca revierte la publicación =====
-  async afterPublish(r, model) {
+  async afterPublish(r, model, allowDownload = true) {
     const b = this.bridge(), pdf = b.pdf; if (!pdf) return;
     const cfg = await pdf.settings().catch(() => ({ pdf_auto_generate: true, pdf_auto_download: true }));
     if (!cfg.pdf_auto_generate) { RouteStore.published.pdf = { status: 'NO_GENERADO', version: r.version || 1 }; await RouteStore.flush(); return; }
     await this.makePdf(r.id, r.number, r.version || 1, model);
     const p = RouteStore.published.pdf;
-    if (p.status === 'OK' && cfg.pdf_auto_download) p.downloaded = this.tryDownload(p.bytes, p.file_name);
+    if (p.status === 'OK' && allowDownload && cfg.pdf_auto_download) p.downloaded = this.tryDownload(p.bytes, p.file_name);
     delete p.bytes; await RouteStore.flush();
   },
   async makePdf(id, number, version, model) {
@@ -934,18 +950,31 @@ const Publisher = {
   // PUBLICADA → NOTIFICADA → VISTA → INICIADA → FINALIZADA (en vivo)
   async render() {
     const btn = document.getElementById('btnPublish'), box = document.getElementById('pubStatus'), b = this.bridge();
+    const standalonePrint = document.getElementById('btnPrint'), standalonePdf = document.getElementById('btnPdf');
     if (!btn || !box) return;
+    if (b) { if (standalonePrint) standalonePrint.hidden = true; if (standalonePdf) standalonePdf.hidden = true; }
     btn.hidden = !b; if (!b) return;
     const pub = RouteStore.published;
-    btn.textContent = pub ? 'PUBLICADA ' + pub.number : 'PUBLICAR HOJA'; btn.disabled = !!pub;
-    box.hidden = !pub; if (!pub) return;
+    if (!pub) {
+      btn.disabled = false; btn.textContent = 'PUBLICAR HOJA';
+      try {
+        const rows = this.rows(), names = [...new Set(rows.map(r => r.transportista))], carriers = rows.length ? await b.carriers() : [];
+        const carrier = names.length === 1 ? carriers.find(c => Normalizer.name(c.name) === Normalizer.name(names[0])) : null;
+        if (carrier && carrier.kind === 'EXTERNO' && carrier.report_group !== 'CRISTIAN_TORRES') btn.textContent = 'DESPACHAR E IMPRIMIR';
+      } catch (e) {}
+      box.hidden = true; return;
+    }
+    const external = pub.mode === 'EXTERNAL';
+    btn.textContent = (external ? 'DESPACHADA ' : 'PUBLICADA ') + pub.number; btn.disabled = true;
+    box.hidden = false;
     let st = null; try { st = await b.status(pub.id); } catch (e) { st = null; }
     const step = (k, label, at) => '<div class="pst' + (at ? ' on' : '') + '" data-st="' + k + '"><span>' + label + '</span><b>' + (at ? new Date(at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '—') + '</b></div>';
-    box.innerHTML = '<div class="pubbar"><b>HOJA ' + esc(pub.number) + '</b> · ' + esc(pub.carrier) + ' · ' + esc(pub.responsable) + '</div><div class="psteps">' +
-      '' + step('PUBLICADA', 'PUBLICADA', st ? st.published_at : pub.at) + step('NOTIFICADA', 'NOTIFICADA', st && st.notified_at) + step('VISTA', 'VISTA', st && st.viewed_at) + step('INICIADA', 'INICIADA', st && st.started_at) + step('FINALIZADA', 'FINALIZADA', st && st.completed_at) + '</div>' +
-      (pub.pdf ? '<div class="pdfbar" id="pdfBar">' + (pub.pdf.status === 'OK' ? '<b>✓ HOJA PUBLICADA · ✓ PDF GENERADO</b><span>' + esc(pub.pdf.file_name) + (pub.pdf.downloaded ? ' · descargado' : '') + '</span><button class="btn soft" type="button" id="pdfDl">DESCARGAR PDF</button>'
-        : pub.pdf.status === 'PDF_ERROR' ? '<b>HOJA PUBLICADA · PDF PENDIENTE</b><span>' + esc(pub.pdf.error || '') + '</span><button class="btn dark" type="button" id="pdfRetry">REINTENTAR PDF</button>'
-        : '<b>✓ HOJA PUBLICADA</b><span>PDF automático desactivado</span>') + '</div>' : '');
+    box.innerHTML = external
+      ? '<div class="pubbar"><b>HOJA ' + esc(pub.number) + '</b> · ' + esc(pub.carrier) + ' · DESPACHO TERCERIZADO</div><div class="psteps">' + step('DESPACHADA', 'DESPACHADA', st && (st.dispatched_at || st.completed_at) || pub.at) + '</div>' +
+        (pub.pdf ? '<div class="pdfbar" id="pdfBar">' + (pub.pdf.status === 'OK' ? '<b>✓ DESPACHO REGISTRADO · ✓ PDF GUARDADO</b><span>' + esc(pub.pdf.file_name) + '</span><button class="btn soft" type="button" id="pdfDl">DESCARGAR PDF</button>' : pub.pdf.status === 'PDF_ERROR' ? '<b>✓ DESPACHO REGISTRADO · PDF PENDIENTE</b><span>' + esc(pub.pdf.error || '') + '</span><button class="btn dark" type="button" id="pdfRetry">REINTENTAR PDF</button>' : '<b>✓ DESPACHO REGISTRADO</b>') + '</div>' : '')
+      : '<div class="pubbar"><b>HOJA ' + esc(pub.number) + '</b> · ' + esc(pub.carrier) + ' · ' + esc(pub.responsable) + '</div><div class="psteps">' +
+        step('PUBLICADA', 'PUBLICADA', st ? st.published_at : pub.at) + step('NOTIFICADA', 'NOTIFICADA', st && st.notified_at) + step('VISTA', 'VISTA', st && st.viewed_at) + step('INICIADA', 'INICIADA', st && st.started_at) + step('FINALIZADA', 'FINALIZADA', st && st.completed_at) + '</div>' +
+        (pub.pdf ? '<div class="pdfbar" id="pdfBar">' + (pub.pdf.status === 'OK' ? '<b>✓ HOJA PUBLICADA · ✓ PDF GENERADO</b><span>' + esc(pub.pdf.file_name) + (pub.pdf.downloaded ? ' · descargado' : '') + '</span><button class="btn soft" type="button" id="pdfDl">DESCARGAR PDF</button>' : pub.pdf.status === 'PDF_ERROR' ? '<b>HOJA PUBLICADA · PDF PENDIENTE</b><span>' + esc(pub.pdf.error || '') + '</span><button class="btn dark" type="button" id="pdfRetry">REINTENTAR PDF</button>' : '<b>✓ HOJA PUBLICADA</b><span>PDF automático desactivado</span>') + '</div>' : '');
     const dl = box.querySelector('#pdfDl'); if (dl) dl.onclick = () => this.downloadPdf().catch(e => toast(e.message));
     const rt = box.querySelector('#pdfRetry'); if (rt) rt.onclick = async () => { rt.disabled = true; await this.retryPdf(); };
   }
