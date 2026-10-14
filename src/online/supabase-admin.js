@@ -19,7 +19,7 @@ export const SupabaseAdmin = {
   async routeDetail(id) {
     const r = await sel(this.sb.from('routes').select('*, carriers(name), route_stops(*)').eq('id', id).single());
     const pdfs = await sel(this.sb.from('route_pdfs').select('*').eq('route_id', id).order('route_version'));
-    const audit = await sel(this.sb.from('audit_log').select('*').eq('target_id', id).order('created_at', { ascending: false }).limit(100)).catch(() => []);
+    const audit = await sel(this.sb.from('audit_log').select('*').eq('target_id', id).order('at', { ascending: false }).limit(100)).catch(() => []);
     const returns = await sel(this.sb.from('route_return_requests').select('*').eq('route_id', id));
     return { route: { ...r, carrier_name: r.carriers && r.carriers.name, stops: (r.route_stops || []).sort((a, b) => a.seq - b.seq) }, pdfs, audit, returns };
   },
@@ -93,14 +93,14 @@ export const SupabaseAdmin = {
   async listCreditNotes() { return sel(this.sb.from('credit_notes').select('*').order('created_at', { ascending: false }).limit(300)); },
   // Auditoría / dashboard / backup
   async auditSearch(f = {}) {
-    let q = this.sb.from('audit_log').select('*').order('created_at', { ascending: false }).limit(300);
+    let q = this.sb.from('audit_log').select('*').order('at', { ascending: false }).limit(300);
     if (f.action) q = q.ilike('action', '%' + f.action + '%');
     if (f.target) q = q.ilike('target_id', '%' + f.target + '%');
-    if (f.from) q = q.gte('created_at', f.from);
+    if (f.from) q = q.gte('at', f.from);
     let rows = await sel(q);
     const ids = [...new Set(rows.map(r => r.actor_id).filter(Boolean))];
     const ps = ids.length ? await sel(this.sb.from('profiles').select('id, full_name').in('id', ids)) : [];
-    rows = rows.map(r => ({ ...r, at: r.created_at, actor_name: (ps.find(p => p.id === r.actor_id) || {}).full_name || '' }));
+    rows = rows.map(r => ({ ...r, actor_name: (ps.find(p => p.id === r.actor_id) || {}).full_name || '' }));
     if (f.user) rows = rows.filter(r => r.actor_name.toLowerCase().includes(f.user.toLowerCase()));
     if (f.text) rows = rows.filter(r => JSON.stringify([r.before, r.after]).toLowerCase().includes(f.text.toLowerCase()));
     if (f.module) rows = rows.filter(r => moduleOfAction(r.action) === f.module);
