@@ -154,7 +154,8 @@ export async function openHistory(api, me) {
         '<td>' + (p.status === 'OK' ? '<button class="btn soft" type="button" data-pdf>PDF</button>' : '<button class="btn dark" type="button" data-retry>REINTENTAR PDF</button>') + '</td></tr>').join('') : '<tr><td colspan="6">Sin PDF registrado.</td></tr>') + '</tbody></table></div>' +
       (pend.length ? '<h3 class="dsub">DEVOLUCIÓN SOLICITADA</h3>' + pend.map(x => '<div class="pkrow" data-ret="' + x.id + '"><span>' + esc(x.reason) + ' · ' + dt(x.created_at) + '</span><span class="uact"><input class="ed" data-rnote placeholder="Resolución (versión/corrección)"><button class="btn soft" type="button" data-rres="RESOLVED">RESOLVER</button><button class="btn soft" type="button" data-rres="REJECTED">RECHAZAR</button></span></div>').join('') : '') +
       '<div class="uact hacts"><button class="btn soft" type="button" id="hExcel">EXCEL</button><button class="btn soft" type="button" id="hAudit">AUDITORÍA</button>' +
-      (active ? '<button class="btn soft" type="button" id="hResend">REENVIAR NOTIFICACIÓN</button><input class="ed" id="hCancelWhy" placeholder="Motivo de cancelación"><button class="btn danger" type="button" id="hCancel">CANCELAR</button>' : '') + '</div><div id="hAuditBox"></div></section>';
+      (active && me.role === 'OPERARIO_DEPOSITO' && hasPerm(me, 'requests.create') ? '<button class="btn dark" type="button" id="hRequestChange">SOLICITAR MODIFICACIÓN</button>' : '') +
+      (active ? '<button class="btn soft" type="button" id="hResend">REENVIAR NOTIFICACIÓN</button>' + (hasPerm(me, 'routes.cancel') ? '<input class="ed" id="hCancelWhy" placeholder="Motivo de cancelación"><button class="btn danger" type="button" id="hCancel">CANCELAR</button>' : '') : '') + '</div><div id="hAuditBox"></div></section>';
     msgBox(box.querySelector('#hSheet'), m);
     const again = t => detail(id, t);
     const signatureSrc = raw => {
@@ -252,6 +253,22 @@ export async function openHistory(api, me) {
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); a.download = name; document.body.appendChild(a); a.click(); a.remove();
     }, 'Excel descargado (columnas de la plantilla publicada).', () => {});
     box.querySelector('#hAudit').onclick = () => { box.querySelector('#hAuditBox').innerHTML = '<ul class="alist">' + (d.audit.length ? d.audit.map(a => '<li>' + dt(a.at || a.created_at) + ' · ' + esc(a.action) + '</li>').join('') : '<li>Sin eventos.</li>') + '</ul>'; };
+    const rq = box.querySelector('#hRequestChange'); if (rq) rq.onclick = async () => {
+      const reason = prompt('Indicá qué se publicó mal y qué necesitás modificar en la hoja ' + r.number + ':');
+      if (!reason || !reason.trim()) return;
+      rq.disabled = true;
+      try {
+        await api.createOperationalRequest({
+          op_id: 'postpub-' + id + '-' + (crypto.randomUUID ? crypto.randomUUID() : Date.now()),
+          request_type: 'CAMBIO_POST_PUBLICACION',
+          route_id: id,
+          reason: reason.trim(),
+          payload: { route_number: r.number, route_version: r.version }
+        });
+        again({ text: 'Solicitud enviada a tu Superior. La hoja publicada no se modifica hasta que la solicitud sea aprobada.' });
+      } catch (e) { again({ err: true, text: e.message }); }
+      finally { rq.disabled = false; }
+    };
     const rs = box.querySelector('#hResend'); if (rs) rs.onclick = () => run(() => api.resendNotification(id), 'Notificación reenviada al responsable.', again);
     const cx = box.querySelector('#hCancel'); if (cx) cx.onclick = async () => {
       const ns = api.routeNocSummary ? await api.routeNocSummary(id).catch(() => null) : null, hasNoc = ns && ns.count > 0;
