@@ -47,7 +47,8 @@ export const money = n => '$ ' + Math.round(Number(n) || 0).toLocaleString('es-A
  *  { kind: '7D' }  últimos 7 días (hoy incluido) · { kind: '15D' }
  *  { kind: 'MONTH', year, month }  mes CALENDARIO (no "últimos 30 días")
  *  { kind: 'FREE', from, to }      desde / hasta
- *  { kind: 'WEEKLY', saturday }    informe semanal: desde el sábado anterior 15:00 hasta ese sábado 15:00
+ *  { kind: 'WEEKLY', saturday }    informe semanal: desde el sábado anterior al corte actual
+ *  { kind: 'BIWEEKLY', cutoff, previous, time } informe quincenal entre dos cortes configurados
  *  { kind: 'MONTHLY', year, month } informe mensual
  * Devuelve: { start, end, days, label, fromTs, toTs } con [fromTs, toTs) en milisegundos UTC.
  */
@@ -67,12 +68,17 @@ export function period(sel, now = Date.now()) {
       return range(sel.from, sel.to, dmy(sel.from) + ' al ' + dmy(sel.to));
     }
     case 'WEEKLY': {
-      // Corte: sábado 15:00 Mendoza. Lo que finaliza después entra en el informe siguiente (sin huecos ni duplicados).
-      // Una sola convención en asunto, email, PDF, historial y pantalla: la ventana real sábado 15:00 → sábado 15:00.
-      const sat = sel.saturday, prevSat = addDays(sat, -7);
-      const win = dmy(prevSat) + ' 15:00 al ' + dmy(sat) + ' 15:00';
-      return { start: prevSat, end: sat, days: 7, costStart: addDays(sat, -6), costEnd: sat, label: 'Ventana ' + win, window: win, fromTs: atLocal(prevSat, '15:00'), toTs: atLocal(sat, '15:00'),
+      const sat = sel.saturday, prevSat = addDays(sat, -7), time = sel.time || '15:00';
+      const win = dmy(prevSat) + ' ' + time + ' al ' + dmy(sat) + ' ' + time;
+      return { start: prevSat, end: sat, days: 7, costStart: addDays(sat, -6), costEnd: sat, label: 'Ventana ' + win, window: win, fromTs: atLocal(prevSat, time), toTs: atLocal(sat, time),
         cutoffNote: 'Ventana analizada: ' + win + '. Lo que se finaliza después entra en el informe siguiente.' };
+    }
+    case 'BIWEEKLY': {
+      const cutoff = sel.cutoff, prev = sel.previous, time = sel.time || '15:00';
+      if (!cutoff || !prev || prev >= cutoff) throw new Error('Período quincenal inválido.');
+      const win = dmy(prev) + ' ' + time + ' al ' + dmy(cutoff) + ' ' + time;
+      return { start: prev, end: cutoff, days: daysBetween(prev, cutoff), costStart: addDays(prev, 1), costEnd: cutoff, label: 'Quincenal · ' + win, window: win, fromTs: atLocal(prev, time), toTs: atLocal(cutoff, time),
+        cutoffNote: 'Ventana quincenal analizada: ' + win + '. Lo que se finaliza después entra en el informe siguiente.' };
     }
     default: throw new Error('Filtro desconocido');
   }
@@ -247,13 +253,29 @@ export function buildReport({ routes, costs, sel, now = Date.now(), type = 'SCRE
 // ---------- Programación (sábado 15:00 y cierre de mes) ----------
 // Devuelve los informes que corresponde generar en este momento (el envío es idempotente aparte).
 export function dueReports(now, settings = {}) {
-  const l = local(now), out = [];
-  const weeklyTime = settings.weekly_time || '15:00', monthlyTime = settings.monthly_time || '23:30';
-  const [wh, wm] = weeklyTime.split(':').map(Number), [mh, mm] = monthlyTime.split(':').map(Number);
-  const mins = l.hour * 60 + l.minute;
-  if (l.weekday === 6 && mins >= wh * 60 + wm) out.push({ type: 'WEEKLY', sel: { kind: 'WEEKLY', saturday: l.date } });
-  const y = +l.date.slice(0, 4), m = +l.date.slice(5, 7);
-  if (+l.date.slice(8, 10) === daysInMonth(y, m) && mins >= mh * 60 + mm) out.push({ type: 'MONTHLY', sel: { kind: 'MONTHLY', year: y, month: m } });
+  const l = local(now), out = [], mode = settings.schedule_mode || 'WEEKLY';
+  if (mode === 'OFF') return out;
+  const weeklyTime = settings.weekly_time || '15:00', monthlyTime = settings.monthly_time || '23:30', biweeklyTime = settings.biweekly_time || '15:00';
+  const mins = l.hour * 60 + l.minute, atOrAfter = t => { const [h, m] = t.split(':').map(Number); return mins >= h * 60 + m; };
+  const y = +l.date.slice(0, 4), m = +l.date.slice(5, 7), day = +l.date.slice(8, 10);
+  if (mode === 'WEEKLY' && l.weekday === (settings.weekly_day ?? 6) && atOrAfter(weeklyTime)) {
+    out.push({ type: 'WEEKLY', sel: { kind: 'WEEKLY', saturday: l.date, time: weeklyTime } });
+  }
+  if (mode === 'BIWEEKLY') {
+    const d1 = Number(settings.biweekly_day_1 || 1), d2 = Number(settings.biweekly_day_2 || 15);
+    if ((day === d1 || day === d2) && atOrAfter(biweeklyTime)) {
+      let previous;
+      if (day === d2) previous = l.date.slice(0, 8) + String(d1).padStart(2, '0');
+      else {
+        const prevMonthLast = addDays(l.date.slice(0, 8) + '01', -1);
+        previous = prevMonthLast.slice(0, 8) + String(d2).padStart(2, '0');
+      }
+      out.push({ type: 'BIWEEKLY', sel: { kind: 'BIWEEKLY', cutoff: l.date, previous, time: biweeklyTime } });
+    }
+  }
+  if (mode === 'MONTHLY' && day === daysInMonth(y, m) && atOrAfter(monthlyTime)) {
+    out.push({ type: 'MONTHLY', sel: { kind: 'MONTHLY', year: y, month: m } });
+  }
   return out;
 }
 
@@ -263,4 +285,4 @@ export const emailKey = (type, start, end, recipient, version = 1, resend = 0) =
 
 export const fileName = rep => rep.type === 'MONTHLY'
   ? 'Informe_Cristian_Torres_Mensual_' + rep.period.start.slice(0, 7) + '.pdf'
-  : 'Informe_Cristian_Torres_' + (rep.type === 'WEEKLY' ? 'Semanal' : 'Manual') + '_' + rep.period.end + '.pdf';
+  : 'Informe_Cristian_Torres_' + (rep.type === 'WEEKLY' ? 'Semanal' : rep.type === 'BIWEEKLY' ? 'Quincenal' : 'Manual') + '_' + rep.period.end + '.pdf';
