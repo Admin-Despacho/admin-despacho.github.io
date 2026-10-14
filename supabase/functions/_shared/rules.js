@@ -2,15 +2,13 @@
 // Edge Functions (Deno). La base de datos aplica las MISMAS reglas en SQL (migración Fase 1):
 // la pantalla nunca es la única defensa.
 
-// RC4: DESPACHO queda por compatibilidad (los usuarios existentes migran a SUPERVISOR_DESPACHO); no se ofrece para usuarios nuevos.
-export const ROLES = ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO', 'DESPACHO', 'TRANSPORTISTA', 'TRANSPORTISTA_INTERNO', 'SOLO_LECTURA'];
-export const ASSIGNABLE_ROLES = ROLES.filter(r => r !== 'DESPACHO');
+export const ROLES = ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO', 'TRANSPORTISTA', 'TRANSPORTISTA_INTERNO', 'SOLO_LECTURA'];
+export const ASSIGNABLE_ROLES = [...ROLES];
 
 export const ROLE_LABEL = {
   ADMIN: 'Admin General',
   SUPERVISOR_DESPACHO: 'Superior Despacho',
   OPERARIO_DEPOSITO: 'Operario Depósito',
-  DESPACHO: 'Despacho',
   TRANSPORTISTA: 'Transportista',
   TRANSPORTISTA_INTERNO: 'Transportista interno',
   SOLO_LECTURA: 'Solo lectura'
@@ -46,8 +44,6 @@ export const ROLE_PERMISSIONS = {
     'requests.create', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team',
     'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicle_mileage.resolve_alerts', 'vehicles.view'],
   OPERARIO_DEPOSITO: ['routes.create', 'routes.view_own', 'locations.view', 'drafts.create', 'drafts.view_own', 'requests.create', 'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicles.view'],
-  DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view',
-    'columns.view', 'vehicle_mileage.view', 'vehicles.view', 'drafts.create', 'drafts.view_own', 'requests.create'],
   TRANSPORTISTA: ['routes.view_assigned', 'deliveries.update', 'deliveries.capture_signature'],
   TRANSPORTISTA_INTERNO: ['routes.view_assigned', 'internal_routes.use', 'deliveries.update', 'deliveries.capture_signature'],
   SOLO_LECTURA: ['routes.view_all']
