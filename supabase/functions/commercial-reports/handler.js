@@ -46,8 +46,10 @@ async function handleRaw(req, deps) {
         const routes = await st.loadThirdPartyRoutes();
         const inPeriod = routes.filter(r => {
           if (carrierId && r.carrier_id !== carrierId) return false;
-          if (r.operational_status !== 'COMPLETADA' || !r.completed_at) return false;
-          const t = Date.parse(r.completed_at);
+          if (r.operational_status !== 'COMPLETADA') return false;
+          const eventAt = r.dispatch_mode === 'EXTERNAL' ? (r.dispatched_at || r.completed_at) : r.completed_at;
+          if (!eventAt) return false;
+          const t = Date.parse(eventAt);
           return t >= p.fromTs && t < p.toTs;
         });
         const carrierById = new Map(carriers.map(c => [c.id, c]));
@@ -69,11 +71,13 @@ async function handleRaw(req, deps) {
               if (value > 0) { withAmount += orderCount; bucket.with_amount += orderCount; }
               else { zeroAmount += orderCount; bucket.zero_amount += orderCount; }
             }
+            const eventAt = r.dispatch_mode === 'EXTERNAL' ? (r.dispatched_at || r.completed_at) : r.completed_at;
             details.push({
-              completed_at: r.completed_at, route_number: r.number, carrier_id: r.carrier_id,
+              completed_at: eventAt, dispatched_at: r.dispatched_at || null, dispatch_mode: r.dispatch_mode || null,
+              route_number: r.number, carrier_id: r.carrier_id,
               carrier_name: (carrierById.get(r.carrier_id) || {}).name || r.carrier_id,
               client_name: s.client_name, order_numbers: nums, bultos: Number(s.bultos) || 0,
-              outcome: s.outcome || null, merchandise_amount: value
+              outcome: r.dispatch_mode === 'EXTERNAL' ? 'DESPACHADO' : (s.outcome || null), merchandise_amount: value
             });
           }
         }
