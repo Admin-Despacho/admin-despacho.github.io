@@ -167,11 +167,42 @@ export async function openHistory(api, me) {
       }
       return 'data:image/png;base64,' + s;
     };
-    const locationText = loc => {
+    let geoQueue = Promise.resolve();
+    const geoLabelFallback = loc => {
       if (!loc) return 'Sin registro';
       if (loc.missing_reason) return 'Sin ubicación · ' + esc(loc.missing_reason);
-      if (loc.lat != null && loc.lon != null) return esc(Number(loc.lat).toFixed(6) + ', ' + Number(loc.lon).toFixed(6)) + (loc.accuracy != null ? ' · precisión ' + esc(Math.round(Number(loc.accuracy))) + ' m' : '');
+      if (loc.lat != null && loc.lon != null) return 'Ubicación registrada' + (loc.accuracy != null ? ' · precisión ' + esc(Math.round(Number(loc.accuracy))) + ' m' : '');
       return 'Sin registro';
+    };
+    const reversePlace = loc => {
+      if (!loc || loc.lat == null || loc.lon == null) return Promise.resolve(geoLabelFallback(loc));
+      const lat = Number(loc.lat), lon = Number(loc.lon), key = 'okd-geo:' + lat.toFixed(4) + ',' + lon.toFixed(4);
+      const cached = localStorage.getItem(key);
+      if (cached) return Promise.resolve(cached + (loc.accuracy != null ? ' · precisión ' + Math.round(Number(loc.accuracy)) + ' m' : ''));
+      const work = async () => {
+        try {
+          const u = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=10&accept-language=es&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon);
+          const res = await fetch(u, { headers: { Accept: 'application/json' } });
+          if (!res.ok) throw new Error('geocode ' + res.status);
+          const j = await res.json(), a = j.address || {};
+          const clean = v => String(v || '').replace(/^Departamento de\s+/i, '').replace(/^Partido de\s+/i, '').trim();
+          const city = clean(a.city || a.town || a.village || a.municipality || a.hamlet || a.suburb);
+          const dept = clean(a.county || a.state_district);
+          const state = clean(a.state);
+          const parts = [];
+          [city, dept || state].forEach(v => { if (v && !parts.some(x => x.toLowerCase() === v.toLowerCase())) parts.push(v); });
+          const place = parts.join(', ') || clean(j.display_name).split(',').slice(0, 2).join(',').trim() || 'Ubicación registrada';
+          localStorage.setItem(key, place);
+          return place + (loc.accuracy != null ? ' · precisión ' + Math.round(Number(loc.accuracy)) + ' m' : '');
+        } catch (e) {
+          return geoLabelFallback(loc);
+        } finally {
+          await new Promise(r => setTimeout(r, 1050));
+        }
+      };
+      const p = geoQueue.then(work, work);
+      geoQueue = p.catch(() => null);
+      return p;
     };
     if (me.role === 'ADMIN') box.querySelectorAll('[data-delivery-detail]').forEach(btn => btn.onclick = async () => {
       const row = btn.closest('tr'), traceBox = box.querySelector('#deliveryTraceBox');
@@ -185,8 +216,8 @@ export async function openHistory(api, me) {
             '<div><span>Realizado por</span><b>' + esc(tr.outcome_by_name || '—') + '</b></div>' +
             '<div><span>Llegada</span><b>' + (s.arrived_at ? dt(s.arrived_at) : 'Sin registro') + '</b></div>' +
             '<div><span>Entrega / cierre</span><b>' + (s.outcome_at ? dt(s.outcome_at) : 'Sin registro') + '</b></div>' +
-            '<div class="wide"><span>Ubicación al llegar</span><b>' + locationText(s.arrive_location) + '</b></div>' +
-            '<div class="wide"><span>Ubicación al finalizar</span><b>' + locationText(s.finish_location) + '</b></div>' +
+            '<div class="wide"><span>Ubicación al llegar</span><b data-geo="arrive">' + geoLabelFallback(s.arrive_location) + '</b></div>' +
+            '<div class="wide"><span>Ubicación al finalizar</span><b data-geo="finish">' + geoLabelFallback(s.finish_location) + '</b></div>' +
             (s.location_warning ? '<div class="wide warning"><span>Alerta de ubicación</span><b>' + esc(s.location_warning) + '</b></div>' : '') +
             (s.outcome_note || s.outcome_reason ? '<div class="wide"><span>Observación / motivo</span><b>' + esc(s.outcome_note || s.outcome_reason) + '</b></div>' : '') +
             (s.collection_status && s.collection_status !== 'PENDIENTE' ? '<div><span>Cobranza</span><b>' + esc(s.collection_status.replaceAll('_',' ')) + '</b></div><div><span>Importe</span><b>' + (s.collected_amount != null ? fmtMoney(s.collected_amount) : '—') + '</b></div><div><span>Medio</span><b>' + esc(s.payment_mode || '—') + '</b></div>' : '') +
@@ -196,6 +227,13 @@ export async function openHistory(api, me) {
           (rc ? '<div class="receipt-card"><h4>RECIBIDO CONFORME</h4><p><b>Comprobante:</b> ' + esc(rc.receipt_number || '—') + ' · <b>Generado:</b> ' + (rc.generated_at ? dt(rc.generated_at) : '—') + '</p><p><b>Email:</b> ' + esc(rc.recipient_email || '—') + '</p></div>' : '') +
           (mails.length ? '<div class="email-trace"><h4>EMAILS DE LA ENTREGA</h4>' + mails.map(m => '<div><b>' + esc(m.kind || '') + '</b><span>' + esc(m.status || '') + (m.sent_at ? ' · ' + dt(m.sent_at) : '') + (m.error ? ' · ' + esc(m.error) : '') + '</span></div>').join('') + '</div>' : '') +
         '</section>';
+        const geoArrive = traceBox.querySelector('[data-geo="arrive"]'), geoFinish = traceBox.querySelector('[data-geo="finish"]');
+        if (geoArrive && s.arrive_location && s.arrive_location.lat != null) reversePlace(s.arrive_location).then(v => { if (geoArrive.isConnected) geoArrive.textContent = v; });
+        if (geoFinish && s.finish_location && s.finish_location.lat != null) reversePlace(s.finish_location).then(v => { if (geoFinish.isConnected) geoFinish.textContent = v; });
+        const grid = traceBox.querySelector('.delivery-trace-grid');
+        if (grid && ((s.arrive_location && s.arrive_location.lat != null) || (s.finish_location && s.finish_location.lat != null))) {
+          const at = document.createElement('p'); at.className = 'geo-attribution'; at.textContent = 'Ubicación aproximada · © OpenStreetMap contributors'; grid.after(at);
+        }
         traceBox.querySelector('[data-close-trace]').onclick = () => { traceBox.innerHTML = ''; };
         traceBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       } catch (e) { traceBox.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; }
