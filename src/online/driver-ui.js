@@ -245,7 +245,9 @@ export class DriverApp {
     const delivered = o === 'ENTREGADO' || o === 'ENTREGA_PARCIAL', cristian = ['CT-ESTE', 'CT-ALR'].includes(r.carrier_id), cob = ['COBRANZA', 'AMBAS'].includes(st.task);
     form.innerHTML = '<b class="drv-ft">' + OUT[o] + '</b>' +
       (delivered ? '<input class="ed" data-f="recv" placeholder="Nombre de quien recibe (obligatorio)"><div class="sigbox"><canvas width="300" height="120" data-sig></canvas><button type="button" class="linkbtn" data-sigclr>Borrar firma</button></div>' +
-        (cristian ? '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') : '') +
+        (cristian ? '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') +
+        // RC4.1: email del cliente en esta MISMA pantalla (identidad + evidencia + contacto); opcional. Con email válido y entrega total se envía el Recibido Conforme.
+        '<input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Email del cliente (opcional · Recibido Conforme)"><span class="drv-mailhint" data-mailhint></span>' : '') +
       (cob ? '<div class="drv-cob"><b>COBRANZA</b>' + (st.expected_amount != null ? ' · esperado $ ' + Number(st.expected_amount).toLocaleString('es-AR') : '') +
         '<select class="ed" data-f="cst"><option value="">Resultado de la cobranza…</option><option value="COBRADO">COBRADO</option><option value="COBRO_PARCIAL">COBRO PARCIAL</option><option value="NO_COBRADO">NO COBRADO</option></select>' +
         '<input class="ed" data-f="camt" inputmode="decimal" placeholder="Importe cobrado"><select class="ed" data-f="cmode"><option value="">Modo de pago…</option><option>EFECTIVO</option><option>TRANSFERENCIA</option><option>CHEQUE</option></select><input class="ed" data-f="cnote" placeholder="Observación / motivo de la cobranza"></div>' : '') +
@@ -260,11 +262,22 @@ export class DriverApp {
       cv.onpointermove = e => { if (!down) return; ctx.lineTo(...pos(e)); ctx.stroke(); drawn = true; };
       cv.onpointerup = () => { down = false; };
       form.querySelector('[data-sigclr]').onclick = () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; }; }
+    // Autocompletar con el perfil reutilizable (CUIL → DNI → cliente). Sin conexión, simplemente no se completa.
+    const em = form.querySelector('[data-f="email"]'), hint = form.querySelector('[data-mailhint]'), rv = form.querySelector('[data-f="recv"]');
+    const fill = async cuil => {
+      if (!em || !this.api.deliveryIdentityLookup) return;
+      const p = await this.api.deliveryIdentityLookup(st.id, cuil || null).catch(() => null);
+      if (!p) return;
+      if (p.email && (!em.value || em.dataset.auto === '1')) { em.value = p.email; em.dataset.auto = '1'; hint.textContent = 'Email recuperado del cliente (podés corregirlo)'; }
+      if (p.full_name && rv && !rv.value) rv.value = p.full_name;
+    };
+    if (em) { em.oninput = () => { em.dataset.auto = ''; hint.textContent = ''; }; fill(null); }
     // DNI: si el CUIL ya tiene DNI no se pide foto
     let dni = null; const cu = form.querySelector('[data-f="cuil"]');
     if (cu) cu.onchange = async () => {
       const n = cu.value.replace(/\D/g, ''), box2 = form.querySelector('[data-dni]');
       if (n.length !== 11) { box2.textContent = 'El CUIL debe tener 11 dígitos.'; return; }
+      fill(n);
       const has = await this.api.cuilHasDni(n).catch(() => false);
       box2.innerHTML = has ? '✓ DNI YA REGISTRADO' : 'CUIL nuevo · foto del DNI (opcional, JPEG/PNG hasta 5 MB) <input type="file" accept="image/jpeg,image/png" capture="environment" data-dnifile>';
       const fi = box2.querySelector('[data-dnifile]');
@@ -284,6 +297,9 @@ export class DriverApp {
         if (!drawn) return fail('Falta la firma de quien recibe.');
         extra.evidence = { receiver_name: recv, signature_png_b64: cv.toDataURL('image/png').split(',')[1] };
         if (cristian) { const n = cu.value.replace(/\D/g, ''); if (n.length !== 11) return fail('El CUIL debe tener 11 dígitos.'); extra.evidence.cuil = n; if (dni) extra.evidence.dni_upload = dni; }
+        const mail = em ? em.value.trim().toLowerCase() : '';
+        if (mail && !/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(mail)) return fail('El email del cliente no es válido (podés dejarlo vacío).');
+        if (mail) extra.evidence.email = mail;
       }
       if (cob) {
         const cst = form.querySelector('[data-f="cst"]').value, amt = form.querySelector('[data-f="camt"]').value.replace(/\./g, '').replace(',', '.'), note = form.querySelector('[data-f="cnote"]').value.trim();

@@ -4,7 +4,7 @@ import { sendQueuedEmails } from '../_shared/internal-route.js';
 import { sendCustomerEmails } from '../_shared/customer-email.js';
 
 import { json, withCors } from '../_shared/http.js';
-/** deps: { cronSecret, getUserFromJwt, getProfile, store (ver sendQueuedEmails), provider, appUrl, getSettings, setSettings(s), audit } */
+/** deps: { cronSecret, getUserFromJwt, getProfile, store (ver sendQueuedEmails), provider, appUrl, inlineLogo (logo del Recibido Conforme por CID), getSettings, setSettings(s), audit } */
 export const handle = withCors(handleRaw);
 async function handleRaw(req, deps) {
   if (req.method === 'OPTIONS') return json(200, { ok: true });
@@ -26,7 +26,7 @@ async function handleRaw(req, deps) {
   }
   if (action === 'send_customer_queued' || action === 'retry_customer') {
     if (me && !(hasPerm(me, 'settings.manage') || hasPerm(me, 'routes.view_all'))) return json(403, { error: 'Sin permiso.' });
-    return json(200, { results: await sendCustomerEmails({ store: deps.customerStore, provider: deps.provider, onlyIds: action === 'retry_customer' ? body.job_ids : undefined }) });
+    return json(200, { results: await sendCustomerEmails({ store: deps.customerStore, provider: deps.provider, inlineLogo: deps.inlineLogo, onlyIds: action === 'retry_customer' ? body.job_ids : undefined }) });
   }
   // Email diario de PDFs de hojas (default 18:00 Mendoza): cola idempotente hoja+versión+destinatario; adjunta el PDF guardado
   if (action === 'send_sheet_emails') {

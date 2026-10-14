@@ -4,6 +4,7 @@ import { validateUserAction, compatibleResponsables, hasPerm, canBeResponsable, 
 import { reorderError, applyReorder, currentStop, approvalRecipients, sendQueuedEmails, routeDiff } from '../../supabase/functions/_shared/internal-route.js';
 import { sendCustomerEmails } from '../../supabase/functions/_shared/customer-email.js';
 import { DemoAdmin } from './demo-admin.js';
+import { DemoRC4 } from './demo-rc4.js';
 
 
 const KEY = 'okd_online_demo_v2';
@@ -124,7 +125,7 @@ export class DemoApi {
     if (cur && cur.status === 'OK') return cur;
     this.db.routePdfs[key] = { ...(cur || { route_id: routeId, route_version: version, attempts: 0 }), status: 'PDF_ERROR', error: msg, attempts: (cur ? cur.attempts : 0) + 1 }; this._save(); return this.db.routePdfs[key];
   }
-  async routePdfSnapshot(routeId) { this._refresh(); const me = await this.me(); if (!hasPerm(me, 'routes.publish')) throw err('Sin permiso.', 'FORBIDDEN', 403); const r = this.db.routes2.find(x => x.id === routeId); return { number: r.number, version: r.version || 1, pdf_model: r.sheet_snapshot.pdf_model }; }
+  async routePdfSnapshot(routeId) { this._refresh(); const me = await this.me(); { const rr = (this.db.routes2 || []).find(x => x.id === routeId); if (rr) this._routeScope(me, rr); } if (!hasPerm(me, 'routes.publish')) throw err('Sin permiso.', 'FORBIDDEN', 403); const r = this.db.routes2.find(x => x.id === routeId); return { number: r.number, version: r.version || 1, pdf_model: r.sheet_snapshot.pdf_model }; }
   async downloadRoutePdf(routeId, version) {
     this._refresh(); const me = await this.me(); const r = this.db.routes2.find(x => x.id === routeId);
     if (!(hasPerm(me, 'routes.view_all') || (r && r.responsable_id === me.id))) throw err('ACCESO NO AUTORIZADO', 'FORBIDDEN', 403);
@@ -289,7 +290,7 @@ export class DemoApi {
     const D = this.db.drafts = this.db.drafts || {};
     let d = D[sheetKey];
     if (!d) { if (!create) return null; d = D[sheetKey] = { id: 'dr-' + (++this.db.seq), client_sheet_key: sheetKey, owner_id: me.id, status: 'BORRADOR', route_id: null, created_at: new Date().toISOString() }; }
-    if (d.owner_id !== me.id && !hasPerm(me, 'routes.manage_all_drafts')) throw err('FORBIDDEN_DRAFT: el borrador pertenece a otro operador', 'FORBIDDEN_DRAFT', 403);
+    if (!this._canManageDraftOf(me, d.owner_id)) throw err('FORBIDDEN_DRAFT: el borrador pertenece a otro operador', 'FORBIDDEN_DRAFT', 403);
     if (needDraft && d.status !== 'BORRADOR') throw err('DRAFT_PUBLISHED: la hoja ya fue publicada; no se modifica como borrador', 'DRAFT_PUBLISHED', 409);
     return d;
   }
@@ -365,21 +366,40 @@ export class DemoApi {
     const d = (this.db.identity || {})[cuil]; if (!d) return null; const o = this.db.storage[d.storage_path];
     const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(o.b64), c => c.charCodeAt(0))], { type: o.mime })); setTimeout(() => URL.revokeObjectURL(url), 60000); return url; // vence en 60 s
   }
-  async cuilHasDni(cuil) { this._refresh(); return !!((this.db.identity || {})[String(cuil || '').replace(/\D/g, '')]); }
+  async cuilHasDni(cuil) { this._refresh(); const d = (this.db.identity || {})[String(cuil || '').replace(/\D/g, '')]; return !!(d && d.storage_path); }
+  // RC4.1: autocompletar la segunda pantalla (solo el chofer de la parada o Admin; nunca la foto del DNI). CUIL → DNI → cliente.
+  async deliveryIdentityLookup(stopId, cuil, dni) {
+    this._refresh(); const me = await this.me();
+    const r = (this.db.routes2 || []).find(x => x.stops.some(s => s.id === stopId)); if (!r) throw err('NOT_FOUND', 'NOT_FOUND', 404);
+    if (!(r.responsable_id === me.id || me.role === 'ADMIN')) throw err('FORBIDDEN', 'FORBIDDEN', 403);
+    const st = r.stops.find(s => s.id === stopId), I = this.db.identity || {}, c = String(cuil || '').replace(/\D/g, ''), d = String(dni || '').replace(/\D/g, '');
+    let p = c && I[c] ? { ...I[c], cuil: c, source: 'CUIL' } : null;
+    if (!p && d) { const k = Object.keys(I).filter(x => I[x].dni === d).sort((a, b) => String(I[b].updated_at).localeCompare(String(I[a].updated_at)))[0]; if (k) p = { ...I[k], cuil: k, source: 'DNI' }; }
+    if (p) return { source: p.source, cuil: p.cuil, dni: p.dni || null, full_name: p.full_name || null, email: p.email || null, has_dni_photo: !!p.storage_path };
+    if (st.client_key) { const e = Object.values(this.db.evidence || {}).filter(x => x.client_key === st.client_key && x.receiver_email).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
+      if (e) return { source: 'CLIENTE', cuil: e.cuil || null, dni: e.receiver_dni || null, full_name: e.receiver_name, email: e.receiver_email, has_dni_photo: !!(e.cuil && I[e.cuil] && I[e.cuil].storage_path) }; }
+    return null;
+  }
   _onTheWay(r) {
     const cur = currentStop(r.stops); if (!cur || !cur.customer_email) return;
     this._queueCustomer(r, cur, 'ON_THE_WAY');
   }
-  _queueCustomer(r, st, kind) {
+  _queueCustomer(r, st, kind, recipient) {
     const J = this.db.customerJobs = this.db.customerJobs || [], key = r.id + '|' + st.id + '|' + kind;
-    if (!J.some(j => j.idempotency_key === key)) J.push({ id: 'cj-' + (++this.db.seq), route_id: r.id, stop_id: st.id, kind, recipient: String(st.customer_email).trim().toLowerCase(), idempotency_key: key, status: 'QUEUED', retry_count: 0 });
+    if (!J.some(j => j.idempotency_key === key)) J.push({ id: 'cj-' + (++this.db.seq), route_id: r.id, stop_id: st.id, kind, recipient: String(recipient || st.customer_email).trim().toLowerCase(), idempotency_key: key, status: 'QUEUED', retry_count: 0, attempts: [] });
   }
   async sendCustomerQueued(onlyIds) {
     this.db.outboxCustomer = this.db.outboxCustomer || [];
     const store = { listJobs: async q => (this.db.customerJobs || []).filter(j => q.statuses.includes(j.status) && (!q.ids || q.ids.includes(j.id))),
-      stopFor: async j => this.db.routes2.find(r => r.id === j.route_id).stops.find(x => x.id === j.stop_id), updateJob: async (id, p) => Object.assign(this.db.customerJobs.find(j => j.id === id), p) };
-    const provider = { send: async m => { if (typeof window !== 'undefined' && window.OKD_MAIL_FAIL) throw new Error('Proveedor de email caído (simulado)'); this.db.outboxCustomer.push({ to: m.to, subject: m.subject, html: m.html }); return { id: 'c' + this.db.outboxCustomer.length }; } };
-    const out = await sendCustomerEmails({ store, provider, onlyIds }); this._save(); return out;
+      stopFor: async j => this.db.routes2.find(r => r.id === j.route_id).stops.find(x => x.id === j.stop_id),
+      receiptFor: async j => { const rc = (this.db.receipts || {})[j.stop_id]; if (!rc) throw new Error('no existe el comprobante'); return rc; },
+      // mismo historial de intentos que el trigger del servidor
+      updateJob: async (id, p) => { const j = this.db.customerJobs.find(x => x.id === id); Object.assign(j, p, { last_attempt_at: new Date().toISOString() });
+        j.attempts = (j.attempts || []).concat([{ at: j.last_attempt_at, status: j.status, provider_id: j.provider_id || null, error: j.error || null, retry: j.retry_count || 0 }]); } };
+    const provider = { send: async m => { if (typeof window !== 'undefined' && window.OKD_MAIL_FAIL) throw new Error('Proveedor de email caído (simulado)'); this.db.outboxCustomer.push({ to: m.to, subject: m.subject, html: m.html, idempotency_key: m.idempotencyKey, attachments: (m.attachments || []).map(x => ({ filename: x.filename, content_type: x.content_type, content_id: x.content_id, bytes: Math.floor(String(x.content || '').length * 3 / 4) - ((String(x.content || '').match(/=+$/) || [''])[0].length) })) }); return { id: 'c' + this.db.outboxCustomer.length }; } };
+    // mismo logo inline (CID) que la Edge Function; el módulo se carga aparte solo cuando hay que enviar
+    const [lm, rb] = await Promise.all([import('../../supabase/functions/_shared/ok-accesorios-logo.js'), import('../../supabase/functions/_shared/resend-body.js')]);
+    const out = await sendCustomerEmails({ store, provider, onlyIds, inlineLogo: rb.inlineLogoFrom(lm) }); this._save(); return out;
   }
   async setStopOutcome(stopId, outcome, note, reason, opId, extra) {
     this._net(); this._refresh();
@@ -395,6 +415,12 @@ export class DemoApi {
     if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome)) {
       if (!String(ev.receiver_name || '').trim() || !ev.signature_png_b64) throw err('EVIDENCE_REQUIRED: nombre del receptor y firma obligatorios', 'EVIDENCE_REQUIRED', 400);
       if (cristian) { cuil = String(ev.cuil || '').replace(/\D/g, ''); if (cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
+      else { cuil = String(ev.cuil || '').replace(/\D/g, '') || null; if (cuil && cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
+      // RC4.1: email del receptor (segunda pantalla), opcional; si viene debe ser válido
+      var vEmail = String(ev.email || '').trim().toLowerCase() || null;
+      if (vEmail && !(/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(vEmail) && vEmail.length <= 254)) throw err('EMAIL_INVALID: el email no es válido', 'EMAIL_INVALID', 400);
+      var vDni = String(ev.dni || '').replace(/\D/g, '') || (cuil ? cuil.slice(2, 10) : null);
+      if (vDni && !/^[0-9]{7,8}$/.test(vDni)) throw err('DNI_INVALID: el DNI debe tener 7 u 8 dígitos', 'DNI_INVALID', 400);
       if (ev.dni_photo_b64) throw err('DNI_STORAGE_REQUIRED: la foto del DNI se sube a Storage privado', 'DNI_STORAGE_REQUIRED', 400);
       if (cristian && ev.dni_storage_path) { const o = (this.db.storage || {})[ev.dni_storage_path];
         if (!new RegExp('^' + cuil + '/[0-9a-f-]{36}\\.(jpg|png)$').test(ev.dni_storage_path) || !o || o.owner !== me.id) throw err('DNI_UPLOAD_INVALID', 'DNI_UPLOAD_INVALID', 400); }
@@ -409,9 +435,24 @@ export class DemoApi {
     if (['COBRANZA', 'AMBAS'].includes(st.task)) Object.assign(st, { collection_status: col.status, collected_amount: col.amount != null ? Number(col.amount) : null, payment_mode: col.mode || null, collection_note: col.note || null });
     if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome)) {
       st.receiver_name = String(ev.receiver_name).trim(); // el nombre sí; firma y CUIL/DNI solo en evidencia privada
-      this.db.evidence = this.db.evidence || {}; this.db.evidence[st.id] = { receiver_name: st.receiver_name, signature_png_b64: ev.signature_png_b64, cuil, created_by: me.id, at: new Date().toISOString() };
-      if (cristian && ev.dni_storage_path) { this.db.identity = this.db.identity || {}; if (!this.db.identity[cuil]) this.db.identity[cuil] = { storage_path: ev.dni_storage_path, mime: this.db.storage[ev.dni_storage_path].mime, registered_by: me.id, registered_at: new Date().toISOString() }; }
-      if (st.customer_email) this._queueCustomer(r, st, outcome === 'ENTREGADO' ? 'DELIVERED' : 'PARTIAL');
+      this.db.evidence = this.db.evidence || {};
+      if (!this.db.evidence[st.id]) this.db.evidence[st.id] = { receiver_name: st.receiver_name, signature_png_b64: ev.signature_png_b64, cuil, created_by: me.id, at: new Date().toISOString(), receiver_email: vEmail, receiver_dni: vDni, client_key: st.client_key || null };
+      this.db.identity = this.db.identity || {};
+      if (cristian && ev.dni_storage_path) { const id0 = this.db.identity[cuil]; if (!id0 || !id0.storage_path) this.db.identity[cuil] = Object.assign(id0 || {}, { storage_path: ev.dni_storage_path, mime: this.db.storage[ev.dni_storage_path].mime, registered_by: me.id, registered_at: new Date().toISOString() }); }
+      // Perfil reutilizable (misma capa de identidad): nombre, DNI, email y cliente
+      if (cuil) { const p0 = this.db.identity[cuil] = this.db.identity[cuil] || { registered_by: me.id, registered_at: new Date().toISOString() };
+        if (vEmail && vEmail !== p0.email) Object.assign(p0, { email: vEmail, email_updated_at: new Date().toISOString(), email_updated_by: me.id });
+        Object.assign(p0, { full_name: st.receiver_name || p0.full_name, dni: vDni || p0.dni, client_key: st.client_key || p0.client_key, updated_at: new Date().toISOString() }); }
+      // Recibido Conforme: entrega total + email válido → comprobante único + envío (la falla del email nunca revierte la entrega)
+      let receipt = false;
+      if (outcome === 'ENTREGADO' && vEmail) {
+        this.db.receipts = this.db.receipts || {};
+        if (!this.db.receipts[st.id]) { const num = 'RC-' + r.number + '-' + String(st.seq || 0).padStart(3, '0');
+          this.db.receipts[st.id] = { stop_id: st.id, route_id: r.id, receipt_number: num, recipient_email: vEmail, generated_by: me.id, generated_at: new Date().toISOString(),
+            snapshot: { receipt_number: num, route_number: r.number, client_name: st.client_name, order_numbers: st.order_numbers, receiver_name: st.receiver_name, delivered_at: new Date().toISOString(), carrier_id: r.carrier_id } }; }
+        this._queueCustomer(r, st, 'RECIBIDO_CONFORME', vEmail); receipt = true;
+      }
+      if (st.customer_email && !receipt) this._queueCustomer(r, st, outcome === 'ENTREGADO' ? 'DELIVERED' : 'PARTIAL');
     }
     if (opId) this.db.ops[opId] = stopId;
     this._onTheWay(r); this._save(); await this.sendCustomerQueued(); return st;
@@ -463,7 +504,7 @@ export class DemoApi {
       if (kmEnd == null || kmEnd === '') throw err('KM_REQUIRED: cargá el kilometraje final', 'KM_REQUIRED', 400);
       if (Number(kmEnd) < v.current_km) throw err('KM_LOWER: el kilometraje no puede bajar (último ' + v.current_km + ')', 'KM_LOWER', 400);
       if (r.km_start != null && Number(kmEnd) < r.km_start) throw err('KM_LOWER: el km final no puede ser menor al inicial', 'KM_LOWER', 400);
-      v.current_km = Number(kmEnd); r.km_end = Number(kmEnd); r.km_ended_at = new Date().toISOString(); this._serviceCheck(v);
+      v.current_km = Number(kmEnd); r.km_end = Number(kmEnd); r.km_ended_at = new Date().toISOString(); this._serviceCheck(v); this._checkTripRange(r);
     }
     const summary = {}; r.stops.forEach(s => { summary[s.outcome] = (summary[s.outcome] || 0) + 1; });
     const mods = (r.events || []).length;
@@ -535,7 +576,7 @@ export class DemoApi {
     this._audit(me, 'VEHICLE_SAVED', v.id, null, { plate }); this._save(); return v;
   }
   async correctVehicleKm(id, km, reason) {
-    this._refresh(); const me = await this.me(); if (!hasPerm(me, 'vehicles.manage')) throw err('Sin permiso.', 'FORBIDDEN', 403);
+    this._refresh(); const me = await this.me(); if (!hasPerm(me, 'vehicles.manage') && !hasPerm(me, 'vehicle_mileage.edit')) throw err('Sin permiso.', 'FORBIDDEN', 403);
     if (!String(reason || '').trim()) throw err('Indicá el motivo de la corrección.', 'REASON_REQUIRED', 400);
     const v = this.db.vehicles.find(x => x.id === id); const before = v.current_km; v.current_km = Number(km);
     this._audit(me, 'VEHICLE_KM_CORRECTED', id, { km: before }, { km: Number(km), reason }); this._save();
@@ -567,9 +608,10 @@ export class DemoApi {
   // ===== Cancelar hoja activa (Administración): libera los pedidos; el correlativo no se reutiliza =====
   async activeRoutes() { this._refresh(); return (this.db.routes2 || []).filter(r => ['PUBLICADA', 'EN_CURSO'].includes(r.operational_status)).map(r => ({ id: r.id, number: r.number, carrier_name: r.carrier_name, responsable_name: r.responsable_name, operational_status: r.operational_status })); }
   async cancelRoute(id, reason) {
-    this._refresh(); const me = await this.me(); if (!hasPerm(me, 'routes.manage_all_drafts')) throw err('Sin permiso.', 'FORBIDDEN', 403);
+    this._refresh(); const me = await this.me(); if (!hasPerm(me, 'routes.manage_all_drafts') && !hasPerm(me, 'routes.cancel')) throw err('Sin permiso.', 'FORBIDDEN', 403);
     if (!String(reason || '').trim()) throw err('Indicá el motivo.', 'REASON_REQUIRED', 400);
     const r = this.db.routes2.find(x => x.id === id && ['PUBLICADA', 'EN_CURSO'].includes(x.operational_status)); if (!r) throw err('Solo hojas publicadas o en curso.', 'BAD_STATE', 409);
+    { const any0 = this.db.routes2.find(x => x.id === id); if (any0) this._routeScope(me, any0); }   // RC4.1: fuera de alcance → FORBIDDEN_ROUTE
     r.operational_status = 'CANCELADA'; Object.values(this.db.drafts || {}).filter(d => d.route_id === id).forEach(d => { d.status = 'CANCELADA'; });
     // RC3: cancelar ≠ revertir NOC. Importes intactos; las aplicaciones consumidas quedan en revisión administrativa
     (this.db.nocApps || []).filter(a => a.route_id === id && a.status === 'CONSUMED').forEach(a => {
@@ -686,3 +728,4 @@ export class DemoApi {
 
 // RC2: borradores, historial, configuración, auditoría, backup y dashboard (mismas reglas que la base)
 Object.assign(DemoApi.prototype, DemoAdmin);
+Object.assign(DemoApi.prototype, DemoRC4);

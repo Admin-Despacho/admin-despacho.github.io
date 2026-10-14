@@ -1,6 +1,9 @@
 // Admin → USUARIOS. Misma estética que la versión offline (cabecera oscura, tabla negra con línea cyan).
 import { esc, fmtDate, fmtDay } from './util.js';
-import { ROLES, ROLE_LABEL, hasPerm, compatibleResponsables, MODULES, MODULE_LABEL, roleModules } from '../../supabase/functions/_shared/rules.js';
+import { ROLES, ROLE_LABEL, hasPerm, compatibleResponsables, MODULES, MODULE_LABEL, roleModules, ROLE_PERMISSIONS, SENSITIVE_PERMISSIONS } from '../../supabase/functions/_shared/rules.js';
+import { PERM_GROUPS, PERM_LABEL } from './rc4-ui.js';
+// RC4: roles que tienen superior asignado y qué roles pueden ser su superior
+const SUP_ROLES = { OPERARIO_DEPOSITO: ['SUPERVISOR_DESPACHO', 'ADMIN'], SUPERVISOR_DESPACHO: ['ADMIN'] };
 import { openAccount } from './account-ui.js';
 
 const STATUS_LABEL = { ACTIVO: 'ACTIVO', DESHABILITADO: 'DESHABILITADO', ARCHIVADO: 'ARCHIVADO', INVITACION_PENDIENTE: 'INVITACIÓN PENDIENTE' };
@@ -73,9 +76,11 @@ export class UsersPanel {
         if (u.status === 'ACTIVO') act += b('reset_password', u.id, 'RESTABLECER CONTRASEÑA') + b('revoke_sessions', u.id, 'CERRAR SESIONES ABIERTAS') + (self ? '' : b('disable', u.id, 'DESHABILITAR'));
         if (u.status === 'DESHABILITADO' || u.status === 'ARCHIVADO') act += b('reactivate', u.id, 'REACTIVAR');
         if (!self && u.status !== 'ARCHIVADO') act += b('remove', u.id, 'ELIMINAR / ARCHIVAR', 'danger');
+        if (!self && u.status !== 'ARCHIVADO' && hasPerm(this.me, 'users.manage_permissions')) act += b('perms', u.id, 'PERMISOS');
         act += '</div>';
       }
-      return '<tr class="' + (u.status === 'ARCHIVADO' ? 'dim' : '') + '" data-uid="' + u.id + '"><td><b>' + esc(u.full_name) + '</b>' + (self ? ' <span style="color:var(--muted);font-size:11.5px">(vos)</span>' : '') + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.phone || '—') + '</td><td>' + esc(ROLE_LABEL[u.role] || u.role) + '</td><td>' + esc(carr) + '</td>' +
+      return '<tr class="' + (u.status === 'ARCHIVADO' ? 'dim' : '') + '" data-uid="' + u.id + '"><td><b>' + esc(u.full_name) + '</b>' + (self ? ' <span style="color:var(--muted);font-size:11.5px">(vos)</span>' : '') +
+        (u.supervisor_user_id ? '<br><small class="usup" style="color:var(--muted)">Superior: ' + esc((this.users.find(x => x.id === u.supervisor_user_id) || {}).full_name || '—') + '</small>' : '') + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.phone || '—') + '</td><td>' + esc(ROLE_LABEL[u.role] || u.role) + '</td><td>' + esc(carr) + '</td>' +
         '<td><span class="ust ' + u.status + '">' + esc(STATUS_LABEL[u.status] || u.status) + '</span></td><td>' + esc(fmtDate(u.last_sign_in_at)) + '</td><td>' + esc(fmtDay(u.created_at)) + '</td>' + (canManage ? '<td>' + act + '</td>' : '') + '</tr>';
     }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No hay usuarios con esos filtros.</td></tr>';
     this.el.querySelectorAll('#upBody [data-act]').forEach(btn => btn.addEventListener('click', () => this.doAction(btn.dataset.act, btn.dataset.id)));
@@ -90,6 +95,7 @@ export class UsersPanel {
     const ask = t => confirm(t);
     switch (act) {
       case 'edit': return this.openEdit(u);
+      case 'perms': return this.openPermissions(u);
       case 'disable':
         if (!ask('¿Deshabilitar a ' + u.full_name + '? No podrá iniciar sesión ni operar y se cierran sus sesiones abiertas. Su historial se conserva.')) return;
         return this.withActiveRoutes(u, 'disable', u.full_name + ' quedó DESHABILITADO.');
@@ -148,6 +154,26 @@ export class UsersPanel {
       m.id = 'activeRoutesModal';
     }
   }
+  // RC4: permisos individuales como checkboxes (base del rol + otorgados − quitados). El servidor valida y audita cada cambio.
+  async openPermissions(u) {
+    let eff = []; try { eff = await this.api.userEffectivePermissions(u.id); } catch (e) { this.say(e.message, true); await this.reload(); return; }
+    const base = new Set(ROLE_PERMISSIONS[u.role] || []), effSet = new Set(eff), admin = this.me.role === 'ADMIN';
+    const sup = this.users.find(x => x.id === u.supervisor_user_id);
+    const body = '<p class="permhead" id="permHead"><b>' + esc(u.full_name) + '</b> · ' + esc(ROLE_LABEL[u.role] || u.role) + ' · Superior: ' + esc(sup ? sup.full_name : '—') + '</p>' +
+      '<p style="margin:0 0 8px;font-size:12px;color:var(--muted)">Tildado = permiso efectivo. <i>(rol)</i> = incluido en el rol. Los sensibles solo los otorga Admin General. Nadie modifica sus propios permisos.</p>' +
+      PERM_GROUPS.map(([g, ps]) => '<fieldset class="permgrp"><legend>' + esc(g) + '</legend>' + ps.map(p => '<label class="chk permchk"><input type="checkbox" data-perm="' + p + '"' + (effSet.has(p) ? ' checked' : '') +
+        (!admin && SENSITIVE_PERMISSIONS.includes(p) && !effSet.has(p) ? ' disabled' : '') + '> ' + esc(PERM_LABEL[p] || p) + (base.has(p) ? ' <i>(rol)</i>' : '') + (SENSITIVE_PERMISSIONS.includes(p) ? ' <small>· sensible</small>' : '') + '</label>').join('') + '</fieldset>').join('') +
+      '<label>Motivo (queda en auditoría)<input id="permWhy" placeholder="Ej.: encargado de plantillas"></label>';
+    const m = this.modal('PERMISOS DE ' + esc(u.full_name.toUpperCase()), body, async mm => {
+      const why = mm.querySelector('#permWhy').value || null, changes = [];
+      mm.querySelectorAll('[data-perm]').forEach(i => { const p = i.dataset.perm, on = i.checked; if (on === effSet.has(p)) return;
+        changes.push([p, on ? (base.has(p) ? 'ROLE' : 'GRANT') : (base.has(p) ? 'REVOKE' : 'ROLE')]); });
+      for (const [p, st] of changes) await this.api.setUserPermission(u.id, p, st, why);
+      this.say(changes.length ? 'Permisos de ' + u.full_name + ' actualizados (' + changes.length + ' cambio' + (changes.length > 1 ? 's' : '') + ', auditados).' : 'Sin cambios.');
+      await this.reload();
+    }, 'GUARDAR PERMISOS');
+    m.id = 'permModal';
+  }
   modal(title, bodyHtml, onSave, saveLabel) {
     const m = document.createElement('div'); m.className = 'umodal';
     m.innerHTML = '<div class="udialog" role="dialog" aria-modal="true"><header><b>' + esc(title) + '</b></header><div class="body">' + bodyHtml + '<div class="up-msg err" id="umErr" hidden></div></div><footer><button class="btn ghost" type="button" id="umCancel">Cancelar</button>' + (onSave ? '<button class="btn dark" type="button" id="umSave">' + esc(saveLabel || 'GUARDAR') + '</button>' : '') + '</footer></div>';
@@ -175,7 +201,7 @@ export class UsersPanel {
       '<label>Rol<select id="nuRole"' + (self ? ' disabled title="No podés cambiar tu propio rol"' : '') + '>' + ROLES.map(r => '<option value="' + r + '"' + (r === role ? ' selected' : '') + '>' + esc(ROLE_LABEL[r]) + '</option>').join('') + '</select></label>' +
       '<div id="nuCarrWrap"><span style="font-size:12.5px;color:var(--muted)">Transportista / empresa (obligatorio para el rol Transportista)</span>' + this.carrierChecks(u ? u.carriers : [], self) + '</div>' +
       '<div id="nuAccess" class="nu-access"></div>' +
-      '<label id="nuSupWrap">Superior que aprueba cambios de ruta interna<select id="nuSup"><option value="">— sin superior (avisa a Administración) —</option>' + sups.map(x => '<option value="' + x.id + '"' + (u && u.supervisor_user_id === x.id ? ' selected' : '') + '>' + esc(x.full_name) + '</option>').join('') + '</select></label>' +
+      '<label id="nuSupWrap"><span id="nuSupLbl">Superior que aprueba cambios de ruta interna</span><select id="nuSup"><option value="">— sin superior (avisa a Administración) —</option>' + sups.map(x => '<option value="' + x.id + '"' + (u && u.supervisor_user_id === x.id ? ' selected' : '') + '>' + esc(x.full_name) + '</option>').join('') + '</select></label>' +
       (isNew ? '<label class="chk"><input type="checkbox" id="nuActive" checked> Activo</label><p style="margin:0;font-size:12px;color:var(--muted)">Se envía una invitación al email para que la persona cree su contraseña.</p>'
         : '<p style="margin:0;font-size:12px;color:var(--muted)">Si cambiás el email, se cambia también el email de acceso.</p>'),
       async mm => {
@@ -184,6 +210,7 @@ export class UsersPanel {
         const data = { full_name: mm.querySelector('#nuName').value, email: mm.querySelector('#nuEmail').value, phone: mm.querySelector('#nuPhone').value };
         if (isNew) {
           const nu = await this.api.action('create', { ...data, role: r, carriers: r === 'TRANSPORTISTA' ? carriers : [], active: mm.querySelector('#nuActive').checked, disabled_modules: this.disabledFrom(mm, r) });
+          const ns = SUP_ROLES[r] ? mm.querySelector('#nuSup').value : ''; if (ns && nu && nu.id) await this.api.setUserSupervisor(nu.id, ns);
           this.say('Usuario creado: ' + nu.full_name + '. ' + (nu.status === 'INVITACION_PENDIENTE' ? 'Se envió la invitación a ' + nu.email + '.' : 'Quedó deshabilitado.'));
         } else {
           const payload = { user_id: u.id, ...data };
@@ -191,13 +218,22 @@ export class UsersPanel {
           if (r === 'TRANSPORTISTA_INTERNO') payload.supervisor_user_id = mm.querySelector('#nuSup').value || null;
           payload.disabled_modules = this.disabledFrom(mm, r);
           await this.api.action('edit', payload);
+          if (SUP_ROLES[r] && hasPerm(this.me, 'users.assign_supervisor') && !self) { const ns = mm.querySelector('#nuSup').value || null; if (ns !== (u.supervisor_user_id || null)) await this.api.setUserSupervisor(u.id, ns); }
           this.say('Usuario actualizado: ' + data.full_name + '.');
         }
         await this.reload();
       });
     m.id = 'editModal';
     const roleSel = m.querySelector('#nuRole');
-    const sync = () => { m.querySelector('#nuCarrWrap').hidden = roleSel.value !== 'TRANSPORTISTA'; m.querySelector('#nuSupWrap').hidden = roleSel.value !== 'TRANSPORTISTA_INTERNO'; /* Superior: SOLO Transportista Interno */ this.renderAccess(m, roleSel.value, u ? u.disabled_modules || [] : []); };
+    const supOpts = r => SUP_ROLES[r] ? this.users.filter(x => SUP_ROLES[r].includes(x.role) && x.status === 'ACTIVO' && (!u || x.id !== u.id)) : sups;
+    const sync = () => {
+      const r = roleSel.value, withSup = r === 'TRANSPORTISTA_INTERNO' || (SUP_ROLES[r] && hasPerm(this.me, 'users.assign_supervisor'));
+      m.querySelector('#nuCarrWrap').hidden = r !== 'TRANSPORTISTA'; m.querySelector('#nuSupWrap').hidden = !withSup;
+      m.querySelector('#nuSupLbl').textContent = SUP_ROLES[r] ? 'Superior asignado (' + SUP_ROLES[r].map(x => ROLE_LABEL[x]).join(' o ') + ')' : 'Superior que aprueba cambios de ruta interna';
+      const sel = m.querySelector('#nuSup'), cur = sel.value || (u && u.supervisor_user_id) || '';
+      sel.innerHTML = '<option value="">' + (SUP_ROLES[r] ? '— sin superior (las solicitudes van a Admin General) —' : '— sin superior (avisa a Administración) —') + '</option>' + supOpts(r).map(x => '<option value="' + x.id + '"' + (x.id === cur ? ' selected' : '') + '>' + esc(x.full_name) + ' · ' + esc(ROLE_LABEL[x.role] || x.role) + '</option>').join('');
+      this.renderAccess(m, r, u ? u.disabled_modules || [] : []);
+    };
     roleSel.addEventListener('change', sync); sync();
   }
   // Acceso por rol (RC1.1): el rol carga los módulos; Administración solo puede RESTRINGIR (nunca agregar)

@@ -5,14 +5,14 @@ export const BACKUP_TABLES = [
   'roles', 'permissions', 'role_permissions', 'module_permissions', 'carriers', 'app_settings', 'financial_rules', 'dispatch_settings', 'notification_settings',
   'internal_route_notification_settings', 'report_settings', 'transport_cost_settings', 'sheet_templates', 'client_locations',
   // identidades (profiles.id → auth.users: ver scripts/restore_backup.mjs)
-  'profiles', 'user_carriers', 'user_passkeys', 'webauthn_challenges',
+  'profiles', 'user_carriers', 'user_passkeys', 'webauthn_challenges', 'user_permission_overrides',
   // vehículos
-  'vehicles', 'vehicle_services', 'vehicle_service_alerts',
+  'mileage_settings', 'vehicles', 'vehicle_services', 'vehicle_service_alerts', 'vehicle_mileage_alerts',
   // importaciones y financiación
   'source_imports', 'financial_document_groups', 'financial_document_parts', 'financing_plans',
   // hojas
   'routing_rules', 'route_sequences', 'route_number_counters', 'routes', 'route_drafts', 'route_stops', 'route_change_events', 'route_approval_requests', 'route_return_requests',
-  'route_financing_snapshots', 'order_reservations', 'shipping_amount_confirmations', 'stop_outcome_ops', 'stop_evidence', 'customer_identity_docs', 'route_pdfs',
+  'route_financing_snapshots', 'order_reservations', 'shipping_amount_confirmations', 'stop_outcome_ops', 'stop_evidence', 'delivery_receipts', 'customer_identity_docs', 'route_pdfs',
   // NOC
   'credit_notes', 'credit_note_applications', 'credit_note_events',
   // informes y emails

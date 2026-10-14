@@ -4,6 +4,7 @@ import { esc } from './util.js';
 import { hasPerm, ROLE_LABEL } from '../../supabase/functions/_shared/rules.js';
 import { DEFAULT_COLUMNS, moduleOfAction } from './demo-admin.js';
 import { zipStore, b64ToBytes, sha256Hex } from './zip.js';
+import { isRc4, appFrame, roleTopNav, openDashboardAdmin, openDashboardSupervisor, openDashboardOperario, mileageBlock } from './rc4-ui.js';
 
 const fmt = n => Number(n || 0).toLocaleString('es-AR');
 const dt = iso => iso ? new Date(iso).toLocaleString('es-AR', { timeZone: 'America/Argentina/Mendoza', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -14,20 +15,22 @@ export const NAV = [
   ['#/dashboard', 'DASHBOARD', me => hasPerm(me, 'users.view') || hasPerm(me, 'settings.manage')],
   ['#/despacho', 'DESPACHO', me => hasPerm(me, 'routes.create')],
   ['#/borradores', 'BORRADORES', me => hasPerm(me, 'routes.create')],
-  ['#/historial', 'HOJAS PUBLICADAS', me => hasPerm(me, 'routes.view_all')],
+  ['#/historial', 'HOJAS PUBLICADAS', me => hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team') || hasPerm(me, 'routes.view_own')],
   ['#/aprobaciones', 'APROBACIONES', me => hasPerm(me, 'can_approve_internal_route_changes')],
   ['#/usuarios', 'USUARIOS', me => hasPerm(me, 'users.view')],
   ['#/configuracion', 'CONFIGURACIÓN', me => hasPerm(me, 'settings.manage') || hasPerm(me, 'vehicles.manage')],
   ['#/informes', 'INFORMES', me => hasPerm(me, 'can_view_commercial_transport_reports') || hasPerm(me, 'can_manage_commercial_transport_reports')],
   ['#/conciliacion-noc', 'CONCILIACIÓN NOC', me => hasPerm(me, 'credit_notes.manage')],
   ['#/auditoria', 'AUDITORÍA', me => hasPerm(me, 'audit.view')],
-  ['#/backup', 'BACKUP', me => hasPerm(me, 'settings.manage')]
+  ['#/backup', 'BACKUP', me => hasPerm(me, 'settings.manage') || hasPerm(me, 'backup.manage')]
 ];
 export function navHtml(me, active) {
+  if (isRc4(me)) return roleTopNav(me, active);   // RC4: navegación por rol (Admin General / Superior / Operario)
   return '<nav class="adnav" id="adNav">' + NAV.filter(n => n[2](me)).map(([h, l]) => '<a href="' + h + '" class="' + (h === active ? 'on' : '') + '" data-nav="' + h + '">' + l + '</a>').join('') + '</nav>';
 }
 // Marco común de los módulos: encabezado + navegación + contenido
 function frame(me, title, active) {
+  if (isRc4(me)) return appFrame(me, title, active);   // RC4: menú lateral (diseño V4 / V2 aprobado)
   const el = document.getElementById('usersPanel'); el.hidden = false;
   el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>' + esc(title) + '</span></div><div class="sp"></div>' +
     '<span class="who-chip">' + esc(me.full_name) + ' · <b>' + esc(ROLE_LABEL[me.role] || me.role) + '</b></span><button class="tbtn" type="button" id="adLogout">Cerrar sesión</button></header>' + navHtml(me, active) + '<div class="up-wrap ad-wrap" id="adBody"></div>';
@@ -40,6 +43,9 @@ function download(name, text, type = 'application/json') { const a = document.cr
 
 // ================= DASHBOARD =================
 export async function openDashboard(api, me) {
+  if (me.role === 'ADMIN') return openDashboardAdmin(api, me);
+  if (me.role === 'SUPERVISOR_DESPACHO') return openDashboardSupervisor(api, me);
+  if (me.role === 'OPERARIO_DEPOSITO') return openDashboardOperario(api, me);
   const w = frame(me, 'Dashboard', '#/dashboard');
   let s = {}; try { s = await api.dashboardSummary(); } catch (e) { msgBox(w, { err: true, text: e.message }); }
   const tiles = NAV.filter(n => n[0] !== '#/dashboard' && n[2](me)).map(([h, l]) => '<a class="dtile" href="' + h + '">' + l + '</a>').join('');
@@ -243,6 +249,7 @@ const CFG = {
     sec.querySelector('#tplSave').onclick = () => run(() => api.saveTemplate(cid, cols.map((c, i) => ({ ...c, order: i + 1 }))), 'Plantilla guardada como versión nueva. Las hojas ya publicadas conservan la suya.', m => { sec.dataset.cid = cid; again(m); });
   },
   async vehiculos(api, me, sec, again) {
+    if (hasPerm(me, 'vehicle_mileage.view') || hasPerm(me, 'vehicle_mileage.rules_manage')) { const kb = document.createElement('div'); kb.className = 'card kmrules-in-config'; kb.id = 'kmRules'; await mileageBlock(api, me, kb, again); sec.after(kb); }
     const vs = await api.vehicleStatus(), users = (await api.listUsers().catch(() => [])).filter(u => u.role === 'TRANSPORTISTA_INTERNO' && u.status === 'ACTIVO');
     const card = v => '<div class="vcard' + (v.service_due ? ' due' : '') + (v.active === false ? ' off' : '') + '" data-vid="' + v.id + '"><b>' + esc(v.name) + ' · ' + esc(v.plate) + '</b>' + (v.active === false ? ' <em>(inactivo)</em>' : '') +
       '<div>Conductor habitual: ' + esc(v.habitual_driver_name || '—') + '</div><div>KM actual: <b>' + fmt(v.current_km) + '</b></div><div>Próximo service: <b>' + fmt(v.next_service_km) + '</b> (cada ' + fmt(v.service_interval_km) + ' km)</div>' +
@@ -474,3 +481,7 @@ async function backupSection(api, me, sec, again) {
   };
 }
 export async function openBackup(api, me) { const w = frame(me, 'Backup', '#/backup'); const sec = document.createElement('section'); sec.className = 'step rp-step'; sec.id = 'cfg-backup'; w.appendChild(sec); await backupSection(api, me, sec, () => openBackup(api, me)); }
+
+// RC4: secciones reutilizables desde Configuración operativa (el servidor valida el permiso igual)
+export const plantillasSection = (api, me, sec, again) => CFG.plantillas(api, me, sec, again);
+export const frameFor = (me, title, active) => frame(me, title, active);

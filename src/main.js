@@ -43,18 +43,28 @@ async function loadLegacy() {
 const canApprovals = me => hasPerm(me, 'can_approve_internal_route_changes');
 const adminUi = () => import('./online/admin-ui.js');
 const isAdminHome = me => hasPerm(me, 'users.view') || hasPerm(me, 'settings.manage');
+// RC4: Superior Despacho y Operario Depósito también tienen su dashboard propio
+const RC4_HOME = me => isAdminHome(me) || ['SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'].includes(me.role);
+const rc4Ui = () => import('./online/rc4-ui.js');
+const rc4Open = fn => async me => { const [r, a] = await Promise.all([rc4Ui(), adminUi()]); return r[fn](api, me, a.frameFor, a.plantillasSection); };
+const canReq = me => hasPerm(me, 'requests.create') || hasPerm(me, 'requests.view_team') || hasPerm(me, 'requests.approve_team') || me.role === 'ADMIN';
 const MODULE_ROUTES = {
-  '#/dashboard': { ok: isAdminHome, open: async me => (await adminUi()).openDashboard(api, me) },
+  '#/dashboard': { ok: RC4_HOME, open: async me => (await adminUi()).openDashboard(api, me) },
+  '#/nueva-hoja': { ok: me => hasPerm(me, 'routes.create'), open: async () => { closeOverlay(); history.replaceState(null, '', location.pathname + '#/despacho'); const b = document.getElementById('tabNew'); if (b) b.click(); } },
+  '#/solicitudes': { ok: canReq, open: rc4Open('openRequests') },
+  '#/notificaciones': { ok: me => hasPerm(me, 'routes.create') || canReq(me), open: rc4Open('openNotifications') },
+  '#/vehiculos': { ok: me => hasPerm(me, 'vehicle_mileage.view') || hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicles.manage'), open: rc4Open('openVehicles') },
+  '#/config-operativa': { ok: me => hasPerm(me, 'columns.view') || hasPerm(me, 'columns.manage_defaults') || hasPerm(me, 'vehicle_mileage.view'), open: rc4Open('openOperationalConfig') },
   '#/despacho': { ok: me => hasPerm(me, 'routes.create'), open: () => closeOverlay() },
   '#/borradores': { ok: me => hasPerm(me, 'routes.create'), open: async me => (await adminUi()).openDrafts(api, me) },
-  '#/historial': { ok: me => hasPerm(me, 'routes.view_all'), open: async me => (await adminUi()).openHistory(api, me) },
+  '#/historial': { ok: me => hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team') || hasPerm(me, 'routes.view_own'), open: async me => (await adminUi()).openHistory(api, me) },
   '#/aprobaciones': { ok: canApprovals, open: async me => { const { ApprovalsPanel } = await import('./online/approvals-ui.js'); await new ApprovalsPanel(api, me).open(); await withNav(me, '#/aprobaciones'); } },
   '#/usuarios': { ok: me => hasPerm(me, 'users.view'), open: async me => { await new UsersPanel(api, me, null, logout).open(); await withNav(me, '#/usuarios'); } },
-  '#/configuracion': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'vehicles.manage'), open: async me => (await adminUi()).openConfig(api, me) },
+  '#/configuracion': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'vehicles.manage'), open: async me => (await adminUi()).openConfig(api, me, new URLSearchParams(location.hash.split('?')[1] || '').get('sec')) },
   '#/informes': { ok: me => hasPerm(me, 'can_view_commercial_transport_reports') || hasPerm(me, 'can_manage_commercial_transport_reports'), open: async me => { const { ReportsPanel } = await import('./online/reports-ui.js'); await new ReportsPanel(api, me, logout).open(); await withNav(me, '#/informes'); } },
   '#/conciliacion-noc': { ok: me => hasPerm(me, 'credit_notes.manage'), open: async me => (await adminUi()).openNocRecon(api, me) },
   '#/auditoria': { ok: me => hasPerm(me, 'audit.view'), open: async me => (await adminUi()).openAudit(api, me) },
-  '#/backup': { ok: me => hasPerm(me, 'settings.manage'), open: async me => (await adminUi()).openBackup(api, me) },
+  '#/backup': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'backup.manage'), open: async me => (await adminUi()).openBackup(api, me) },
   '#/mis-hojas': { ok: me => hasPerm(me, 'routes.view_assigned'), open: () => closeOverlay() }
 };
 // Inserta la barra de navegación debajo del encabezado del panel abierto
@@ -124,7 +134,15 @@ async function route() {
     // Reglas del servidor (financieras + asignación): se ESPERAN y el estado queda visible. Sin servidor se puede seguir preparando
     // (contingencia identificada), pero no se publica hasta recuperar las reglas, recalcular y revisar con la versión vigente.
     if (hasPerm(me, 'routes.create')) await syncServerConfig();
-    if (!location.hash && isAdminHome(me)) location.hash = '#/dashboard';
+    // RC4: sin permiso de publicar (Operario Depósito) no se ofrece PUBLICAR; en su lugar, SOLICITAR AUTORIZACIÓN (el servidor igual rechazaría)
+    if (!hasPerm(me, 'routes.publish')) {
+      document.body.classList.add('no-publish');
+      const bp = document.getElementById('btnPublish');
+      if (bp && !document.getElementById('btnAskAuth') && hasPerm(me, 'requests.create')) {
+        const a = document.createElement('a'); a.id = 'btnAskAuth'; a.className = 'btn dark'; a.href = '#/solicitudes?nueva=1'; a.textContent = 'SOLICITAR AUTORIZACIÓN'; bp.after(a);
+      }
+    }
+    if (!location.hash && RC4_HOME(me)) location.hash = '#/dashboard';
   } else {
     show('#noPanel');
     if (hasPerm(me, 'routes.view_assigned')) { const { DriverApp } = await import('./online/driver-ui.js'); new DriverApp(api, me, logout).start(); }

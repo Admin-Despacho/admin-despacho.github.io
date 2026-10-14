@@ -1,0 +1,11 @@
+-- RC4.1 source-history marker
+--
+-- The online test environment received a generated migration named
+-- rc4_1_security_grants before the final generalized hardening was applied.
+-- Its narrow grant/revoke intent is superseded by the next migration:
+-- 20261029000100_rc4_1_1_revoke_public_function_execute.sql
+--
+-- This file intentionally performs no schema/data mutation. It exists so the
+-- repository documents the server-side migration history without attempting
+-- to replay an obsolete intermediate security state.
+select 1;

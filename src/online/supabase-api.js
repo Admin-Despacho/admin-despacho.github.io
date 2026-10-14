@@ -147,6 +147,7 @@ export class SupabaseApi {
   async setStopOutcome(stop, outcome, note, reason, opId, extra) { const r = await this._rpc('set_stop_outcome', { p_stop: stop, p_outcome: outcome, p_note: note || null, p_reason: reason || null, p_op_id: opId, p_extra: extra || null }); this.sendCustomerQueued().catch(() => null); return r; }
   async finalizeRoute(id, kmEnd) { return this._rpc('finalize_route', { p_route: id, p_km_end: kmEnd ?? null }); }
   async arriveStop(stop, location, opId) { return this._rpc('arrive_stop', { p_stop: stop, p_location: location, p_op_id: opId }); }
+  async deliveryIdentityLookup(stopId, cuil, dni) { return this._rpc('delivery_identity_lookup', { p_stop: stopId, p_cuil: cuil || null, p_dni: dni || null }); }
   async cuilHasDni(cuil) { return this._rpc('cuil_has_dni', { p_cuil: cuil }); }
   // DNI en Storage privado: subir (chofer) y URL firmada de 60 s (solo identity_docs.view). Nunca URL pública.
   async uploadIdentityDoc(cuil, file) {
@@ -240,4 +241,6 @@ export class SupabaseApi {
 
 // RC2: borradores, historial, configuración, auditoría, backup y dashboard
 import { SupabaseAdmin } from './supabase-admin.js';
+import { SupabaseRC4 } from './supabase-rc4.js';
 Object.assign(SupabaseApi.prototype, SupabaseAdmin);
+Object.assign(SupabaseApi.prototype, SupabaseRC4);

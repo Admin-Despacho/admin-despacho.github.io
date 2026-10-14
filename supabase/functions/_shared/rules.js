@@ -2,10 +2,14 @@
 // Edge Functions (Deno). La base de datos aplica las MISMAS reglas en SQL (migración Fase 1):
 // la pantalla nunca es la única defensa.
 
-export const ROLES = ['ADMIN', 'DESPACHO', 'TRANSPORTISTA', 'TRANSPORTISTA_INTERNO', 'SOLO_LECTURA'];
+// RC4: DESPACHO queda por compatibilidad (los usuarios existentes migran a SUPERVISOR_DESPACHO); no se ofrece para usuarios nuevos.
+export const ROLES = ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO', 'DESPACHO', 'TRANSPORTISTA', 'TRANSPORTISTA_INTERNO', 'SOLO_LECTURA'];
+export const ASSIGNABLE_ROLES = ROLES.filter(r => r !== 'DESPACHO');
 
 export const ROLE_LABEL = {
-  ADMIN: 'Administración',
+  ADMIN: 'Admin General',
+  SUPERVISOR_DESPACHO: 'Superior Despacho',
+  OPERARIO_DEPOSITO: 'Operario Depósito',
   DESPACHO: 'Despacho',
   TRANSPORTISTA: 'Transportista',
   TRANSPORTISTA_INTERNO: 'Transportista interno',
@@ -21,12 +25,29 @@ export const PERMISSIONS = [
   'signatures.view', 'audit.view', 'settings.manage',
   'can_approve_internal_route_changes',
   'can_view_commercial_transport_reports', 'can_manage_commercial_transport_reports',
-  'routes.manage_all_drafts', 'identity_docs.view', 'collections.manage', 'vehicles.manage', 'credit_notes.manage'
+  'routes.manage_all_drafts', 'identity_docs.view', 'collections.manage', 'vehicles.manage', 'credit_notes.manage',
+  // RC4: permisos granulares
+  'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicle_mileage.edit', 'vehicle_mileage.rules_manage', 'vehicle_mileage.resolve_alerts',
+  'columns.view', 'columns.manage_defaults', 'columns.manage_templates', 'columns.apply_global',
+  'routes.edit', 'routes.cancel', 'routes.reassign', 'routes.view_team', 'routes.view_own',
+  'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team',
+  'requests.create', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team', 'requests.reassign',
+  'users.assign_supervisor', 'users.manage_permissions', 'vehicles.view', 'vehicles.service_manage', 'backup.manage'
 ];
+// Solo Admin General puede otorgarlos (mismo criterio que public.is_sensitive_permission)
+export const SENSITIVE_PERMISSIONS = ['users.manage', 'users.manage_permissions', 'users.assign_supervisor', 'settings.manage', 'credit_notes.manage', 'audit.view', 'backup.manage',
+  'identity_docs.view', 'can_manage_commercial_transport_reports', 'routes.manage_all_drafts', 'columns.apply_global'];
 
 export const ROLE_PERMISSIONS = {
   ADMIN: PERMISSIONS.slice(),
-  DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view'],
+  // RC4.1: el Superior ve SU EQUIPO por defecto (routes.view_team); "todas las hojas" (routes.view_all) solo por permiso individual de Admin
+  SUPERVISOR_DESPACHO: ['routes.create', 'routes.edit', 'routes.publish', 'routes.cancel', 'routes.assign', 'routes.reassign', 'routes.view_team', 'routes.view_own',
+    'internal_routes.manage', 'locations.view', 'signatures.view', 'collections.manage', 'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team',
+    'requests.create', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team',
+    'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicle_mileage.resolve_alerts', 'vehicles.view'],
+  OPERARIO_DEPOSITO: ['routes.create', 'routes.view_own', 'locations.view', 'drafts.create', 'drafts.view_own', 'requests.create', 'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicles.view'],
+  DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view',
+    'columns.view', 'vehicle_mileage.view', 'vehicles.view', 'drafts.create', 'drafts.view_own', 'requests.create'],
   TRANSPORTISTA: ['routes.view_assigned', 'deliveries.update', 'deliveries.capture_signature'],
   TRANSPORTISTA_INTERNO: ['routes.view_assigned', 'internal_routes.use', 'deliveries.update', 'deliveries.capture_signature'],
   SOLO_LECTURA: ['routes.view_all']
@@ -38,21 +59,28 @@ export const STATUS = ['ACTIVO', 'DESHABILITADO', 'ARCHIVADO', 'INVITACION_PENDI
 export const MODULES = ['DESPACHO', 'MIS_HOJAS', 'USUARIOS', 'INFORMES', 'APROBACIONES', 'CONFIGURACION', 'AUDITORIA'];
 export const MODULE_LABEL = { DESPACHO: 'Despacho general', MIS_HOJAS: 'Mis hojas publicadas', USUARIOS: 'Usuarios', INFORMES: 'Informes', APROBACIONES: 'Aprobaciones', CONFIGURACION: 'Configuración', AUDITORIA: 'Auditoría' };
 export const MODULE_PERMISSIONS = {
-  DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view', 'routes.manage_all_drafts', 'collections.manage'],
+  DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view', 'routes.manage_all_drafts', 'collections.manage',
+    'routes.edit', 'routes.cancel', 'routes.reassign', 'routes.view_team', 'routes.view_own', 'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team',
+    'columns.view', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicles.view', 'requests.create'],
   MIS_HOJAS: ['routes.view_assigned', 'deliveries.update', 'deliveries.capture_signature', 'internal_routes.use'],
-  USUARIOS: ['users.view', 'users.manage'],
+  USUARIOS: ['users.view', 'users.manage', 'users.assign_supervisor', 'users.manage_permissions'],
   INFORMES: ['can_view_commercial_transport_reports', 'can_manage_commercial_transport_reports'],
-  APROBACIONES: ['can_approve_internal_route_changes'],
-  CONFIGURACION: ['settings.manage', 'vehicles.manage', 'locations.manage', 'credit_notes.manage'],
+  APROBACIONES: ['can_approve_internal_route_changes', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team', 'requests.reassign'],
+  CONFIGURACION: ['settings.manage', 'vehicles.manage', 'locations.manage', 'credit_notes.manage', 'columns.manage_defaults', 'columns.manage_templates', 'columns.apply_global',
+    'vehicle_mileage.edit', 'vehicle_mileage.rules_manage', 'vehicle_mileage.resolve_alerts', 'vehicles.service_manage', 'backup.manage'],
   AUDITORIA: ['audit.view', 'identity_docs.view']
 };
 export const moduleOf = perm => MODULES.find(m => MODULE_PERMISSIONS[m].includes(perm)) || null;
 export const roleModules = role => MODULES.filter(m => MODULE_PERMISSIONS[m].some(p => (ROLE_PERMISSIONS[role] || []).includes(p)));
-export const userModules = user => (user && user.status === 'ACTIVO') ? roleModules(user.role).filter(m => !(user.disabled_modules || []).includes(m)) : [];
+export const effectivePermissions = user => PERMISSIONS.filter(p => hasPerm(user, p));
+export const userModules = user => (user && user.status === 'ACTIVO') ? MODULES.filter(m => MODULE_PERMISSIONS[m].some(p => hasPerm(user, p))) : [];
 
+// Permiso efectivo = (rol + otorgados) − quitados − módulos restringidos (igual que public.user_has_perm)
 export function hasPerm(user, perm) {
   if (!user || user.status !== 'ACTIVO') return false;
-  if (!(ROLE_PERMISSIONS[user.role] || []).includes(perm)) return false;
+  const ov = (user.permission_overrides || {})[perm];
+  if (ov === false) return false;
+  if (ov !== true && !(ROLE_PERMISSIONS[user.role] || []).includes(perm)) return false;
   const m = moduleOf(perm);
   return !(m && (user.disabled_modules || []).includes(m));
 }

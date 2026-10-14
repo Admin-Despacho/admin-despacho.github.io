@@ -31,15 +31,15 @@ export const DemoAdmin = {
   },
   async listDrafts() {
     this._refresh(); const me = await this.me(); this._need(me, 'routes.create');
-    const all = hasPerm(me, 'routes.manage_all_drafts'), RS = this.db.reservations || {};
-    return Object.values(this.db.drafts || {}).filter(d => d.status === 'BORRADOR' && (all || d.owner_id === me.id)).map(d => ({
+    const RS = this.db.reservations || {};
+    return Object.values(this.db.drafts || {}).filter(d => d.status === 'BORRADOR' && this._canViewDraftOf(me, d.owner_id)).map(d => ({
       id: d.id, client_sheet_key: d.client_sheet_key, name: d.name || 'Hoja', carrier_name: d.carrier_name || '', delivery_count: d.delivery_count || 0, orders: d.orders || [],
       owner_id: d.owner_id, owner_name: (this._user(d.owner_id) || {}).full_name, status: d.status, created_at: d.created_at, updated_at: d.updated_at || d.created_at,
       reserved: Object.keys(RS).filter(o => RS[o].sheet_key === d.client_sheet_key && RS[o].status === 'BORRADOR').sort() })).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
   },
   async draftContent(sheetKey) {
     this._refresh(); const me = await this.me(); this._need(me, 'routes.create'); const d = (this.db.drafts || {})[sheetKey]; if (!d) return null;
-    if (d.owner_id !== me.id && !hasPerm(me, 'routes.manage_all_drafts')) throw err('FORBIDDEN_DRAFT', 'FORBIDDEN_DRAFT', 403);
+    if (!this._canViewDraftOf(me, d.owner_id)) throw err('FORBIDDEN_DRAFT', 'FORBIDDEN_DRAFT', 403);
     return { name: d.name, status: d.status, content: d.content || null };
   },
   async deleteDraft(sheetKey) {
@@ -55,8 +55,8 @@ export const DemoAdmin = {
 
   // ===== Historial =====
   async searchRoutes(f = {}) {
-    this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all');
-    const C = this._carriers(); let list = (this.db.routes2 || []).slice();
+    this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all', 'routes.view_team', 'routes.view_own');
+    const C = this._carriers(); let list = (this.db.routes2 || []).filter(r => this._canViewRoute(me, r));   // RC4.1: mismo alcance que la RLS
     const has = (a, b) => String(a || '').toLowerCase().includes(String(b || '').toLowerCase());
     if (f.number) list = list.filter(r => has(r.number, f.number));
     if (f.carrier) list = list.filter(r => r.carrier_id === f.carrier);
@@ -75,8 +75,9 @@ export const DemoAdmin = {
       stops: r.stops.length, bultos: r.stops.reduce((a, s) => a + (Number(s.bultos) || 0), 0), zones: [...new Set(r.stops.map(s => s.zone).filter(Boolean))] })) };
   },
   async routeDetail(id) {
-    this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all');
+    this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all', 'routes.view_team', 'routes.view_own');
     const r = (this.db.routes2 || []).find(x => x.id === id); if (!r) throw err('No existe.', 'NOT_FOUND', 404);
+    this._routeScope(me, r);
     const pdfs = Object.values(this.db.routePdfs || {}).filter(p => p.route_id === id).sort((a, b) => a.route_version - b.route_version)
       .map(p => ({ ...p, generated_by_name: (this._user(p.generated_by) || {}).full_name }));
     const audit = (this.db.audit || []).filter(a => a.target === id || a.target_id === id);
@@ -85,6 +86,7 @@ export const DemoAdmin = {
   },
   async resendNotification(id) {
     this._refresh(); const me = await this.me(); this._need(me, 'routes.publish');
+    { const any0 = (this.db.routes2 || []).find(x => x.id === id); if (any0) this._routeScope(me, any0); }
     const r = this.db.routes2.find(x => x.id === id && ['PUBLICADA', 'EN_CURSO'].includes(x.operational_status)); if (!r) throw err('Solo hojas publicadas o en curso.', 'BAD_STATE', 409);
     this.db.notifs = (this.db.notifs || []).filter(n => !(n.route_id === id && n.type === 'RECORDATORIO_HOJA'));
     this.db.notifs.push({ id: 'nt-' + (++this.db.seq), user_id: r.responsable_id, route_id: id, type: 'RECORDATORIO_HOJA', title: 'HOJA ' + r.number + ' PUBLICADA', body: 'Recordatorio de Despacho', created_at: new Date().toISOString(), read_at: null });
@@ -105,7 +107,7 @@ export const DemoAdmin = {
     return T || { id: null, carrier_id: carrierId, version: 0, columns: DEFAULT_COLUMNS.map(c => ({ ...c })) };
   },
   async saveTemplate(carrierId, columns) {
-    this._refresh(); const me = await this.me(); this._need(me, 'settings.manage');
+    this._refresh(); const me = await this.me(); this._need(me, 'settings.manage', 'columns.manage_defaults', 'columns.manage_templates');
     if (!Array.isArray(columns) || !columns.length) throw err('Plantilla vacía.', 'BAD_TEMPLATE', 400);
     if (columns.some(c => c.required && c.visible === false)) throw err('Una columna obligatoria no se puede ocultar.', 'REQUIRED_HIDDEN', 400);
     const T = this.db.templates = this.db.templates || [];
