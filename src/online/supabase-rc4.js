@@ -7,7 +7,7 @@ export const SupabaseRC4 = {
   async setUserPermission(userId, perm, state, reason) { return this._rpc('set_user_permission', { p_user: userId, p_perm: perm, p_state: state, p_reason: reason || null }); },
   async setUserSupervisor(userId, supId) { return this._rpc('set_user_supervisor', { p_user: userId, p_sup: supId || null }); },
   async myTeam() { const me = await this.me(); const ids = (await this._rpc('team_of', { p_user: me.id })) || []; return ids.length ? sel(this.sb.from('profiles').select('id, full_name, role, status').in('id', ids)) : []; },
-  async createOperationalRequest(p) { return this._rpc('create_operational_request', { p }); },
+  async createOperationalRequest(p) { const r = await this._rpc('create_operational_request', { p }); this.flushPushQueue().catch(() => null); return r; },
   async listOperationalRequests(filter) {
     const me = await this.me();
     let q = this.sb.from('route_approval_requests').select('*, requester:profiles!route_approval_requests_requested_by_fkey(full_name), approver:profiles!route_approval_requests_supervisor_user_id_fkey(full_name), route:routes(number)')
@@ -18,7 +18,7 @@ export const SupabaseRC4 = {
     return rows.filter(r => filter !== 'asignadas' || (r.status === 'PENDING' && (r.supervisor_user_id === me.id || (r.escalated && me.role === 'ADMIN'))))
       .map(r => ({ ...r, requested_by_name: r.requester && r.requester.full_name, approver_name: r.approver ? r.approver.full_name : 'Admin General', route_number: r.route && r.route.number }));
   },
-  async resolveOperationalRequest(id, decision, note, opId) { return this._rpc('resolve_operational_request', { p_request: id, p_decision: decision, p_note: note || null, p_op_id: opId || null }); },
+  async resolveOperationalRequest(id, decision, note, opId) { const r = await this._rpc('resolve_operational_request', { p_request: id, p_decision: decision, p_note: note || null, p_op_id: opId || null }); this.flushPushQueue().catch(() => null); return r; },
   async cancelOperationalRequest(id) { return this._rpc('cancel_operational_request', { p_request: id }); },
   async mileageSettings() { const r = await sel(this.sb.from('mileage_settings').select('*').eq('id', 'DEFAULT')); return r && r[0]; },
   async setMileageSettings(p) { return this._rpc('set_mileage_settings', { p }); },
