@@ -24,7 +24,7 @@ const store = {
   async loadThirdPartyRoutes() {
     const carriers = await this.loadThirdPartyCarriers();
     if (!carriers.length) return [];
-    const routes = must(await admin.from('routes').select('id, number, carrier_id, operational_status, completed_at, route_stops(*)')
+    const routes = must(await admin.from('routes').select('id, number, carrier_id, operational_status, dispatch_mode, dispatched_at, completed_at, route_stops(*)')
       .in('carrier_id', carriers.map((c:any) => c.id)).eq('operational_status', 'COMPLETADA')) as any[];
     return routes.map((r) => ({ ...r, stops: r.route_stops ?? [] }));
   },
