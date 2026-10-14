@@ -190,9 +190,9 @@ export async function openHistory(api, me) {
 const SECTIONS = [['transportistas', 'A. TRANSPORTISTAS'], ['plantillas', 'B. PLANTILLAS / COLUMNAS'], ['vehiculos', 'C. VEHÍCULOS Y MANTENIMIENTO'], ['financieras', 'D. REGLAS FINANCIERAS'], ['asignacion', 'D2. REGLAS DE ASIGNACIÓN'], ['financiacion', 'D3. FINANCIACIÓN PROPIA'],
   ['emails', 'E. EMAILS Y NOTIFICACIONES'], ['pdf', 'F. PDF Y ENVÍOS'], ['ubicaciones', 'G. UBICACIONES'], ['backup', 'H. BACKUP'], ['general', 'I. PARÁMETROS GENERALES']];
 export async function openConfig(api, me, section) {
-  const w = frame(me, 'Configuración', '#/configuracion');
   const allowed = SECTIONS.filter(([k]) => hasPerm(me, 'settings.manage') || k === 'vehiculos');
   let cur = section && allowed.some(s => s[0] === section) ? section : allowed[0][0];
+  const w = frame(me, 'Configuración', '#/configuracion?sec=' + cur);
   w.innerHTML = '<div class="up-head"><h2>CONFIGURACIÓN</h2></div><div class="cfgnav" id="cfgNav">' + allowed.map(([k, l]) => '<button type="button" data-sec="' + k + '">' + l + '</button>').join('') + '</div><div id="cfgBody"></div>';
   const show = async (k, m) => {
     cur = k; w.querySelectorAll('[data-sec]').forEach(b => b.classList.toggle('on', b.dataset.sec === k));
