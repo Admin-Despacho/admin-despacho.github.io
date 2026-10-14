@@ -438,3 +438,80 @@ body.no-publish #btnPublish{display:none!important}
   flex:0 0 auto;
   transform:none;
 }
+
+
+/* RC4.1.13 · Panel Admin General: trazabilidad de entrega + firma. */
+.delivery-trace-panel{
+  margin-top:16px;
+  padding:18px;
+  border:1px solid #cfdde3;
+  border-radius:16px;
+  background:#fff;
+}
+.delivery-trace-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:14px;
+  margin-bottom:14px;
+}
+.delivery-trace-head h3,.delivery-trace-head p{margin:0}
+.delivery-trace-head p{margin-top:4px;color:#63727a}
+.delivery-trace-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px;
+}
+.delivery-trace-grid>div,.receipt-card,.email-trace,.signature-card,.delivery-evidence>div:first-child{
+  border:1px solid #d9e3e7;
+  border-radius:12px;
+  padding:12px;
+  min-width:0;
+}
+.delivery-trace-grid span{
+  display:block;
+  margin-bottom:5px;
+  font-size:11px;
+  color:#66777f;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.delivery-trace-grid b{overflow-wrap:anywhere}
+.delivery-trace-grid .wide{grid-column:span 2}
+.delivery-trace-grid .warning{background:#fff4e8}
+.delivery-evidence{
+  display:grid;
+  grid-template-columns:minmax(220px,1fr) minmax(280px,1.3fr);
+  gap:12px;
+  margin-top:12px;
+}
+.delivery-evidence h4,.receipt-card h4,.email-trace h4{margin:0 0 8px}
+.signature-card img{
+  display:block;
+  width:100%;
+  max-width:440px;
+  height:auto;
+  max-height:180px;
+  object-fit:contain;
+  background:#fff;
+  border:1px solid #e4eaed;
+  border-radius:8px;
+}
+.receipt-card,.email-trace{margin-top:12px}
+.email-trace>div{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  padding:7px 0;
+  border-top:1px solid #edf1f3;
+}
+.email-trace>div:first-of-type{border-top:0}
+@media(max-width:1100px){
+  .delivery-trace-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .delivery-trace-grid .wide{grid-column:span 2}
+}
+@media(max-width:760px){
+  .delivery-trace-head,.email-trace>div{flex-direction:column}
+  .delivery-trace-grid,.delivery-evidence{grid-template-columns:1fr}
+  .delivery-trace-grid .wide{grid-column:auto}
+}
