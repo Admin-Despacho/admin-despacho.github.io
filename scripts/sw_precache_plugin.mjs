@@ -3,7 +3,8 @@
 import { readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
-const SKIP = [/^sw\.js$/, /\.map$/, /^splash\.png$/]; // splash.png no se usa (la app usa splash.webp)
+const SKIP = [/^sw\.js$/, /\.map$/, /^splash\.png$/, // splash.png no se usa (la app usa splash.webp)
+  /^branding\/ok-accesorios-horizontal\.png$/]; // PNG del logo de email: el correo lo lleva inline (CID); la app no lo usa
 export function listDist(dir, root = dir, out = []) {
   for (const n of readdirSync(dir).sort()) { const p = join(dir, n), rel = relative(root, p).split('\\').join('/');
     if (statSync(p).isDirectory()) listDist(p, root, out); else if (!SKIP.some(r => r.test(rel))) out.push(rel); }
