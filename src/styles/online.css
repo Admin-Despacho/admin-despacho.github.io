@@ -375,3 +375,43 @@ body.no-publish #btnPublish{display:none!important}
   .rc4legacy-shell .rc4legacy-content .sheethead .btn{padding-left:11px;padding-right:11px;font-size:12px}
   .rc4legacy-shell .rc4legacy-content .sheethead h2{flex-basis:100%}
 }
+
+
+/* RC4.1.8 · Toolbar de hoja en dos niveles: datos arriba, acciones abajo. */
+.rc4legacy-shell .rc4legacy-content .sheethead{
+  display:grid!important;
+  grid-template-columns:max-content minmax(170px,220px) 1fr;
+  gap:10px 12px;
+  align-items:center;
+}
+.rc4legacy-shell .rc4legacy-content .sheethead>h2{grid-column:1;grid-row:1;margin:0}
+.rc4legacy-shell .rc4legacy-content .sheethead>.sheetdate{grid-column:2;grid-row:1;min-width:0}
+.rc4legacy-shell .rc4legacy-content .sheethead>.sp{display:none!important}
+.rc4legacy-shell .rc4legacy-content .sheet-actions{
+  grid-column:1/-1;
+  grid-row:2;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  align-items:center;
+  width:100%;
+  min-width:0;
+}
+.rc4legacy-shell .rc4legacy-content .sheet-actions .btn{
+  flex:0 0 auto;
+  max-width:100%;
+  white-space:nowrap;
+}
+.rc4legacy-shell .rc4legacy-content .sheet-actions #btnPublish{
+  margin-left:auto;
+}
+@media (max-width:1250px){
+  .rc4legacy-shell .rc4legacy-content .sheethead{grid-template-columns:1fr}
+  .rc4legacy-shell .rc4legacy-content .sheethead>h2,
+  .rc4legacy-shell .rc4legacy-content .sheethead>.sheetdate,
+  .rc4legacy-shell .rc4legacy-content .sheet-actions{grid-column:1;grid-row:auto}
+  .rc4legacy-shell .rc4legacy-content .sheet-actions #btnPublish{margin-left:0}
+}
+@media (max-width:900px){
+  .rc4legacy-shell .rc4legacy-content .sheet-actions .btn{flex:1 1 180px;justify-content:center}
+}
