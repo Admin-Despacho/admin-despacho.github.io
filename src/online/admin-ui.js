@@ -314,6 +314,8 @@ const CFG = {
         '<label class="chk"><input type="checkbox" id="svcCopyDriver"' + (ns.service_copy_driver ? ' checked' : '') + '> Copiar al conductor habitual del vehículo</label>' +
         '<div style="margin-top:12px"><button class="btn dark" type="button" id="svcMailSave">GUARDAR ALERTAS</button></div>' +
       '</div>' +
+      '<h3 class="dsub">REGISTRAR SERVICE REALIZADO</h3>' +
+      (vs.length ? '<div class="service-register-box" id="adminServiceRegister"><select id="asVeh"><option value="">Seleccionar vehículo</option>' + vs.filter(v => v.active !== false).map(v => '<option value="' + v.id + '">' + esc(v.name + ' · ' + v.plate) + '</option>').join('') + '</select><input id="asDate" type="date" value="' + new Date().toISOString().slice(0, 10) + '"><input id="asKm" inputmode="numeric" placeholder="KM al momento del service"><input id="asNote" placeholder="Observación (opcional)"><button class="btn dark" type="button" id="asSave">REGISTRAR SERVICE</button></div><p class="rp-note">Disponible para Admin General. También puede habilitarse a Operarios desde Usuarios y permisos → Vehículos → Gestionar service.</p>' : '<div class="up-msg">Todavía no hay vehículos cargados. Agregá el vehículo abajo para poder registrar su service.</div>') +
       '<h3 class="dsub">ALTA DE VEHÍCULO</h3><div class="ufilters" id="vehNew"><input id="nvName" placeholder="Modelo / nombre (ej. TOYOTA HILUX)"><input id="nvPlate" placeholder="Patente"><select id="nvDriver"><option value="">Conductor habitual</option>' + users.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select>' +
       '<input id="nvKm" inputmode="numeric" placeholder="KM actual"><input id="nvLast" inputmode="numeric" placeholder="KM último service (opcional)"><input id="nvInt" inputmode="numeric" placeholder="Intervalo (10.000)"><button class="btn dark" type="button" id="nvSave">AGREGAR VEHÍCULO</button></div>' +
       '<p class="rp-note">Si no cargás el último service, se toma el KM actual como base: próximo service = base + intervalo. Al iniciar una ruta interna el chofer carga el KM inicial y al finalizar el KM final; el KM actual se actualiza con el odómetro real.</p>';
@@ -351,6 +353,18 @@ const CFG = {
     }, 'Alertas de service guardadas.', again);
 
     const num = v => v === '' ? '' : Number(String(v).replace(/\./g, '').replace(',', '.'));
+    const adminSvc = sec.querySelector('#adminServiceRegister');
+    if (adminSvc) {
+      const asVeh = adminSvc.querySelector('#asVeh'), asKm = adminSvc.querySelector('#asKm');
+      asVeh.onchange = () => { const v = vs.find(x => x.id === asVeh.value); if (v) asKm.value = v.current_km == null ? '' : v.current_km; };
+      adminSvc.querySelector('#asSave').onclick = () => run(async () => {
+        const vid = asVeh.value, km = num(asKm.value), date = adminSvc.querySelector('#asDate').value, note = adminSvc.querySelector('#asNote').value;
+        if (!vid) throw new Error('Seleccioná un vehículo.');
+        if (!(km > 0)) throw new Error('Ingresá el kilometraje al momento del service.');
+        await api.registerServiceDone(vid, km, date, note);
+        await api.sendServiceAlerts().catch(() => null);
+      }, 'Service registrado. Se recalculó el próximo service y comenzó un nuevo ciclo.', again);
+    }
     sec.querySelector('#nvSave').onclick = () => run(() => api.saveVehicle({ name: sec.querySelector('#nvName').value, plate: sec.querySelector('#nvPlate').value, habitual_driver_id: sec.querySelector('#nvDriver').value || null,
       current_km: num(sec.querySelector('#nvKm').value) || 0, last_service_km: num(sec.querySelector('#nvLast').value.trim()), service_interval_km: num(sec.querySelector('#nvInt').value) || 10000 }), 'Vehículo agregado.', again);
     sec.querySelectorAll('.vcard').forEach(c => {
