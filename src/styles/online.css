@@ -415,3 +415,26 @@ body.no-publish #btnPublish{display:none!important}
 @media (max-width:900px){
   .rc4legacy-shell .rc4legacy-content .sheet-actions .btn{flex:1 1 180px;justify-content:center}
 }
+
+
+/* RC4.1.12 · Historial: correlativo completo de hoja sin recorte. */
+.rc4app #hDetail .rp-step > h2{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:10px;
+  min-width:0;
+}
+.rc4app #hDetail .rp-step > h2 > .n{
+  width:auto;
+  min-width:34px;
+  max-width:none;
+  height:auto;
+  min-height:30px;
+  padding:6px 9px;
+  border-radius:9px;
+  white-space:nowrap;
+  line-height:1;
+  flex:0 0 auto;
+  transform:none;
+}
