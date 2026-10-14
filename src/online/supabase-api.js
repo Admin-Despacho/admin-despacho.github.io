@@ -131,10 +131,10 @@ export class SupabaseApi {
     }
     if (r.error) throw this._rpcErr(r.error); return r.data;
   }
-  async publishRoute(p) { return this._rpc('publish_route', { p }); }
+  async publishRoute(p) { const r = await this._rpc('publish_route', { p }); this.flushPushQueue().catch(() => null); return r; }
   async dispatchExternalRoute(p) { return this._rpc('dispatch_external_route', { p }); }
   async beginPostPublishRevision(id) { return this._rpc('begin_post_publish_revision', { p_route: id }); }
-  async publishRouteRevision(p) { return this._rpc('publish_route_revision', { p }); }
+  async publishRouteRevision(p) { const r = await this._rpc('publish_route_revision', { p }); this.flushPushQueue().catch(() => null); return r; }
   async reserveOrders(sheetKey, orders) { return this._rpc('reserve_orders', { p_sheet_key: sheetKey, p_orders: orders.map(String) }); }
   async releaseOrders(sheetKey, orders) { return this._rpc('release_orders', { p_sheet_key: sheetKey, p_orders: orders ? orders.map(String) : null }); }
   async routeStatus(id) { const { data } = await this.sb.from('routes').select('id, number, operational_status, dispatch_mode, dispatched_at, published_at, notified_at, viewed_at, started_at, completed_at').eq('id', id).maybeSingle(); return data; }
@@ -209,6 +209,10 @@ export class SupabaseApi {
   }
   async myPasskeys() { const { data } = await this.sb.from('user_passkeys').select('id, device_name, created_at, last_used_at, revoked_at'); return data || []; }
   async revokePasskey(id) { return this._rpc('revoke_passkey', { p_id: id }); }
+  async pushPublicKey() { return this._rpc('push_public_key', {}); }
+  async savePushSubscription(p) { return this._rpc('save_push_subscription', { p }); }
+  async revokePushSubscription(endpoint) { return this._rpc('revoke_push_subscription', { p_endpoint: endpoint }); }
+  async flushPushQueue() { const { data, error } = await this._invoke('push-notifications', { body: { action: 'flush' } }); if (error) throw error; return data; }
   async myNotifications() { const { data } = await this.sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(50); return data || []; }
   // En vivo: Supabase Realtime sobre hojas y notificaciones + sondeo de respaldo (si Realtime falla, igual aparece al reconectar)
   subscribe(cb, onStatus) {
