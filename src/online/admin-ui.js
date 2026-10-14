@@ -250,15 +250,62 @@ const CFG = {
   },
   async vehiculos(api, me, sec, again) {
     if (hasPerm(me, 'vehicle_mileage.view') || hasPerm(me, 'vehicle_mileage.rules_manage')) { const kb = document.createElement('div'); kb.className = 'card kmrules-in-config'; kb.id = 'kmRules'; await mileageBlock(api, me, kb, again); sec.after(kb); }
-    const vs = await api.vehicleStatus(), users = (await api.listUsers().catch(() => [])).filter(u => u.role === 'TRANSPORTISTA_INTERNO' && u.status === 'ACTIVO');
+    const [vs, allUsers, ns] = await Promise.all([api.vehicleStatus(), api.listUsers().catch(() => []), api.notificationSettings().catch(() => ({}))]);
+    const users = allUsers.filter(u => u.role === 'TRANSPORTISTA_INTERNO' && u.status === 'ACTIVO');
     const card = v => '<div class="vcard' + (v.service_due ? ' due' : '') + (v.active === false ? ' off' : '') + '" data-vid="' + v.id + '"><b>' + esc(v.name) + ' · ' + esc(v.plate) + '</b>' + (v.active === false ? ' <em>(inactivo)</em>' : '') +
       '<div>Conductor habitual: ' + esc(v.habitual_driver_name || '—') + '</div><div>KM actual: <b>' + fmt(v.current_km) + '</b></div><div>Próximo service: <b>' + fmt(v.next_service_km) + '</b> (cada ' + fmt(v.service_interval_km) + ' km)</div>' +
       '<div>' + (v.service_due ? '<span class="due-tag">⚠ SERVICE REQUERIDO</span>' : 'Faltan: <b>' + fmt(v.km_to_service) + ' km</b>') + '</div>' +
       '<div class="uact"><button class="btn soft" type="button" data-edit>EDITAR</button><button class="btn soft" type="button" data-svc>REGISTRAR SERVICE REALIZADO</button><button class="btn soft" type="button" data-off>' + (v.active === false ? 'ACTIVAR' : 'DESACTIVAR') + '</button></div><div class="vform" hidden></div></div>';
     sec.innerHTML = '<h2><span class="n">C</span>VEHÍCULOS Y MANTENIMIENTO</h2><div class="vgrid" id="vehList">' + (vs.map(card).join('') || '<p class="rp-empty">Sin vehículos.</p>') + '</div>' +
+      '<h3 class="dsub">ALERTAS DE SERVICE POR EMAIL</h3>' +
+      '<div class="service-alert-box">' +
+        '<label class="chk"><input type="checkbox" id="svcMailOn"' + (ns.service_email_enabled ? ' checked' : '') + '> Activar alertas de service por email</label>' +
+        '<div class="ufilters"><label class="rp-lbl">Avisar cuando falten <input id="svcWarnKm" inputmode="numeric" value="' + (ns.service_warning_km ?? 1000) + '"> km</label>' +
+        '<label class="rp-lbl">Repetir cada <input id="svcRepeatKm" inputmode="numeric" value="' + (ns.service_repeat_km ?? 500) + '"> km</label></div>' +
+        '<div class="report-recipients"><label class="rp-lbl" style="display:block">Destinatarios adicionales</label>' +
+          '<div class="recipient-row"><input id="svcRcptAdd" type="email" placeholder="nombre@empresa.com"><button class="btn soft" type="button" id="svcRcptAddBtn">AGREGAR EMAIL</button></div>' +
+          '<div id="svcRcptList" class="recipient-chips"></div>' +
+          '<p class="rp-note">Sin límite de destinatarios configurado por la app. Cada email queda registrado por separado.</p></div>' +
+        '<label class="chk"><input type="checkbox" id="svcCopyAdmin"' + (ns.service_copy_admin !== false ? ' checked' : '') + '> Copiar a todos los Admin General activos</label>' +
+        '<label class="chk"><input type="checkbox" id="svcCopyDriver"' + (ns.service_copy_driver ? ' checked' : '') + '> Copiar al conductor habitual del vehículo</label>' +
+        '<div style="margin-top:12px"><button class="btn dark" type="button" id="svcMailSave">GUARDAR ALERTAS</button></div>' +
+      '</div>' +
       '<h3 class="dsub">ALTA DE VEHÍCULO</h3><div class="ufilters" id="vehNew"><input id="nvName" placeholder="Modelo / nombre (ej. TOYOTA HILUX)"><input id="nvPlate" placeholder="Patente"><select id="nvDriver"><option value="">Conductor habitual</option>' + users.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select>' +
       '<input id="nvKm" inputmode="numeric" placeholder="KM actual"><input id="nvLast" inputmode="numeric" placeholder="KM último service (opcional)"><input id="nvInt" inputmode="numeric" placeholder="Intervalo (10.000)"><button class="btn dark" type="button" id="nvSave">AGREGAR VEHÍCULO</button></div>' +
       '<p class="rp-note">Si no cargás el último service, se toma el KM actual como base: próximo service = base + intervalo. Al iniciar una ruta interna el chofer carga el KM inicial y al finalizar el KM final; el KM actual se actualiza con el odómetro real.</p>';
+    const svcRecipients = [...(ns.service_email_recipients || [])];
+    const drawSvcRecipients = () => {
+      const box = sec.querySelector('#svcRcptList');
+      box.innerHTML = svcRecipients.length
+        ? svcRecipients.map((mail, i) => '<span class="recipient-chip">' + esc(mail) + '<button type="button" data-svc-rm="' + i + '" aria-label="Quitar destinatario">×</button></span>').join('')
+        : '<span class="rp-note">Todavía no hay destinatarios adicionales configurados.</span>';
+      box.querySelectorAll('[data-svc-rm]').forEach(b => b.onclick = () => { svcRecipients.splice(+b.dataset.svcRm, 1); drawSvcRecipients(); });
+    };
+    const addSvcRecipient = () => {
+      const inp = sec.querySelector('#svcRcptAdd'), mail = inp.value.trim().toLowerCase();
+      if (!mail) return;
+      if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(mail)) { msgBox(sec, { err: true, text: 'Ingresá un email válido.' }); return; }
+      if (!svcRecipients.includes(mail)) svcRecipients.push(mail);
+      inp.value = ''; drawSvcRecipients();
+    };
+    sec.querySelector('#svcRcptAddBtn').onclick = addSvcRecipient;
+    sec.querySelector('#svcRcptAdd').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addSvcRecipient(); } };
+    drawSvcRecipients();
+    sec.querySelector('#svcMailSave').onclick = () => run(async () => {
+      const warning = parseInt(sec.querySelector('#svcWarnKm').value, 10), repeat = parseInt(sec.querySelector('#svcRepeatKm').value, 10);
+      if (!(warning >= 0)) throw new Error('Los KM de aviso deben ser 0 o más.');
+      if (!(repeat >= 1)) throw new Error('La repetición debe ser de al menos 1 km.');
+      await api.setNotificationSettings({
+        service_email_enabled: sec.querySelector('#svcMailOn').checked,
+        service_warning_km: warning,
+        service_repeat_km: repeat,
+        service_email_recipients: svcRecipients,
+        service_copy_admin: sec.querySelector('#svcCopyAdmin').checked,
+        service_copy_driver: sec.querySelector('#svcCopyDriver').checked
+      });
+      await api.sendServiceAlerts().catch(() => null);
+    }, 'Alertas de service guardadas.', again);
+
     const num = v => v === '' ? '' : Number(String(v).replace(/\./g, '').replace(',', '.'));
     sec.querySelector('#nvSave').onclick = () => run(() => api.saveVehicle({ name: sec.querySelector('#nvName').value, plate: sec.querySelector('#nvPlate').value, habitual_driver_id: sec.querySelector('#nvDriver').value || null,
       current_km: num(sec.querySelector('#nvKm').value) || 0, last_service_km: num(sec.querySelector('#nvLast').value.trim()), service_interval_km: num(sec.querySelector('#nvInt').value) || 10000 }), 'Vehículo agregado.', again);
