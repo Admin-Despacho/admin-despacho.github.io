@@ -260,13 +260,15 @@ export async function openVehicles(api, me, frame) {
     let vs = [], alerts = [];
     try { vs = await (api.vehicleStatus ? api.vehicleStatus() : api.listVehicles()); } catch (e) { vs = []; }
     try { alerts = await api.listMileageAlerts(); } catch (e) { alerts = []; }
-    const canEnter = hasPerm(me, 'vehicle_mileage.enter'), canEdit = hasPerm(me, 'vehicle_mileage.edit') || hasPerm(me, 'vehicles.manage'), canResolve = hasPerm(me, 'vehicle_mileage.resolve_alerts');
+    const canEnter = hasPerm(me, 'vehicle_mileage.enter'), canManageVehicles = hasPerm(me, 'vehicles.manage'), canService = hasPerm(me, 'vehicles.service_manage') || canManageVehicles, canEdit = hasPerm(me, 'vehicle_mileage.edit') || canManageVehicles, canResolve = hasPerm(me, 'vehicle_mileage.resolve_alerts');
     w.innerHTML = '<div class="grid"><section class="card span12" id="kmRules"></section>' +
       '<section class="card span12"><div class="section-title"><h2>Vehículos</h2><span class="tag">' + (canEnter ? 'Podés cargar km' : 'Solo lectura') + '</span></div><div class="tscroll"><table class="table" id="vehTable"><thead><tr><th>Vehículo</th><th>Patente</th><th>Último km</th><th>Próximo service</th><th>Estado</th><th></th></tr></thead><tbody>' +
       (vs.filter(v => v.active !== false).map(v => '<tr data-vid="' + v.id + '"><td><b>' + esc(v.name) + '</b>' + (v.habitual_driver_id === me.id ? ' <small>(asignado)</small>' : '') + '</td><td>' + esc(v.plate) + '</td><td>' + n0(v.current_km) + '</td><td>' + (v.next_service_km ? n0(v.next_service_km) : '—') + '</td><td>' +
         (v.service_due ? pill('bad', 'Service requerido') : pill('ok', 'OK')) + '</td><td><div class="uact">' +
         (canEnter ? '<input class="ed" data-km placeholder="Km actual" inputmode="numeric"><button class="btn soft" type="button" data-rec>CARGAR KM</button>' : '') +
-        (canEdit ? '<button class="btn soft" type="button" data-fix>CORREGIR</button>' : hasPerm(me, 'requests.create') ? '<button class="btn soft" type="button" data-askfix>SOLICITAR CORRECCIÓN</button>' : '') + '</div></td></tr>').join('') || '<tr><td colspan="6">Sin vehículos.</td></tr>') + '</tbody></table></div></section>' +
+        (canService ? '<button class="btn soft" type="button" data-service>REGISTRAR SERVICE</button>' : '') +
+        (canManageVehicles ? '<button class="btn soft" type="button" data-vedit>EDITAR VEHÍCULO</button>' : '') +
+        (canEdit ? '<button class="btn soft" type="button" data-fix>CORREGIR KM</button>' : hasPerm(me, 'requests.create') ? '<button class="btn soft" type="button" data-askfix>SOLICITAR CORRECCIÓN</button>' : '') + '</div></td></tr>').join('') || '<tr><td colspan="6">Sin vehículos.</td></tr>') + '</tbody></table></div></section>' +
       '<section class="card span12"><div class="section-title"><h2>Alertas de kilometraje</h2><span class="tag">' + (canResolve ? 'Podés resolverlas' : 'Solo lectura') + '</span></div><div class="tscroll"><table class="table" id="kmAlerts"><thead><tr><th>Fecha</th><th>Vehículo</th><th>Tipo</th><th>Km</th><th>Estado</th><th></th></tr></thead><tbody>' +
       (alerts.map(a => '<tr data-aid="' + a.id + '"><td>' + esc(dt(a.created_at)) + '</td><td>' + esc(a.plate || '') + '</td><td>' + esc({ LOWER_THAN_LAST: 'Km menor que el último registrado', TRIP_OUT_OF_RANGE: 'Recorrido fuera de rango', INCONSISTENT: 'Diferencia inconsistente' }[a.kind] || a.kind) + '</td><td>' +
         n0(a.km_from) + ' → ' + n0(a.km_to) + '</td><td>' + (a.status === 'OPEN' ? pill('warn', 'Abierta') : pill('ok', 'Resuelta')) + (a.resolution_note ? '<br><small>' + esc(a.resolution_note) + '</small>' : '') + '</td><td>' +
@@ -275,6 +277,22 @@ export async function openVehicles(api, me, frame) {
     await mileageBlock(api, me, w.querySelector('#kmRules'), draw);
     w.querySelectorAll('[data-rec]').forEach(b => b.onclick = async () => { const tr = b.closest('tr'), km = Number(tr.querySelector('[data-km]').value);
       try { const r = await api.recordVehicleKm(tr.dataset.vid, km, 'Carga desde OK Despacho'); draw(r.ok === false ? { err: true, text: r.message } : { text: 'Kilometraje cargado: ' + n0(r.current_km) + ' km.' }); } catch (e) { draw({ err: true, text: e.message }); } });
+    w.querySelectorAll('[data-service]').forEach(b => b.onclick = async () => {
+      const tr = b.closest('tr'), v = vs.find(x => x.id === tr.dataset.vid);
+      const km = prompt('Kilometraje al momento del service', String(v && v.current_km != null ? v.current_km : '')); if (km == null) return;
+      const date = prompt('Fecha del service (AAAA-MM-DD)', new Date().toISOString().slice(0,10)); if (date == null) return;
+      const note = prompt('Observación del service (opcional)', '') || '';
+      try { await api.registerServiceDone(tr.dataset.vid, Number(km), date, note); if (api.sendServiceAlerts) api.sendServiceAlerts().catch(() => null); draw({ text: 'Service registrado. Se recalculó el próximo service y comenzó un nuevo ciclo.' }); }
+      catch (e) { draw({ err: true, text: e.message }); }
+    });
+    w.querySelectorAll('[data-vedit]').forEach(b => b.onclick = async () => {
+      const tr = b.closest('tr'), v = vs.find(x => x.id === tr.dataset.vid); if (!v) return;
+      const name = prompt('Modelo / nombre del vehículo', v.name || ''); if (name == null) return;
+      const plate = prompt('Patente', v.plate || ''); if (plate == null) return;
+      const interval = prompt('Intervalo de service en km', String(v.service_interval_km || 10000)); if (interval == null) return;
+      try { await api.saveVehicle({ id: v.id, name: name.trim(), plate: plate.trim(), habitual_driver_id: v.habitual_driver_id || '', service_interval_km: Number(interval), active: v.active !== false, notes: v.notes || '' }); draw({ text: 'Vehículo actualizado (auditado).' }); }
+      catch (e) { draw({ err: true, text: e.message }); }
+    });
     w.querySelectorAll('[data-fix]').forEach(b => b.onclick = async () => { const tr = b.closest('tr'), km = prompt('Kilometraje correcto'); if (km == null) return; const why = prompt('Motivo de la corrección (obligatorio)'); if (!why) return;
       try { await api.correctVehicleKm(tr.dataset.vid, Number(km), why); draw({ text: 'Kilometraje corregido (auditado).' }); } catch (e) { draw({ err: true, text: e.message }); } });
     w.querySelectorAll('[data-askfix]').forEach(b => b.onclick = async () => { const tr = b.closest('tr'), km = prompt('Kilometraje correcto'); if (km == null) return; const why = prompt('Motivo (obligatorio)'); if (!why) return;
