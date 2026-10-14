@@ -337,3 +337,41 @@ body.no-publish #btnPublish{display:none!important}
 .recipient-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .recipient-chip{display:inline-flex;align-items:center;gap:8px;background:#e9fbfd;border:1px solid #b9eff3;color:#075d68;border-radius:999px;padding:7px 10px;font-size:12.5px;font-weight:650}
 .recipient-chip button{border:0;background:transparent;color:#075d68;font-size:18px;line-height:1;cursor:pointer;padding:0 2px}
+
+
+/* RC4.1.7 · Hoja de ruta: acciones siempre visibles, sin scroll horizontal del panel. */
+.rc4legacy-shell .rc4legacy-body{overflow-x:hidden}
+.rc4legacy-shell .rc4legacy-content > main{overflow-x:hidden}
+.rc4legacy-shell .rc4legacy-content .sheethead{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:10px;
+  width:100%;
+}
+.rc4legacy-shell .rc4legacy-content .sheethead .sp{display:none}
+.rc4legacy-shell .rc4legacy-content .sheethead h2{flex:0 0 auto}
+.rc4legacy-shell .rc4legacy-content .sheethead .sheetdate{flex:0 1 190px;min-width:150px}
+.rc4legacy-shell .rc4legacy-content .sheethead .btn{
+  flex:0 0 auto;
+  white-space:nowrap;
+  padding-left:14px;
+  padding-right:14px;
+}
+.rc4legacy-shell .rc4legacy-content #btnPublish{
+  margin-left:auto;
+  order:20;
+}
+.rc4legacy-shell .rc4legacy-content .tablewrap{
+  max-width:100%;
+  overflow:auto;
+}
+/* En pantallas intermedias los controles bajan de línea antes de generar scroll lateral. */
+@media (max-width:1500px){
+  .rc4legacy-shell .rc4legacy-content .sheethead{align-items:flex-start}
+  .rc4legacy-shell .rc4legacy-content #btnPublish{margin-left:0}
+}
+@media (max-width:1180px){
+  .rc4legacy-shell .rc4legacy-content .sheethead .btn{padding-left:11px;padding-right:11px;font-size:12px}
+  .rc4legacy-shell .rc4legacy-content .sheethead h2{flex-basis:100%}
+}
