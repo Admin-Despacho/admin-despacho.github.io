@@ -6,7 +6,7 @@ import { ZONE_LABEL, money, dmy, MONTHS, localDate } from '../../supabase/functi
 import { openAccount } from './account-ui.js';
 import { appFrame, isRc4 } from './rc4-ui.js';
 
-const TYPE = { WEEKLY: 'Semanal', MONTHLY: 'Mensual', MANUAL: 'Manual' };
+const TYPE = { WEEKLY: 'Semanal', BIWEEKLY: 'Quincenal', MONTHLY: 'Mensual', MANUAL: 'Manual' };
 const days = f => f == null ? '—' : 'cada ' + Math.round(f) + ' días';
 
 export class ReportsPanel {
@@ -120,7 +120,7 @@ export class ReportsPanel {
     const list = (await this.call('history', { filters: Object.fromEntries(Object.entries(this.hf).filter(([, v]) => v)) })).reports;
     const opt = (v, l, s) => '<option value="' + v + '"' + (v === s ? ' selected' : '') + '>' + l + '</option>';
     const mailState = r => { const e = r.emails || []; if (!e.length) return 'NO ENVIADO'; const sent = e.filter(x => x.status === 'SENT').length; const bad = e.find(x => x.status !== 'SENT'); return sent + '/' + e.length + ' enviados' + (bad ? ' · ' + bad.status : ''); };
-    body.innerHTML = '<div class="ufilters"><select id="hfType">' + opt('', 'Todos los tipos', this.hf.type) + opt('WEEKLY', 'Semanal', this.hf.type) + opt('MONTHLY', 'Mensual', this.hf.type) + opt('MANUAL', 'Manual', this.hf.type) + '</select>' +
+    body.innerHTML = '<div class="ufilters"><select id="hfType">' + opt('', 'Todos los tipos', this.hf.type) + opt('WEEKLY', 'Semanal', this.hf.type) + opt('BIWEEKLY', 'Quincenal', this.hf.type) + opt('MONTHLY', 'Mensual', this.hf.type) + opt('MANUAL', 'Manual', this.hf.type) + '</select>' +
       '<select id="hfSent">' + opt('', 'Enviados y no enviados', this.hf.sent) + opt('SI', 'Enviados', this.hf.sent) + opt('NO', 'No enviados', this.hf.sent) + '</select>' +
       '<label class="rp-lbl">Desde <input type="date" id="hfFrom" value="' + this.hf.from + '"></label><label class="rp-lbl">Hasta <input type="date" id="hfTo" value="' + this.hf.to + '"></label><span class="ufcount">' + list.length + ' informes</span></div>' +
       (list.length ? '<div class="utable-wrap"><table class="utable"><thead><tr><th>TIPO</th><th>PERÍODO</th><th>VERSIÓN</th><th>GENERADO</th><th>PDF</th><th>EMAIL</th><th>ACCIONES</th></tr></thead><tbody>' +
@@ -161,11 +161,26 @@ export class ReportsPanel {
       '<div class="ufilters" style="margin-top:10px"><label class="rp-lbl">Nuevo costo mensual <input id="cfgCost" inputmode="decimal" placeholder="1600000"></label><label class="rp-lbl">Desde <input type="date" id="cfgFrom"></label><button class="btn dark" type="button" id="cfgCostSave">GUARDAR COSTO</button></div>' +
       '<p class="rp-note">Los informes ya generados no cambian. Períodos menores al mes: cada día vale costo mensual / días de ese mes.</p></section>' +
       '<section class="step rp-step"><h2><span class="n">@</span>ENVÍO AUTOMÁTICO<small>hora de Mendoza</small></h2>' +
-      '<p class="rp-plabel">Semanal: <b>todos los sábados 15:00</b> · Mensual: <b>último día del mes</b> a la hora configurada.</p>' +
-      '<div class="ufilters"><label class="rp-lbl">Hora del mensual <input id="cfgMonthly" value="' + esc(settings.monthly_time || '23:30') + '" size="5"></label>' +
-      '<label class="rp-lbl" style="flex:1;min-width:320px">Destinatarios (separados por coma) <input id="cfgRcpt" value="' + esc((settings.recipients || []).join(', ')) + '" style="width:100%"></label>' +
+      '<p class="rp-note">Elegí una frecuencia automática. El sistema genera el informe, crea el PDF y lo envía a todos los destinatarios configurados.</p>' +
+      '<div class="ufilters report-schedule-grid">' +
+      '<label class="rp-lbl">Frecuencia <select id="cfgMode">' +
+        '<option value="OFF"' + ((settings.schedule_mode || 'WEEKLY') === 'OFF' ? ' selected' : '') + '>Desactivado</option>' +
+        '<option value="WEEKLY"' + ((settings.schedule_mode || 'WEEKLY') === 'WEEKLY' ? ' selected' : '') + '>Semanal</option>' +
+        '<option value="BIWEEKLY"' + ((settings.schedule_mode || 'WEEKLY') === 'BIWEEKLY' ? ' selected' : '') + '>Quincenal</option>' +
+        '<option value="MONTHLY"' + ((settings.schedule_mode || 'WEEKLY') === 'MONTHLY' ? ' selected' : '') + '>Mensual</option>' +
+      '</select></label>' +
+      '<div id="cfgWeeklyBox"><label class="rp-lbl">Semanal · hora <input id="cfgWeekly" value="' + esc(settings.weekly_time || '15:00') + '" size="5"></label><p class="rp-note">Se envía todos los sábados.</p></div>' +
+      '<div id="cfgBiweeklyBox"><label class="rp-lbl">Quincenal · primer día <input id="cfgBiDay1" type="number" min="1" max="28" value="' + Number(settings.biweekly_day_1 || 1) + '"></label>' +
+        '<label class="rp-lbl">Segundo día <input id="cfgBiDay2" type="number" min="1" max="28" value="' + Number(settings.biweekly_day_2 || 15) + '"></label>' +
+        '<label class="rp-lbl">Hora <input id="cfgBiTime" value="' + esc(settings.biweekly_time || '15:00') + '" size="5"></label><p class="rp-note">Por defecto: días 1 y 15 de cada mes.</p></div>' +
+      '<div id="cfgMonthlyBox"><label class="rp-lbl">Mensual · hora <input id="cfgMonthly" value="' + esc(settings.monthly_time || '23:30') + '" size="5"></label><p class="rp-note">Se envía el último día de cada mes.</p></div>' +
+      '</div>' +
+      '<div class="report-recipients"><label class="rp-lbl" style="display:block">Destinatarios</label>' +
+        '<div class="recipient-row"><input id="cfgRcptAdd" type="email" placeholder="nombre@empresa.com"><button class="btn soft" type="button" id="cfgRcptAddBtn">AGREGAR EMAIL</button></div>' +
+        '<div id="cfgRcptList" class="recipient-chips"></div>' +
+        '<p class="rp-note">Podés agregar uno o varios emails. Cada destinatario recibe su propio envío y queda registrado en el historial.</p></div>' +
       '<label class="rp-lbl chk"><input type="checkbox" id="cfgPdf"' + (settings.require_pdf !== false ? ' checked' : '') + '> Exigir PDF adjunto (si falla el PDF no se envía)</label>' +
-      '<button class="btn dark" type="button" id="cfgSave">GUARDAR</button></div></section>' +
+      '<div style="margin-top:12px"><button class="btn dark" type="button" id="cfgSave">GUARDAR CONFIGURACIÓN</button></div></section>' +
       (this.api.mode === 'demo' ? '<section class="step rp-step"><h2><span class="n">▶</span>SIMULAR ENVÍO PROGRAMADO<small>solo modo demo</small></h2>' +
         '<div class="ufilters"><label class="rp-lbl">Fecha y hora (Mendoza) <input type="datetime-local" id="simAt"></label><button class="btn soft" type="button" id="simRun">EJECUTAR PROGRAMACIÓN</button></div>' +
         '<div id="outbox">' + this.outboxHtml() + '</div></section>' : '');
@@ -173,9 +188,45 @@ export class ReportsPanel {
       try { await this.call('cost_set', { monthly_cost: Number(String(body.querySelector('#cfgCost').value).replace(/\./g, '').replace(',', '.')), valid_from: body.querySelector('#cfgFrom').value }); this.say('Costo guardado. Los informes ya generados conservan el costo anterior.'); }
       catch (e) { this.say(e.message, true); } this.render();
     });
+    const recipients = [...(settings.recipients || [])];
+    const listRcpt = () => {
+      const box = body.querySelector('#cfgRcptList');
+      box.innerHTML = recipients.length ? recipients.map((mail, i) => '<span class="recipient-chip">' + esc(mail) + '<button type="button" data-rm="' + i + '" aria-label="Quitar destinatario">×</button></span>').join('') : '<span class="rp-note">Todavía no hay destinatarios configurados.</span>';
+      box.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => { recipients.splice(+b.dataset.rm, 1); listRcpt(); }));
+    };
+    const addRcpt = () => {
+      const inp = body.querySelector('#cfgRcptAdd'), mail = inp.value.trim().toLowerCase();
+      if (!mail) return;
+      if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(mail)) { this.say('Ingresá un email válido.', true); return this.render(); }
+      if (!recipients.includes(mail)) recipients.push(mail);
+      inp.value = ''; listRcpt();
+    };
+    body.querySelector('#cfgRcptAddBtn').addEventListener('click', addRcpt);
+    body.querySelector('#cfgRcptAdd').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addRcpt(); } });
+    listRcpt();
+    const syncMode = () => {
+      const mode = body.querySelector('#cfgMode').value;
+      body.querySelector('#cfgWeeklyBox').hidden = mode !== 'WEEKLY';
+      body.querySelector('#cfgBiweeklyBox').hidden = mode !== 'BIWEEKLY';
+      body.querySelector('#cfgMonthlyBox').hidden = mode !== 'MONTHLY';
+    };
+    body.querySelector('#cfgMode').addEventListener('change', syncMode); syncMode();
     body.querySelector('#cfgSave').addEventListener('click', async () => {
-      try { await this.call('settings_set', { settings: { monthly_time: body.querySelector('#cfgMonthly').value.trim(), recipients: body.querySelector('#cfgRcpt').value.split(',').map(s => s.trim()).filter(Boolean), require_pdf: body.querySelector('#cfgPdf').checked } }); this.say('Configuración guardada.'); }
-      catch (e) { this.say(e.message, true); } this.render();
+      try {
+        const settingsOut = {
+          schedule_mode: body.querySelector('#cfgMode').value,
+          weekly_time: body.querySelector('#cfgWeekly').value.trim(),
+          biweekly_day_1: Number(body.querySelector('#cfgBiDay1').value),
+          biweekly_day_2: Number(body.querySelector('#cfgBiDay2').value),
+          biweekly_time: body.querySelector('#cfgBiTime').value.trim(),
+          monthly_time: body.querySelector('#cfgMonthly').value.trim(),
+          recipients,
+          require_pdf: body.querySelector('#cfgPdf').checked
+        };
+        await this.call('settings_set', { settings: settingsOut });
+        this.say('Configuración de envío automático guardada.');
+      } catch (e) { this.say(e.message, true); }
+      this.render();
     });
     const sim = body.querySelector('#simRun');
     if (sim) sim.addEventListener('click', async () => {
