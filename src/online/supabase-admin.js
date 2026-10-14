@@ -33,8 +33,8 @@ export const SupabaseAdmin = {
   async saveTemplate(carrierId, columns) { return this._rpc('save_sheet_template', { p_carrier: carrierId, p_columns: columns }); },
   // Vehículos
   async vehicleStatus() { return sel(this.sb.from('vehicle_service_status').select('*').order('name')); },
-  async saveVehicle(p) { return this._rpc('upsert_vehicle', { p }); },
-  async registerServiceDone(id, km, date, note) { return this._rpc('register_vehicle_service', { p_vehicle: id, p_km: km, p_date: date, p_note: note || null }); },
+  async saveVehicle(p) { const r = await this._rpc('upsert_vehicle', { p }); this.sendServiceAlerts().catch(() => null); return r; },
+  async registerServiceDone(id, km, date, note) { const r = await this._rpc('register_vehicle_service', { p_vehicle: id, p_km: km, p_date: date, p_note: note || null }); this.sendServiceAlerts().catch(() => null); return r; },
   // Reglas, notificaciones, ubicaciones, parámetros
   async financialRules() { const r = await sel(this.sb.from('financial_rules').select('*').order('version', { ascending: false }).limit(1)); return r && r[0] ? r[0] : { version: 0, rules: DEFAULT_RULES }; },
   async setFinancialRules(rules) { return this._rpc('set_financial_rules', { p_rules: rules }); },
