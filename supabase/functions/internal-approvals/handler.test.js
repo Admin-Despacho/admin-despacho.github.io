@@ -76,3 +76,112 @@ Deno.test('RC2-17 reenviar invitación sin crear otro usuario de Auth (fallback 
   const r2 = await h(new Request('https://x', { method: 'POST', headers: { authorization: 'Bearer t' }, body: JSON.stringify({ action: 'resend_invite', user_id: 'inv' }) }), d2);
   eq(r2.status, 429); eq((await r2.json()).code, 'EMAIL_RATE_LIMIT');
 });
+
+Deno.test('RC4.1 Recibido Conforme: desde el comprobante guardado, sin DNI/CUIL; falla del proveedor → ERROR con reintento; reintento OK con la misma clave idempotente', async () => {
+  const { receiptEmail, sendCustomerEmails } = await import('../_shared/customer-email.js');
+  const receipt = { receipt_number: 'RC-01-000123-001', snapshot: { receipt_number: 'RC-01-000123-001', client_name: 'Cliente Mail', order_numbers: ['95001'], receiver_name: 'Laura Gómez', delivered_at: '2026-10-13T15:00:00Z' } };
+  const m = receiptEmail({ receipt, stop: { client_name: 'Cliente Mail', order_numbers: ['95001'] } });
+  ok(m.subject.includes('RC-01-000123-001') && m.html.includes('Laura Gómez') && m.html.includes('95001') && !/cuil|dni/i.test(m.html));
+  const jobs = [{ id: 'r1', kind: 'RECIBIDO_CONFORME', recipient: 'cliente@viejo.com', idempotency_key: 'route|stop|RECIBIDO_CONFORME', status: 'QUEUED', retry_count: 0 }];
+  const updates = [], keys = []; let fail = true;
+  const store = { listJobs: async () => jobs.filter(j => j.status !== 'SENT'), stopFor: async () => ({ client_name: 'Cliente Mail', order_numbers: ['95001'] }), receiptFor: async () => receipt,
+    updateJob: async (id, patch) => { updates.push(patch); Object.assign(jobs[0], patch); } };
+  const provider = { send: async x => { keys.push(x.idempotencyKey); if (fail) throw new Error('proveedor caído'); return { id: 'msg-1' }; } };
+  await sendCustomerEmails({ store, provider });
+  eq(jobs[0].status, 'ERROR'); eq(jobs[0].retry_count, 1); ok(jobs[0].error.includes('proveedor caído'));
+  fail = false; await sendCustomerEmails({ store, provider });
+  eq(jobs[0].status, 'SENT'); eq(jobs[0].provider_id, 'msg-1'); eq(keys, ['route|stop|RECIBIDO_CONFORME', 'route|stop|RECIBIDO_CONFORME']);
+  await sendCustomerEmails({ store, provider }); eq(keys.length, 2);   // ya enviado: no se vuelve a mandar
+});
+Deno.test('RC4.1 Sin comprobante guardado: el job queda en ERROR (no se inventa uno) y la entrega no se toca', async () => {
+  const { sendCustomerEmails } = await import('../_shared/customer-email.js');
+  const jobs = [{ id: 'r2', kind: 'RECIBIDO_CONFORME', recipient: 'a@b.com', idempotency_key: 'k2', status: 'QUEUED', retry_count: 0 }];
+  const store = { listJobs: async () => jobs.filter(j => j.status !== 'SENT'), stopFor: async () => ({ client_name: 'X' }), receiptFor: async () => { throw new Error('no existe'); }, updateJob: async (id, p) => Object.assign(jobs[0], p) };
+  let sent = 0; await sendCustomerEmails({ store, provider: { send: async () => { sent++; return { id: 'x' }; } } });
+  eq(jobs[0].status, 'ERROR'); ok(jobs[0].error.startsWith('COMPROBANTE')); eq(sent, 0);
+});
+
+Deno.test('RC4.1 · Diseño Recibido Conforme: asunto, logo oficial, datos, link al sitio, privacidad, acentos, móvil y sin imágenes', async () => {
+  const { receiptEmail, SITE_URL } = await import('../_shared/customer-email.js');
+  const receipt = { receipt_number: 'RC-01-000123-001', snapshot: { receipt_number: 'RC-01-000123-001', client_name: 'Ferretería Ñandú', order_numbers: ['95001', '95002'], receiver_name: 'José Pérez',
+    delivered_at: '2026-10-13T15:05:00Z', carrier_id: 'CT-ESTE' } };
+  const stop = { client_name: 'Ferretería Ñandú', order_numbers: ['95001', '95002'], receiver_cuil: '20301112223', receiver_dni: '30111222', lat: -32.89, lon: -68.84, outcome_note: 'NOTA INTERNA' };
+  const L = await import('../_shared/ok-accesorios-logo.js'); const { inlineLogoFrom } = await import('../_shared/resend-body.js');
+  const m = receiptEmail({ receipt, stop, inlineLogo: inlineLogoFrom(L) });
+  // 1. asunto
+  eq(m.subject, 'OK Accesorios · Recibido conforme RC-01-000123-001');
+  // 2. logo HORIZONTAL oficial en encabezado y pie (nunca el ícono cuadrado de la app), con proporción exacta 1536×201 y alt textual
+  eq((m.html.match(/<img src="cid:ok-accesorios-logo"/g) || []).length, 2); ok(m.html.includes('alt="OK ACCESORIOS"'));
+  ok(!/icon-192|icon-512|apple-touch|\/logo\.png/.test(m.html));
+  ok(m.html.includes('width="240" height="31"') && m.html.includes('width="160" height="21"') && m.html.includes('max-width:100%;height:auto'));   // 240×201/1536 = 31,4 · 160×201/1536 = 20,9
+  // 3. textos y datos dinámicos
+  for (const t of ['Recibido Conforme', 'Hola <b>Ferretería Ñandú</b>, registramos correctamente la entrega de tu pedido.', 'Entrega confirmada', 'Tu pedido fue entregado correctamente.',
+    'RC-01-000123-001', '95001 + 95002', 'José Pérez', '13/10/2026', '12:05', 'Recibido conforme', 'Este correo confirma la recepción conforme de la mercadería.']) ok(m.html.includes(t), t);
+  for (const k of ['Comprobante', 'Cliente', 'Pedido', 'Recibió', 'Fecha y hora', 'Estado']) ok(m.html.includes('>' + k + '<'), k);
+  // 4. sitio web visible y clickeable, con https, en el pie (sin el lema anterior)
+  eq(SITE_URL, 'https://www.okaccesorios.com.ar'); ok(m.html.includes('<a href="https://www.okaccesorios.com.ar"') && m.html.includes('>https://www.okaccesorios.com.ar</a>'));
+  ok(!/SIEMPRE CERCA/i.test(m.html + m.text)); ok(m.text.includes('https://www.okaccesorios.com.ar'));
+  // 5. móvil / compatibilidad: viewport, ancho fluido con tope 600, tablas, estilos inline, sin CSS externo, <style>, scripts ni flex/grid
+  ok(m.html.includes('name="viewport"') && m.html.includes('max-width:600px;width:100%') && m.html.includes('<!--[if mso]>') && m.html.includes('role="presentation"'));
+  ok(!/<style|<link|<script|display:\s*(flex|grid)|position:\s*(absolute|fixed)/i.test(m.html));
+  // 6. acentos y codificación
+  ok(m.html.includes('<meta charset="utf-8">') && m.html.includes('Recibió') && m.html.includes('recepción') && m.html.includes('Ñandú'));
+  // 7. sin datos sensibles (aunque la parada los traiga)
+  ok(!/\bcuil\b|\bdni\b|\bfirma\b|signature|\bgps\b|latitud|-32\.89|-68\.84|30111222|20301112223|NOTA INTERNA/i.test(m.html + m.text));
+  // 8. imágenes bloqueadas / sin URL pública: queda el texto de marca, sin <img>
+  const n = receiptEmail({ receipt, stop });
+  ok(!n.html.includes('<img') && n.html.includes('OK <span style="color:#16d6e5;">ACCESORIOS</span>'));
+  ok(!n.attachments);   // sin bytes del logo no hay adjunto ni <img>
+  // caracteres peligrosos escapados
+  const x = receiptEmail({ receipt: { receipt_number: 'R', snapshot: { receipt_number: 'R', client_name: '<script>x</script>', receiver_name: 'A & B' } }, stop: {} });
+  ok(!x.html.includes('<script>x') && x.html.includes('&lt;script&gt;') && x.html.includes('A &amp; B'));
+});
+Deno.test('RC4.1 · Diseño: el envío no cambia (misma clave idempotente, un solo envío, mismo destinatario)', async () => {
+  const { sendCustomerEmails } = await import('../_shared/customer-email.js'); const L = await import('../_shared/ok-accesorios-logo.js'); const { inlineLogoFrom } = await import('../_shared/resend-body.js');
+  const receipt = { receipt_number: 'RC-9', snapshot: { receipt_number: 'RC-9', client_name: 'C', order_numbers: ['1'], receiver_name: 'R', delivered_at: '2026-10-13T15:00:00Z' } };
+  const jobs = [{ id: 'z1', kind: 'RECIBIDO_CONFORME', recipient: 'c@c.com', idempotency_key: 'r|s|RECIBIDO_CONFORME', status: 'QUEUED', retry_count: 0 }];
+  const sent = []; const store = { listJobs: async () => jobs.filter(j => j.status !== 'SENT'), stopFor: async () => ({}), receiptFor: async () => receipt, updateJob: async (id, p) => Object.assign(jobs[0], p) };
+  await sendCustomerEmails({ store, provider: { send: async x => { sent.push(x); return { id: 'm1' }; } }, inlineLogo: inlineLogoFrom(L) });
+  await sendCustomerEmails({ store, provider: { send: async x => { sent.push(x); return { id: 'm2' }; } }, inlineLogo: inlineLogoFrom(L) });
+  eq(sent.length, 1); eq(sent[0].idempotencyKey, 'r|s|RECIBIDO_CONFORME'); eq(sent[0].to, 'c@c.com'); eq(jobs[0].status, 'SENT'); ok(sent[0].html.includes('cid:ok-accesorios-logo') && !sent[0].html.includes('icon-192'));
+});
+
+Deno.test('RC4.1 · CID: HTML y payload a Resend con el logo oficial inline, mismo content_id, image/png, sin URL externa, fallback y texto plano', async () => {
+  const { receiptEmail, sendCustomerEmails } = await import('../_shared/customer-email.js'); const L = await import('../_shared/ok-accesorios-logo.js'); const { resendBody, inlineLogoFrom } = await import('../_shared/resend-body.js');
+  const receipt = { receipt_number: 'RC-01-000123-001', snapshot: { receipt_number: 'RC-01-000123-001', client_name: 'Ferretería Ñandú', order_numbers: ['95001'], receiver_name: 'José Pérez', delivered_at: '2026-10-13T15:05:00Z' } };
+  const m = receiptEmail({ receipt, stop: {}, inlineLogo: inlineLogoFrom(L) });
+  // 1. el HTML usa cid:ok-accesorios-logo (encabezado y pie)
+  eq((m.html.match(/src="cid:ok-accesorios-logo"/g) || []).length, 2);
+  // 2. ninguna URL del logo: ni /branding/ok-accesorios-horizontal.png ni <img src="http…">
+  ok(!m.html.includes('/branding/ok-accesorios-horizontal.png') && !/<img[^>]+src="https?:/i.test(m.html) && !m.html.includes('icon-192'));
+  // 3-6. payload real a Resend (el mismo que arma la Edge Function)
+  const sent = []; const jobs = [{ id: 'c1', kind: 'RECIBIDO_CONFORME', recipient: 'cliente@viejo.com', idempotency_key: 'r1|s1|RECIBIDO_CONFORME', status: 'QUEUED', retry_count: 0 }];
+  const store = { listJobs: async () => jobs.filter(j => j.status !== 'SENT'), stopFor: async () => ({}), receiptFor: async () => receipt, updateJob: async (id, p) => Object.assign(jobs[0], p) };
+  let fail = true;
+  const provider = { send: async x => { const body = resendBody(x, 'OK Accesorios <avisos@okaccesorios.com.ar>'); sent.push({ x, body }); if (fail) throw new Error('Resend 500: caído'); return { id: 'msg-cid' }; } };
+  await sendCustomerEmails({ store, provider, inlineLogo: inlineLogoFrom(L) });         // falla
+  fail = false; await sendCustomerEmails({ store, provider, inlineLogo: inlineLogoFrom(L) });   // reintento OK
+  await sendCustomerEmails({ store, provider, inlineLogo: inlineLogoFrom(L) });         // ya enviado: no se repite
+  eq(sent.length, 2);                                                                   // 9. no duplica: un intento fallido + uno OK
+  const b = sent[1].body, a = b.attachments;
+  ok(Array.isArray(a) && a.length === 1);                                               // 3. el logo va inline en el payload
+  eq(a[0].content_id, 'ok-accesorios-logo'); ok(b.html.includes('src="cid:' + a[0].content_id + '"'));   // 4. mismo CID que el HTML
+  eq(a[0].content_type, 'image/png');                                                   // 5. MIME
+  eq(a[0].filename, 'ok-accesorios-horizontal.png');                                     // 6. nombre de archivo
+  // 7. bytes idénticos al PNG oficial congelado (y al hash del BRAND-LOCK)
+  const bytes = Uint8Array.from(atob(a[0].content), c => c.charCodeAt(0));
+  const file = await Deno.readFile(new URL('../../../public/branding/ok-accesorios-horizontal.png', import.meta.url));
+  eq(bytes.length, file.length); eq(bytes.length, L.LOGO_BYTES); ok(bytes.every((v, i) => v === file[i]));
+  const hex = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), x => x.toString(16).padStart(2, '0')).join('');
+  const lock = JSON.parse(await Deno.readTextFile(new URL('../../../tests/brand/branding.lock.json', import.meta.url))).sha256;
+  eq(hex, L.LOGO_SHA256); eq(hex, lock['public/branding/ok-accesorios-horizontal.png']);
+  // 8 / 10. reintento con la MISMA clave idempotente y el MISMO destinatario
+  eq(sent[0].x.idempotencyKey, 'r1|s1|RECIBIDO_CONFORME'); eq(sent[1].x.idempotencyKey, 'r1|s1|RECIBIDO_CONFORME');
+  eq(b.to, ['cliente@viejo.com']); eq(sent[0].body.to, ['cliente@viejo.com']); eq(jobs[0].status, 'SENT'); eq(jobs[0].provider_id, 'msg-cid');
+  // 11. fallback ALT y 12. texto plano completo (sin imágenes)
+  ok(b.html.includes('alt="OK ACCESORIOS"')); ok(b.text.includes('RECIBIDO CONFORME') && b.text.includes('RC-01-000123-001') && b.text.includes('https://www.okaccesorios.com.ar') && !b.text.includes('cid:'));
+  // los otros emails al cliente siguen sin adjuntos (sin cambios)
+  const other = resendBody({ to: 'x@y.com', subject: 's', html: 'h', text: 't' }, 'f'); ok(!('attachments' in other)); eq(Object.keys(other), ['from', 'to', 'subject', 'html', 'text']);
+  // tamaño real del logo en cada correo
+  ok(L.LOGO_BYTES === 127934 && a[0].content.length === 170580);
+});

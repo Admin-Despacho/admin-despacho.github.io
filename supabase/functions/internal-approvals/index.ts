@@ -2,6 +2,8 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { json } from '../_shared/http.js';
 import { handle } from './handler.js';
+import { resendBody, inlineLogoFrom } from '../_shared/resend-body.js';
+import * as logoModule from '../_shared/ok-accesorios-logo.js';
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 const must = <T>(r: { data: T; error: any }) => { if (r.error) throw new Error(r.error.message); return r.data; };
 const store = {
@@ -17,6 +19,8 @@ const store = {
 const customerStore = {
   async listJobs(f: any) { let q = admin.from('customer_email_jobs').select('*').in('status', f.statuses); if (f.ids) q = q.in('id', f.ids); return must(await q) as any[]; },
   async stopFor(j: any) { return must(await admin.from('route_stops').select('client_name, order_numbers').eq('id', j.stop_id).single()); },
+  // RC4.1: el Recibido Conforme se arma SIEMPRE desde el comprobante guardado (nunca se regenera ni se duplica)
+  async receiptFor(j: any) { return must(await admin.from('delivery_receipts').select('receipt_number, snapshot').eq('stop_id', j.stop_id).single()); },
   async updateJob(id: string, patch: any) { must(await admin.from('customer_email_jobs').update(patch).eq('id', id)); }
 };
 const sheetStore = {
@@ -28,11 +32,12 @@ const sheetStore = {
 };
 const provider = { async send(m: any) {
   const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { authorization: 'Bearer ' + Deno.env.get('RESEND_API_KEY'), 'content-type': 'application/json', 'idempotency-key': m.idempotencyKey },
-    body: JSON.stringify({ from: Deno.env.get('REPORT_FROM'), to: [m.to], subject: m.subject, html: m.html, text: m.text }) });
+    body: JSON.stringify(resendBody(m, Deno.env.get('REPORT_FROM'))) });
   const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error('Resend ' + r.status + ': ' + (j.message ?? 'error')); return { id: j.id };
 } };
 const deps = {
   cronSecret: Deno.env.get('CRON_SECRET') ?? '', appUrl: (Deno.env.get('APP_URL') ?? '').replace(/\/$/, ''), store, customerStore, sheetStore, provider,
+  inlineLogo: inlineLogoFrom(logoModule),   // RC4.1: logo del Recibido Conforme embebido por CID (no depende de APP_URL)
   async queueSheetEmails() { must(await admin.rpc('queue_sheet_emails', { p_day: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Mendoza' }).format(new Date()) })); },
   async getUserFromJwt(jwt: string) { const { data } = await admin.auth.getUser(jwt); return data?.user ? { id: data.user.id } : null; },
   async getProfile(id: string) { return must(await admin.from('profiles').select('*').eq('id', id).maybeSingle()); },
