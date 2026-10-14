@@ -132,6 +132,8 @@ export class SupabaseApi {
     if (r.error) throw this._rpcErr(r.error); return r.data;
   }
   async publishRoute(p) { return this._rpc('publish_route', { p }); }
+  async beginPostPublishRevision(id) { return this._rpc('begin_post_publish_revision', { p_route: id }); }
+  async publishRouteRevision(p) { return this._rpc('publish_route_revision', { p }); }
   async reserveOrders(sheetKey, orders) { return this._rpc('reserve_orders', { p_sheet_key: sheetKey, p_orders: orders.map(String) }); }
   async releaseOrders(sheetKey, orders) { return this._rpc('release_orders', { p_sheet_key: sheetKey, p_orders: orders ? orders.map(String) : null }); }
   async routeStatus(id) { const { data } = await this.sb.from('routes').select('id, number, operational_status, published_at, notified_at, viewed_at, started_at, completed_at').eq('id', id).maybeSingle(); return data; }
