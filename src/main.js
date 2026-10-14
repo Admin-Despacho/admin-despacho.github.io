@@ -50,12 +50,12 @@ const rc4Open = fn => async me => { const [r, a] = await Promise.all([rc4Ui(), a
 const canReq = me => hasPerm(me, 'requests.create') || hasPerm(me, 'requests.view_team') || hasPerm(me, 'requests.approve_team') || me.role === 'ADMIN';
 const MODULE_ROUTES = {
   '#/dashboard': { ok: RC4_HOME, open: async me => (await adminUi()).openDashboard(api, me) },
-  '#/nueva-hoja': { ok: me => hasPerm(me, 'routes.create'), open: async () => { closeOverlay(); history.replaceState(null, '', location.pathname + '#/despacho'); const b = document.getElementById('tabNew'); if (b) b.click(); } },
+  '#/nueva-hoja': { ok: me => hasPerm(me, 'routes.create'), open: async me => { closeOverlay(); show('#operario'); await mountLegacyRc4(me, '#/despacho'); history.replaceState(null, '', location.pathname + '#/despacho'); const b = document.getElementById('tabNew'); if (b) b.click(); } },
   '#/solicitudes': { ok: canReq, open: rc4Open('openRequests') },
   '#/notificaciones': { ok: me => hasPerm(me, 'routes.create') || canReq(me), open: rc4Open('openNotifications') },
   '#/vehiculos': { ok: me => hasPerm(me, 'vehicle_mileage.view') || hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicles.manage'), open: rc4Open('openVehicles') },
   '#/config-operativa': { ok: me => hasPerm(me, 'columns.view') || hasPerm(me, 'columns.manage_defaults') || hasPerm(me, 'vehicle_mileage.view'), open: rc4Open('openOperationalConfig') },
-  '#/despacho': { ok: me => hasPerm(me, 'routes.create'), open: () => closeOverlay() },
+  '#/despacho': { ok: me => hasPerm(me, 'routes.create'), open: async me => { closeOverlay(); show('#operario'); await mountLegacyRc4(me, '#/despacho'); } },
   '#/borradores': { ok: me => hasPerm(me, 'routes.create'), open: async me => (await adminUi()).openDrafts(api, me) },
   '#/historial': { ok: me => hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team') || hasPerm(me, 'routes.view_own'), open: async me => (await adminUi()).openHistory(api, me) },
   '#/aprobaciones': { ok: canApprovals, open: async me => { const { ApprovalsPanel } = await import('./online/approvals-ui.js'); await new ApprovalsPanel(api, me).open(); await withNav(me, '#/aprobaciones'); } },
@@ -67,6 +67,39 @@ const MODULE_ROUTES = {
   '#/backup': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'backup.manage'), open: async me => (await adminUi()).openBackup(api, me) },
   '#/mis-hojas': { ok: me => hasPerm(me, 'routes.view_assigned'), open: () => closeOverlay() }
 };
+// Integra el constructor legacy dentro del shell visual RC4 sin tocar su lógica operativa.
+async function mountLegacyRc4(me, active = '#/despacho') {
+  if (!me || !['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'].includes(me.role)) return;
+  const op = $('#operario'); if (!op) return;
+  const r = await rc4Ui();
+  let shell = op.querySelector(':scope > .rc4legacy-shell');
+  if (!shell) {
+    const oldNodes = [...op.childNodes];
+    const legacy = document.createElement('div'); legacy.className = 'rc4legacy-content';
+    oldNodes.forEach(n => legacy.appendChild(n));
+
+    shell = document.createElement('div'); shell.className = 'rc4app rc4legacy-shell';
+    shell.innerHTML =
+      '<aside class="rc4side"><div class="brand"><img class="logo" src="/icons/icon-192.png" alt="OK"><div><b>DESPACHO</b><small>' + esc(ROLE_LABEL[me.role] || me.role) + '</small></div></div>' +
+      '<nav class="nav" id="rc4LegacyNav"></nav><div class="footer"></div></aside>' +
+      '<main class="rc4main"><div class="topbar"><div class="title"><h1>Despacho</h1><p>Preparación de hojas de ruta</p></div>' +
+      '<div class="topact"><div class="userchip"><b>' + esc(me.full_name) + ' · ' + esc(ROLE_LABEL[me.role] || me.role) + '</b><br><span>' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span></div>' +
+      '<button class="tbtn" type="button" id="legacyRc4Logout">Cerrar sesión</button></div></div><div class="rc4legacy-body"></div></main>';
+    shell.querySelector('.rc4legacy-body').appendChild(legacy);
+    op.appendChild(shell);
+    shell.querySelector('#legacyRc4Logout').onclick = logout;
+  }
+  const foot = { ADMIN: 'OK Despacho · Administración<br>Configuración global exclusiva Admin', SUPERVISOR_DESPACHO: 'Rol operativo de supervisión<br>Sin acceso a configuración global', OPERARIO_DEPOSITO: 'Operario Depósito<br>Preparación de hojas' }[me.role] || '';
+  const routeOf = h => String(h || '').split('?')[0];
+  const a = routeOf(active);
+  const nav = r.roleNav(me).map(([h, l, sub]) =>
+    '<a href="' + h + '" data-nav="' + h + '" class="' + (routeOf(h) === a && !(sub || []).some(s => routeOf(s[0]) === a && routeOf(s[0]) !== routeOf(h)) ? 'active' : '') + '"><span class="dot"></span>' + esc(l) + '</a>' +
+    (sub ? '<div class="sub">' + sub.map(([sh, sl]) => '<a href="' + sh + '" data-nav="' + sh + '" class="' + (routeOf(sh) === a ? 'active' : '') + '">' + esc(sl) + '</a>').join('') + '</div>' : '')
+  ).join('');
+  shell.querySelector('#rc4LegacyNav').innerHTML = nav;
+  shell.querySelector('.footer').innerHTML = foot;
+}
+
 // Inserta la barra de navegación debajo del encabezado del panel abierto
 async function withNav(me, active) {
   const { navHtml } = await adminUi(); const top = document.querySelector('#usersPanel > .top');
@@ -102,7 +135,7 @@ async function addHeaderControls(me) {
   chip.innerHTML = esc(me.full_name) + ' · <b>' + esc(ROLE_LABEL[me.role] || me.role) + '</b>';
   chip.addEventListener('click', () => openAccount(api, me, logout));
   top.insertBefore(chip, before);
-  await moduleButtons(me, top);
+  if (!RC4_HOME(me)) await moduleButtons(me, top);
   const out = document.createElement('button'); out.className = 'tbtn'; out.type = 'button'; out.id = 'btnLogout'; out.textContent = 'Cerrar sesión';
   out.addEventListener('click', logout);
   top.appendChild(out);
@@ -130,6 +163,7 @@ async function route() {
     show('#operario');
     try { await loadLegacy(); } catch (e) { alert(e.message); }
     await addHeaderControls(me);
+    await mountLegacyRc4(me, location.hash.split('?')[0] || '#/despacho');
     // reglas financieras vigentes del servidor (versionadas)
     // Reglas del servidor (financieras + asignación): se ESPERAN y el estado queda visible. Sin servidor se puede seguir preparando
     // (contingencia identificada), pero no se publica hasta recuperar las reglas, recalcular y revisar con la versión vigente.
