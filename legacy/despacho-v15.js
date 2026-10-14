@@ -776,7 +776,7 @@ const SheetTabs = {
     sheet = sheet || {};
     RouteStore.rows = sheet.rows || []; RouteStore.selected = new Set(sheet.selected || []); RouteStore.sheetId = sheet.sheetId || sheetUid(); RouteStore.sheetDate = sheet.sheetDate || '';
     RouteStore.audit = sheet.audit || []; RouteStore.showCash = sheet.showCash !== false; RouteStore.showCheques = sheet.showCheques !== false; RouteStore.showTransfers = sheet.showTransfers !== false;
-    RouteStore.oldDecisions = sheet.oldDecisions || {}; RouteStore.published = sheet.published || null;
+    RouteStore.oldDecisions = sheet.oldDecisions || {}; RouteStore.published = sheet.published || null; RouteStore.revision = sheet.revision || null;
   },
   tab(id) { return this.idx && this.idx.tabs.find(t => t.id === (id || RouteStore.sheetId)); },
   touch() {
@@ -841,14 +841,26 @@ const Publisher = {
     return this.rows().filter(r => { const st = baseStatus(r); return r.monto == null || (st.blocking && !(r.calc && r.calc.shipProv && st.issues.every(i => i.level !== 'error' && (i.level !== 'warn' || i.code === 'ENVÍO A CONFIRMAR')))); });
   },
   async payload(carrier, responsable) {
-    return { sheet_key: RouteStore.sheetId, carrier_id: carrier.id, responsable_id: responsable,
+    const draftContent = {
+      rows: JSON.parse(JSON.stringify(RouteStore.rows || [])), selected: Array.from(RouteStore.selected || []),
+      sheetDate: RouteStore.sheetDate, audit: (RouteStore.audit || []).slice(-2000),
+      showCash: RouteStore.showCash, showCheques: RouteStore.showCheques, showTransfers: RouteStore.showTransfers,
+      oldDecisions: RouteStore.oldDecisions || {}, sheetId: RouteStore.sheetId, published: null, revision: RouteStore.revision || null
+    };
+    const out = { sheet_key: RouteStore.sheetId, carrier_id: carrier.id, responsable_id: responsable,
       stops: this.rows().map(r => { const p = Money.parts(r), prov = r.calc && r.calc.shipProv;
         const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null, cristian = ['CT-ESTE', 'CT-ALR'].includes(carrier.id);
         return { client_name: r.cliente, client_key: (r.calc && r.calc.cuit) || Normalizer.name(r.cliente), zone: this.zone(r, carrier), order_numbers: [r.mainOrder, r.shipOrder].filter(Boolean).map(String),
           // Cristian cobra el monto de la hoja: entrega + cobranza con importe esperado (el chofer no lo modifica)
           task: cristian && (r.monto || 0) > 0 ? 'AMBAS' : 'ENTREGA', expected_amount: cristian && (r.monto || 0) > 0 ? r.monto : null,
           customer_email: r.email || (cc && cc.email) || null,
-          merchandise_amount: p.main || 0, shipping_fee: p.ship || 0, ship_fee_status: prov ? 'PROVISIONAL' : 'SALDO', ship_order: r.shipOrder || null, address: r.domicilio || '', ready: true }; }) };
+          merchandise_amount: p.main || 0, shipping_fee: p.ship || 0, ship_fee_status: prov ? 'PROVISIONAL' : 'SALDO', ship_order: r.shipOrder || null, address: r.domicilio || '', ready: true }; }),
+      draft_content: draftContent };
+    if (RouteStore.revision) {
+      out.revision_route_id = RouteStore.revision.route_id;
+      out.revision_version = RouteStore.revision.version;
+    }
+    return out;
   },
   async open() {
     const b = this.bridge(); if (!b) return;
@@ -879,7 +891,8 @@ const Publisher = {
         pl.pdf_model = JSON.parse(JSON.stringify(ExportModel.build())); // el PDF sale SIEMPRE de este snapshot publicado
         const r = await b.publish(pl);
         RouteStore.published = { id: r.id, number: r.number, at: r.published_at, carrier: carrier.name, responsable: (resp.find(u => u.id === r.responsable_id) || {}).full_name || '' };
-        RouteStore.log({ tipo: 'hoja publicada', numero: r.number }); await RouteStore.flush();
+        const revisedFrom = RouteStore.revision && RouteStore.revision.version; RouteStore.revision = null;
+        RouteStore.log({ tipo: revisedFrom ? 'hoja corregida y republicada' : 'hoja publicada', numero: r.number, version: r.version || 1, versionAnterior: revisedFrom || null }); await RouteStore.flush();
         m.remove(); toast('Hoja ' + r.number + ' publicada · disponible en tiempo real para ' + RouteStore.published.responsable); SheetTabs.render();
         await this.afterPublish(r, pl.pdf_model); this.render();
       } catch (e) { const er = m.querySelector('#pubErr'); er.textContent = e.message; er.hidden = false; ev.target.disabled = false; }
@@ -939,10 +952,10 @@ const Publisher = {
 };
 
 const RouteStore = {
-  rows: [], selected: new Set(), data: { pedidos: null, sc: null, cc: null }, sheetDate: '', audit: [], opNotesInExcel: false, showCash: true, showCheques: true, showTransfers: true, oldDecisions: {},
+  rows: [], selected: new Set(), data: { pedidos: null, sc: null, cc: null }, sheetDate: '', audit: [], opNotesInExcel: false, showCash: true, showCheques: true, showTransfers: true, oldDecisions: {}, revision: null,
   save: null,
   init() {
-    this.flush = () => { SheetTabs.touch(); return DB.set('sheet:' + this.sheetId, { rows: this.rows, selected: Array.from(this.selected), sheetDate: this.sheetDate, audit: this.audit.slice(-2000), showCash: this.showCash, showCheques: this.showCheques, showTransfers: this.showTransfers, oldDecisions: this.oldDecisions, sheetId: this.sheetId, published: this.published || null }); };
+    this.flush = () => { SheetTabs.touch(); return DB.set('sheet:' + this.sheetId, { rows: this.rows, selected: Array.from(this.selected), sheetDate: this.sheetDate, audit: this.audit.slice(-2000), showCash: this.showCash, showCheques: this.showCheques, showTransfers: this.showTransfers, oldDecisions: this.oldDecisions, sheetId: this.sheetId, published: this.published || null, revision: this.revision || null }); };
     this.save = debounce(this.flush, 350);
     // guardar también al cerrar o cambiar de pestaña
     window.addEventListener('pagehide', () => this.flush());
@@ -2570,6 +2583,32 @@ const PdfExporter = {
   $('#optOpNotes').checked = !!Config.get().opNotesInExcel;
   $('#optCash').checked = RouteStore.showCash; $('#optCheques').checked = RouteStore.showCheques; $('#optTransfers').checked = RouteStore.showTransfers;
   UI.renderHead(); UI.renderFiles(); UI.renderCarriers(); UI.renderTable();
+  window.OKD_LEGACY = {
+    openDraft: async (key, name, content) => {
+      if (!key) throw new Error('Borrador inválido.');
+      const sh = Object.assign({}, content || {}, { sheetId: key, published: null });
+      let t = SheetTabs.idx.tabs.find(x => x.id === key);
+      if (!t) { t = { id: key, name: name || 'Hoja', closed: false, orders: [] }; SheetTabs.idx.tabs.push(t); }
+      t.name = name || t.name || 'Hoja'; t.closed = false; t.published = null; SheetTabs.idx.active = key;
+      await DB.set('sheet:' + key, sh); await DB.set('sheets_index', SheetTabs.idx);
+      await SheetTabs.show(key, sh); await RouteStore.flush();
+    },
+    dropLocal: async key => {
+      await DB.tx('readwrite', st => st.delete('sheet:' + key));
+      if (!SheetTabs.idx) return;
+      const wasActive = SheetTabs.idx.active === key;
+      SheetTabs.idx.tabs = SheetTabs.idx.tabs.filter(x => x.id !== key);
+      if (wasActive) {
+        const next = SheetTabs.idx.tabs.find(x => !x.closed);
+        if (next) { SheetTabs.idx.active = next.id; await DB.set('sheets_index', SheetTabs.idx); await SheetTabs.show(next.id); }
+        else {
+          const id = sheetUid(); SheetTabs.idx.tabs.push({ id, name: 'Hoja 1', closed: false, orders: [] }); SheetTabs.idx.active = id;
+          await DB.set('sheets_index', SheetTabs.idx); await SheetTabs.show(id, { sheetId: id }); await RouteStore.flush();
+        }
+      } else await DB.set('sheets_index', SheetTabs.idx);
+      SheetTabs.render();
+    }
+  };
   SheetTabs.render(); Publisher.render();
   if (Publisher.bridge() && Publisher.bridge().subscribe) Publisher.bridge().subscribe(() => Publisher.render()); // estado en vivo
   // El aviso de revisado heredado ya se mostró en esta apertura: se guarda para no repetirlo
