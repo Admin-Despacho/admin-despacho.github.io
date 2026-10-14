@@ -81,7 +81,14 @@ export async function openDrafts(api, me) {
       };
       tr.querySelector('[data-ren]').onclick = () => { const n = prompt('Nuevo nombre del borrador', d.name || ''); if (n && n.trim()) run(() => api.touchDraft(key, n.trim(), d.carrier_name, d.delivery_count, d.orders, undefined), 'Borrador renombrado.', render); };
       tr.querySelector('[data-rel]').onclick = () => { if (confirm('¿Liberar los pedidos reservados de este borrador?')) run(() => api.releaseOrders(key, null), 'Pedidos liberados: quedan disponibles para otra hoja.', render); };
-      tr.querySelector('[data-del]').onclick = () => { if (confirm('¿Eliminar el borrador "' + (d.name || '') + '" y liberar sus pedidos?')) run(async () => { await api.deleteDraft(key); if (window.OKD_LEGACY) await window.OKD_LEGACY.dropLocal(key); }, 'Borrador eliminado y pedidos liberados.', render); };
+      tr.querySelector('[data-del]').onclick = async () => {
+        if (!confirm('¿Eliminar el borrador "' + (d.name || '') + '" y liberar sus pedidos?')) return;
+        try {
+          const n = await api.deleteDraft(key);
+          if (window.OKD_LEGACY) await window.OKD_LEGACY.dropLocal(key);
+          render({ text: Number(n) === -1 ? 'Corrección descartada. La hoja publicada original quedó intacta.' : 'Borrador eliminado y pedidos liberados.' });
+        } catch (e) { render({ err: true, text: e.message }); }
+      };
     });
   };
   await render();
