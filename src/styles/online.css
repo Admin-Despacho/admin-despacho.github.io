@@ -325,3 +325,15 @@ body.no-publish #btnPublish{display:none!important}
   .rc4legacy-shell .rc4legacy-content .steps{grid-template-columns:1fr}
   .rc4legacy-shell .rc4legacy-content .step.s3{grid-column:auto}
 }
+
+
+/* RC4.1.6 · Configuración de informes automáticos */
+.report-schedule-grid{align-items:flex-start;gap:12px;flex-wrap:wrap}
+.report-schedule-grid>label,.report-schedule-grid>div{min-width:190px}
+.report-schedule-grid [hidden]{display:none!important}
+.report-recipients{margin:14px 0}
+.recipient-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.recipient-row input{min-width:280px;max-width:480px;flex:1}
+.recipient-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.recipient-chip{display:inline-flex;align-items:center;gap:8px;background:#e9fbfd;border:1px solid #b9eff3;color:#075d68;border-radius:999px;padding:7px 10px;font-size:12.5px;font-weight:650}
+.recipient-chip button{border:0;background:transparent;color:#075d68;font-size:18px;line-height:1;cursor:pointer;padding:0 2px}
