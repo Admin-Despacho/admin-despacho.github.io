@@ -1138,7 +1138,7 @@ const Publisher = {
         return { client_name: r.cliente, client_key: r.stopType === 'TAREA' ? ('TASK-' + r.id) : (r.stopType === 'UBICACION_INTERNA' ? r.internalLocationKey : ((r.calc && r.calc.cuit) || Normalizer.name(r.cliente))), zone: this.zone(r, carrier), order_numbers: [r.mainOrder, r.shipOrder].filter(Boolean).map(String),
           // Cristian cobra el monto de la hoja: entrega + cobranza con importe esperado (el chofer no lo modifica)
           task: cristian && (r.monto || 0) > 0 ? 'AMBAS' : 'ENTREGA', expected_amount: cristian && (r.monto || 0) > 0 ? r.monto : null,
-          stop_type: r.stopType || 'PEDIDO', internal_location_key: r.internalLocationKey || null, instructions: r.taskInstructions || null, contact_name: r.taskContact || null, contact_phone: r.taskPhone || null,
+          stop_type: r.stopType || 'PEDIDO', internal_location_key: r.internalLocationKey || null, instructions: r.taskInstructions || (r.locationObservation || null), contact_name: r.taskContact || null, contact_phone: r.taskPhone || null,
           customer_email: (r.stopType && r.stopType !== 'PEDIDO') ? null : (r.email || (cc && cc.email) || null),
           merchandise_amount: (r.stopType && r.stopType !== 'PEDIDO') ? 0 : (p.main || 0), shipping_fee: (r.stopType && r.stopType !== 'PEDIDO') ? 0 : (p.ship || 0), ship_fee_status: prov ? 'PROVISIONAL' : 'SALDO', ship_order: r.shipOrder || null, address: r.domicilio || '', ready: true }; }) };
   },
@@ -1877,6 +1877,65 @@ const UI = {
   isInternalSelected() {
     return Array.from(RouteStore.selected || []).some(x => /^(TRANSPORTE\s+)?INTERNO$/i.test(String(x || '').trim()));
   },
+  openInternalLocationComposer(hit) {
+    const box = document.querySelector('.step.s3'), ids = $('#ids'), log = $('#log');
+    if (!box) return;
+    const old = box.querySelector('#internalLocationComposer'); if (old) old.remove();
+    const composer = document.createElement('div');
+    composer.id = 'internalLocationComposer'; composer.className = 'internal-task-form internal-location-form';
+    composer.innerHTML =
+      '<b>UBICACIÓN INTERNA</b><div class="internal-location-head"><strong>' + esc(hit.name) + '</strong><span>' + esc(hit.address || '') + '</span><small>GPS guardado · radio ' + esc(hit.radius_m || 200) + ' m</small></div>' +
+      '<label>¿Lleva pedidos a esta ubicación?<textarea class="ed" id="ilOrders" rows="2" placeholder="Ej. 25384 25385 25378"></textarea></label>' +
+      '<label>Observación de la parada (opcional)<textarea class="ed" id="ilObs" rows="3" placeholder="Ej. Dejar cajas vacías en depósito."></textarea></label>' +
+      '<div class="internal-task-actions"><button class="btn go" type="button" id="ilAddStop">AGREGAR PARADA</button><button class="btn soft" type="button" id="ilCancelStop">CANCELAR</button></div>';
+    box.querySelector('#log').before(composer);
+    composer.querySelector('#ilCancelStop').onclick = () => { composer.remove(); ids.value = ''; ids.focus(); };
+    composer.querySelector('#ilAddStop').onclick = async () => {
+      const raw = composer.querySelector('#ilOrders').value;
+      const orderIds = []; (raw.match(/\d+/g) || []).forEach(x => { const v = String(parseInt(x,10)); if (v && !orderIds.includes(v)) orderIds.push(v); });
+      const obs = composer.querySelector('#ilObs').value.trim();
+      const rows = [];
+      // Si hay pedidos, deben existir en el informe y no pueden estar ya usados en otra hoja.
+      for (const id of orderIds) {
+        const used = RouteStore.usedOrders();
+        if (used.has(id)) { toast('El pedido ' + id + ' ya está en esta hoja.'); return; }
+        const otherTab = SheetTabs.orderInOther(id);
+        if (otherTab) { toast('El pedido ' + id + ' ya está en otra hoja (' + otherTab + ').'); return; }
+        const res = ShippingMatcher.resolve(id);
+        if (!res || res.shipPending) { toast('El pedido ' + id + ' no se encontró correctamente en el informe.'); return; }
+        const r = RouteStore.buildFromResolution(res);
+        r.stopType = 'PEDIDO';
+        r.transportista = 'TRANSPORTE INTERNO';
+        r.carrierOrig = 'TRANSPORTE INTERNO';
+        r.domicilio = hit.address || r.domicilio || '';
+        r.internalLocationKey = hit.location_key;
+        r.internalRadius = hit.radius_m || 200;
+        r.locationGroup = hit.location_key;
+        if (obs) r.opNotes = (r.opNotes || []).concat(obs);
+        rows.push(r);
+      }
+      if (rows.length) {
+        for (const r of rows) {
+          const ob = window.OKD_BRIDGE && window.OKD_BRIDGE.orders;
+          if (ob) {
+            try { await ob.reserve(RouteStore.sheetId, [r.mainOrder, r.shipOrder].filter(Boolean).map(String)); }
+            catch (e) { toast('No se pudo reservar el pedido ' + (r.mainOrder || '') + ': ' + (e.message || e)); return; }
+          }
+        }
+        RouteStore.rows.push(...rows);
+      } else {
+        const row = RouteStore.newInternalLocation(hit);
+        row.locationGroup = hit.location_key;
+        row.locationObservation = obs;
+        if (obs) row.obsPago = obs;
+        RouteStore.rows.push(row);
+      }
+      RouteStore.save(); CalculationEngine.computeAll(RouteStore.rows); this.renderTable();
+      log.innerHTML = '<div class="msg ok"><b>PARADA AGREGADA</b> · ' + esc(hit.name) + (orderIds.length ? '<br>Pedidos: ' + esc(orderIds.join(', ')) : '') + (obs ? '<br>Obs.: ' + esc(obs) : '') + '</div>';
+      ids.value = ''; composer.remove(); ids.focus();
+    };
+    composer.querySelector('#ilOrders').focus();
+  },
   updateEntryMode() {
     const internal = this.isInternalSelected(), box = document.querySelector('.step.s3'), ids = $('#ids');
     if (!box || !ids) return;
@@ -1930,12 +1989,7 @@ const UI = {
         const hit = list.find(x => Normalizer.name(x.location_key) === q || Normalizer.name(x.name) === q)
           || list.find(x => Normalizer.name(x.name).includes(q) || Normalizer.name(x.location_key).includes(q) || Normalizer.name(x.address || '').includes(q));
         if (!hit) { log.innerHTML = '<div class="msg warn"><b>UBICACIÓN INTERNA NO ENCONTRADA.</b> Revisá el nombre guardado en Configuración → G2.</div>'; return; }
-        const exists = RouteStore.rows.some(r => r.stopType === 'UBICACION_INTERNA' && r.internalLocationKey === hit.location_key);
-        if (exists) { log.innerHTML = '<div class="msg">La ubicación <b>' + esc(hit.name) + '</b> ya está en la hoja.</div>'; return; }
-        const row = RouteStore.newInternalLocation(hit);
-        RouteStore.rows.push(row); RouteStore.save(); this.renderTable();
-        log.innerHTML = '<div class="msg ok"><b>UBICACIÓN AGREGADA</b> · ' + esc(hit.name) + '<br>' + esc(hit.address || '') + ' · radio ' + esc(hit.radius_m || 200) + ' m</div>';
-        $('#ids').value = '';
+        this.openInternalLocationComposer(hit);
         return;
       } catch (e) {
         log.innerHTML = '<div class="msg err">No se pudo consultar la ubicación interna: ' + esc(e.message || String(e)) + '</div>';

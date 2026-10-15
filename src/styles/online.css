@@ -659,3 +659,9 @@ body.no-publish #btnPublish{display:none!important}
 .task-chip.soft{background:#eef3f5;color:#43535e}.task-na{color:var(--muted);font-size:12px}
 .task-row td{background:#fffdf7}
 @media(max-width:700px){.internal-task-grid{grid-template-columns:1fr}}
+
+.internal-location-form{background:#f4feff;border-color:#b9eff3}
+.internal-location-form>b{color:#007a87}
+.internal-location-head{display:flex;flex-direction:column;gap:3px;padding:9px 10px;border:1px solid #c9eef1;border-radius:10px;background:#fff}
+.internal-location-head strong{font-size:14px}
+.internal-location-head span,.internal-location-head small{font-size:12px;color:var(--muted)}
