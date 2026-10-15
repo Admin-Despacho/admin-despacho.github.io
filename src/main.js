@@ -15,10 +15,12 @@ const show = id => ['#auth', '#noPanel', '#operario'].forEach(s => { $(s).hidden
 let legacyLoaded = false;
 
 const legacyAssetUrl = url => {
-  // El constructor legacy vive fuera del bundle de Vite. Usar el nombre hash del bundle actual
-  // como cache-buster evita mezclar un main nuevo con un despacho-v15.js viejo tras un deploy.
+  // despacho-v15.js cambia fuera del bundle de Vite. Su versión no puede depender del hash de main:
+  // si solo cambia el archivo público, el bundle conserva el mismo nombre y el navegador puede reutilizarlo.
+  // Para el constructor operativo usamos un cache-buster por apertura; el resto de librerías conserva caché estable.
   const buildAsset = (() => { try { return new URL(import.meta.url).pathname.split('/').pop() || 'build'; } catch (e) { return 'build'; } })();
-  return url + (url.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(buildAsset);
+  const version = /\/legacy\/despacho-v15\.js(?:\?|$)/.test(url) ? String(Date.now()) : buildAsset;
+  return url + (url.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(version);
 };
 async function loadText(url) { const u = legacyAssetUrl(url); const r = await fetch(u, { cache: 'reload' }); if (!r.ok) throw new Error('No se pudo cargar ' + url); return r.text(); }
 function loadScript(url) {
