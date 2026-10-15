@@ -1376,15 +1376,9 @@ const UI = {
     document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer && e.dataTransfer.files.length) this.handleFiles(Array.from(e.dataTransfer.files), null); });
     // Transportistas
     $('#carriers').addEventListener('change', e => {
-      if (e.target.matches('input[type=checkbox]')) {
-        if (e.target.checked) {
-          // Una hoja = un transportista. Al elegir otro, se reemplaza la selección anterior.
-          RouteStore.selected.clear();
-          RouteStore.selected.add(e.target.value);
-          $('#carriers input[type=checkbox]').forEach(x => { if (x !== e.target) x.checked = false; });
-        } else {
-          RouteStore.selected.delete(e.target.value);
-        }
+      if (e.target.matches('input[name="route_carrier"]')) {
+        RouteStore.selected.clear();
+        if (e.target.checked) RouteStore.selected.add(e.target.value);
         RouteStore.save(); this.refreshStatuses(); this.renderCards(); Publisher.render();
       }
     });
@@ -1517,7 +1511,13 @@ const UI = {
     });
     const list = cfg.carriers.slice();
     counts.forEach((v, k) => { if (list.indexOf(k) < 0) list.push(k); });
-    $('#carriers').innerHTML = list.map(c => '<label class="carrier"><input type="checkbox" value="' + esc(c) + '"' + (RouteStore.selected.has(c) ? ' checked' : '') + '>' + esc(c) +
+    // Una hoja = un transportista. Normaliza selecciones antiguas múltiples y usa selección única nativa.
+    if (RouteStore.selected.size > 1) {
+      const first = Array.from(RouteStore.selected)[0];
+      RouteStore.selected = new Set(first ? [first] : []);
+      RouteStore.save();
+    }
+    $('#carriers').innerHTML = list.map(c => '<label class="carrier"><input type="radio" name="route_carrier" value="' + esc(c) + '"' + (RouteStore.selected.has(c) ? ' checked' : '') + '>' + esc(c) +
       (OrderIndex.size() ? '<span class="c" title="Pedidos en el informe">' + (counts.get(c) || 0) + '</span>' : '') + '</label>').join('');
     if (OrderIndex.size() && other.size) {
       const tot = Array.from(other.values()).reduce((a, b) => a + b, 0);
