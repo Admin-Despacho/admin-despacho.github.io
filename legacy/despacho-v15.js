@@ -1377,7 +1377,14 @@ const UI = {
     // Transportistas
     $('#carriers').addEventListener('change', e => {
       if (e.target.matches('input[type=checkbox]')) {
-        if (e.target.checked) RouteStore.selected.add(e.target.value); else RouteStore.selected.delete(e.target.value);
+        if (e.target.checked) {
+          // Una hoja = un transportista. Al elegir otro, se reemplaza la selección anterior.
+          RouteStore.selected.clear();
+          RouteStore.selected.add(e.target.value);
+          $('#carriers input[type=checkbox]').forEach(x => { if (x !== e.target) x.checked = false; });
+        } else {
+          RouteStore.selected.delete(e.target.value);
+        }
         RouteStore.save(); this.refreshStatuses(); this.renderCards(); Publisher.render();
       }
     });
