@@ -40,6 +40,9 @@ jobs:
           VITE_SUPABASE_ANON_KEY: sb_publishable_cwLs4qzUgtMuEDEEhsQSfg_n-Q9McXG
         run: npm run build
 
+      - name: Write production build fingerprint
+        run: node scripts/write_build_info.mjs "$GITHUB_SHA"
+
       - name: Verify production carrier flow artifact
         run: node scripts/verify_production_carrier_flow.mjs --dist
 
