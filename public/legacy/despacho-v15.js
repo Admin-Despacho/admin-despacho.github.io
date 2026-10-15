@@ -971,7 +971,16 @@ const SheetTabs = {
 
 /* ---------------- Publicar hoja (Fase 2B.1): valida en el servidor, correlativo, snapshot y notificación ---------------- */
 const Publisher = {
+  _renderSeq: 0,
   bridge() { return window.OKD_BRIDGE && window.OKD_BRIDGE.routes; },
+  carrierMatch(carriers, value) {
+    const v = Normalizer.name(value || '');
+    return (carriers || []).find(c => Normalizer.name(c.name) === v || Normalizer.name(c.id) === v) || null;
+  },
+  actionNames() {
+    const rows = this.rows();
+    return rows.length ? [...new Set(rows.map(r => r.transportista).filter(Boolean))] : Array.from(RouteStore.selected || []).filter(Boolean);
+  },
   zone(row, carrier) {
     if (carrier.id === 'CT-ESTE') return 'ESTE';
     if (carrier.id === 'CT-ALR') return /capital|ciudad de mendoza|centro/i.test((row.localidad || '') + ' ' + (row.domicilio || '')) ? 'CENTRO' : 'ALREDEDORES';
@@ -1097,7 +1106,7 @@ const Publisher = {
     });
   },
   // Preparación antes de publicar: LISTO / LISTO CON ADVERTENCIAS / REVISAR
-  readiness(rows, carrier, resp, bad, vehicles) {
+  readiness(rows, carrier, resp, bad, vehicles, external) {
     const items = [], add = (lvl, t) => items.push([lvl, t]);
     if (window.OKD_CFG_STATE && window.OKD_CFG_STATE !== 'OK') add('err', 'CONFIGURACIÓN · SIN CONEXIÓN / REVISAR: la hoja se calculó con la configuración local de contingencia');
     if (this.tplErr) add('err', 'No se pudo verificar la plantilla de columnas de ' + this.tplErr.carrier + ' (' + this.tplErr.msg + '). Usá REINTENTAR.');
@@ -1105,7 +1114,8 @@ const Publisher = {
     if (finBlocked.length) add('err', 'FINANCIACIÓN PROPIA · REVISAR: la sincronización falló para ' + finBlocked.length + ' entrega(s) con financiación (reintentá antes de publicar)');
     if (carrier && carrier.kind === 'INTERNO') add(vehicles && vehicles.length ? 'ok' : 'err', vehicles && vehicles.length ? 'Ruta interna: vehículo asignado (obligatorio)' : 'Ruta interna sin vehículo activo: dalo de alta en CONFIGURACIÓN → VEHÍCULOS');
     add(carrier ? 'ok' : 'err', carrier ? 'Transportista: ' + carrier.name : 'Transportista sin definir o hay más de uno');
-    add(resp.length ? 'ok' : 'err', resp.length ? 'Responsable compatible disponible' : 'Sin responsable compatible');
+    if (external) add('ok', 'Despacho tercerizado: no requiere responsable de app');
+    else add(resp.length ? 'ok' : 'err', resp.length ? 'Responsable compatible disponible' : 'Sin responsable compatible');
     add(rows.length ? 'ok' : 'err', rows.length + ' entrega(s)');
     if (bad.length) add('err', bad.length + ' pedido(s) con montos/documentos, financiación o NOC por revisar');
     const noAddr = rows.filter(r => !String(r.domicilio || '').trim() || !String(r.localidad || '').trim()).length; if (noAddr) add('warn', noAddr + ' entrega(s) sin domicilio o localidad');
@@ -1138,24 +1148,28 @@ const Publisher = {
     const rows = this.rows(); if (!rows.length) { toast('La hoja no tiene pedidos para publicar.'); return; }
     const bad = this.problems();
     const carriers = await b.carriers();
-    const names = [...new Set(rows.map(r => r.transportista))];
-    const carrier = names.length === 1 ? carriers.find(c => Normalizer.name(c.name) === Normalizer.name(names[0])) : null;
+    const names = [...new Set(rows.map(r => r.transportista).filter(Boolean))];
+    const carrier = names.length === 1 ? this.carrierMatch(carriers, names[0]) : null;
+    const external = !!(carrier && carrier.kind === 'EXTERNO' && carrier.report_group !== 'CRISTIAN_TORRES');
     const m = document.createElement('div'); m.className = 'modal open'; m.id = 'publishModal';
     let resp = [];
-    if (carrier) { try { resp = await b.responsables(carrier.id); } catch (e) { resp = []; } }
+    if (carrier && !external) { try { resp = await b.responsables(carrier.id); } catch (e) { resp = []; } }
     const vehicles = carrier && carrier.kind === 'INTERNO' && b.vehicles ? (await b.vehicles().catch(() => [])).filter(v => v.active) : [];
     // Plantilla: "sin plantilla" (respuesta válida → predeterminada) ≠ error del servidor (→ REVISAR, no se publica)
     let tpl = null, tplErr = null;
     if (carrier && b.template) { try { tpl = await b.template(carrier.id); } catch (e) { tplErr = e.message || String(e); } }
     this.tplErr = tplErr ? { carrier: carrier.name, msg: tplErr } : null;
     await FinancingPlans.forClients(rows.map(rowKey)); // espera la sincronización de financiación pendiente
-    const ready = this.readiness(rows, carrier, resp, bad, vehicles);
+    const ready = this.readiness(rows, carrier, resp, bad, vehicles, external);
     const nocInfo = await this.nocDetect(rows); // estado REAL de cada NOC en el servidor (nunca solo el Excel)
-    const blockMsg = !carrier ? (names.length > 1 ? 'La hoja tiene pedidos de varios transportistas (' + names.join(', ') + '). Publicá una hoja por transportista.' : 'El transportista "' + (names[0] || '') + '" no está dado de alta.')
-      : !resp.length ? 'No hay usuarios activos compatibles con ' + carrier.name + '.' : bad.length ? 'Hay ' + bad.length + ' pedido(s) con revisión pendiente o sin monto: ' + bad.map(r => r.mainOrder || r.shipOrder).join(', ') + '.' : '';
-    m.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"><header><b>PUBLICAR HOJA</b></header><div class="body">' +
+    const blockMsg = !carrier ? (names.length > 1 ? 'La hoja tiene pedidos de varios transportistas (' + names.join(', ') + '). Prepará una hoja por transportista.' : 'El transportista "' + (names[0] || '') + '" no está dado de alta.')
+      : (!external && !resp.length) ? 'No hay usuarios activos compatibles con ' + carrier.name + '.'
+      : bad.length ? 'Hay ' + bad.length + ' pedido(s) con revisión pendiente o sin monto: ' + bad.map(r => r.mainOrder || r.shipOrder).join(', ') + '.' : '';
+    const title = external ? 'DESPACHAR E IMPRIMIR' : 'PUBLICAR HOJA';
+    m.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"><header><b>' + title + '</b></header><div class="body">' +
       '<p>Transportista: <b>' + esc(carrier ? carrier.name : (names.join(', ') || '—')) + '</b> · ' + rows.length + ' entregas</p>' +
-      (resp.length ? '<label>Responsable <select class="ed" id="pubResp">' + resp.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select></label>' : '') +
+      (external ? '<p>Al confirmar, la hoja quedará registrada como <b>despachada al transporte tercerizado</b>, contará en Informes → Otros transportistas, se guardará el PDF y se abrirá la impresión.</p>' : '') +
+      (!external && resp.length ? '<label>Responsable <select class="ed" id="pubResp">' + resp.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select></label>' : '') +
       (carrier && carrier.kind === 'INTERNO' && vehicles.length ? '<label>Vehículo (obligatorio) <select class="ed" id="pubVeh">' + vehicles.map(v => '<option value="' + v.id + '">' + esc(v.name + ' · ' + v.plate) + '</option>').join('') + '</select></label>' : '') +
       (blockMsg ? '<p class="shiperr" id="pubBlock">' + esc(blockMsg) + '</p>' : '') +
       '<div class="ready ' + ready.level + '" id="pubReady"><b>' + ready.label + '</b><ul>' + ready.items.map(i => '<li class="' + i[0] + '">' + esc(i[1]) + '</li>').join('') + '</ul></div>' +
@@ -1165,7 +1179,7 @@ const Publisher = {
       (tpl ? '<p class="rp-note">Plantilla de hoja: ' + (tpl.version ? 'v' + tpl.version : 'predeterminada') + '</p>' : '') +
       '<p class="shiperr" id="pubErr" hidden></p></div>' +
       '<footer><button class="btn ghost" type="button" id="pubCancel">Cancelar</button>' + (this.tplErr || rows.some(r => FinancingPlans.blocked(rowKey(r))) ? '<button class="btn soft" type="button" id="pubRetry">REINTENTAR</button>' : '') +
-      '<button class="btn go" type="button" id="pubGo"' + (blockMsg ? ' disabled' : '') + '>PUBLICAR</button></footer></div>';
+      '<button class="btn go" type="button" id="pubGo"' + (blockMsg ? ' disabled' : '') + '>' + title + '</button></footer></div>';
     document.body.appendChild(m);
     m.querySelector('#pubCancel').onclick = () => m.remove();
     const bulVals = () => [...m.querySelectorAll('[data-bul]')].map(x => x.value.trim());
@@ -1185,7 +1199,8 @@ const Publisher = {
         const keep = rows.map(r => ({ r, monto: r.monto, obs: r.obsPago }));
         rows.forEach(r => { if (r.nocApplied > 0 && r.monto != null) { r.monto = Math.round((r.monto - r.nocApplied) * 100) / 100; r.obsPago = [r.obsPago, (r.nocList || []).map(x => 'NOC ' + x.comp + ' aplicada ' + ars(x.applied)).join(' · ')].filter(Boolean).join(' · '); } });
         try {
-        const pl = await this.payload(carrier, m.querySelector('#pubResp').value); const veh = m.querySelector('#pubVeh'); if (veh && veh.value) pl.vehicle_id = veh.value;
+        const respSel = m.querySelector('#pubResp');
+        const pl = await this.payload(carrier, respSel ? respSel.value : null); const veh = m.querySelector('#pubVeh'); if (veh && veh.value) pl.vehicle_id = veh.value;
         pl.financing = this.financingPayload(rows); // snapshot de financiación propia (plan real) al publicar
         pl.stops.forEach((st, i) => { if (rows[i].nocApplied > 0) { st.noc = rows[i].nocList; st.merchandise_amount = Math.max(0, Math.round(((st.merchandise_amount || 0) - rows[i].nocApplied) * 100) / 100); } });
         pl.stops.forEach((st, i) => { st.bultos = rows[i].bultos; });
@@ -1203,22 +1218,31 @@ const Publisher = {
         var plOut = pl;
         } finally { keep.forEach(k => { k.r.monto = k.monto; k.r.obsPago = k.obs; }); }
         const pl = plOut;
-        const r = await b.publish(pl);
-        RouteStore.published = { id: r.id, number: r.number, at: r.published_at, carrier: carrier.name, responsable: (resp.find(u => u.id === r.responsable_id) || {}).full_name || '' };
-        RouteStore.log({ tipo: 'hoja publicada', numero: r.number }); await RouteStore.flush();
-        m.remove(); toast('Hoja ' + r.number + ' publicada · disponible en tiempo real para ' + RouteStore.published.responsable); SheetTabs.render();
-        await this.afterPublish(r, pl.pdf_model); this.render();
+        if (external) {
+          const r = await b.dispatchExternal(pl);
+          RouteStore.published = { id: r.id, number: r.number, at: r.dispatched_at || r.completed_at || r.published_at, carrier: carrier.name, responsable: '', mode: 'EXTERNAL' };
+          RouteStore.log({ tipo: 'hoja despachada a transporte tercerizado', numero: r.number, transportista: carrier.name, version: r.version || 1 }); await RouteStore.flush();
+          m.remove(); toast('Hoja ' + r.number + ' despachada a ' + carrier.name + ' · registrada en informes.'); SheetTabs.render();
+          await this.afterPublish(r, pl.pdf_model, false); await this.render();
+          const pb = document.getElementById('btnPrint'); if (pb) pb.click();
+        } else {
+          const r = await b.publish(pl);
+          RouteStore.published = { id: r.id, number: r.number, at: r.published_at, carrier: carrier.name, responsable: (resp.find(u => u.id === r.responsable_id) || {}).full_name || '', mode: 'APP' };
+          RouteStore.log({ tipo: 'hoja publicada', numero: r.number }); await RouteStore.flush();
+          m.remove(); toast('Hoja ' + r.number + ' publicada · disponible en tiempo real para ' + RouteStore.published.responsable); SheetTabs.render();
+          await this.afterPublish(r, pl.pdf_model, true); this.render();
+        }
       } catch (e) { const er = m.querySelector('#pubErr'); er.textContent = e.message; er.hidden = false; ev.target.disabled = false; }
     };
   },
   // ===== PDF automático al publicar (RC1.2): se guarda en Storage privado; la descarga es aparte y nunca revierte la publicación =====
-  async afterPublish(r, model) {
+  async afterPublish(r, model, allowDownload = true) {
     const b = this.bridge(), pdf = b.pdf; if (!pdf) return;
     const cfg = await pdf.settings().catch(() => ({ pdf_auto_generate: true, pdf_auto_download: true }));
     if (!cfg.pdf_auto_generate) { RouteStore.published.pdf = { status: 'NO_GENERADO', version: r.version || 1 }; await RouteStore.flush(); return; }
     await this.makePdf(r.id, r.number, r.version || 1, model);
     const p = RouteStore.published.pdf;
-    if (p.status === 'OK' && cfg.pdf_auto_download) p.downloaded = this.tryDownload(p.bytes, p.file_name);
+    if (p.status === 'OK' && allowDownload && cfg.pdf_auto_download) p.downloaded = this.tryDownload(p.bytes, p.file_name);
     delete p.bytes; await RouteStore.flush();
   },
   async makePdf(id, number, version, model) {
@@ -1247,11 +1271,27 @@ const Publisher = {
   // PUBLICADA → NOTIFICADA → VISTA → INICIADA → FINALIZADA (en vivo)
   async render() {
     const btn = document.getElementById('btnPublish'), box = document.getElementById('pubStatus'), b = this.bridge();
+    const standalonePrint = document.getElementById('btnPrint'), standalonePdf = document.getElementById('btnPdf');
     if (!btn || !box) return;
+    if (b) { if (standalonePrint) standalonePrint.hidden = true; if (standalonePdf) standalonePdf.hidden = true; }
     btn.hidden = !b; if (!b) return;
     const pub = RouteStore.published;
-    btn.textContent = pub ? 'PUBLICADA ' + pub.number : 'PUBLICAR HOJA'; btn.disabled = !!pub;
-    box.hidden = !pub; if (!pub) return;
+    if (!pub) {
+      const seq = ++this._renderSeq;
+      btn.disabled = false; btn.textContent = 'PUBLICAR HOJA';
+      try {
+        const names = this.actionNames();
+        const carriers = names.length ? await b.carriers() : [];
+        if (seq !== this._renderSeq) return;
+        const carrier = names.length === 1 ? this.carrierMatch(carriers, names[0]) : null;
+        const external = !!(carrier && carrier.kind === 'EXTERNO' && carrier.report_group !== 'CRISTIAN_TORRES');
+        btn.textContent = external ? 'DESPACHAR E IMPRIMIR' : 'PUBLICAR HOJA';
+        btn.dataset.carrierMode = external ? 'EXTERNAL' : 'APP';
+      } catch (e) {}
+      box.hidden = true; return;
+    }
+    btn.textContent = (pub.mode === 'EXTERNAL' ? 'DESPACHADA ' : 'PUBLICADA ') + pub.number; btn.disabled = true;
+    box.hidden = false;
     let st = null; try { st = await b.status(pub.id); } catch (e) { st = null; }
     const step = (k, label, at) => '<div class="pst' + (at ? ' on' : '') + '" data-st="' + k + '"><span>' + label + '</span><b>' + (at ? new Date(at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '—') + '</b></div>';
     box.innerHTML = '<div class="pubbar"><b>HOJA ' + esc(pub.number) + '</b> · ' + esc(pub.carrier) + ' · ' + esc(pub.responsable) + '</div><div class="psteps">' +
@@ -1645,9 +1685,10 @@ const UI = {
     document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer && e.dataTransfer.files.length) this.handleFiles(Array.from(e.dataTransfer.files), null); });
     // Transportistas
     $('#carriers').addEventListener('change', e => {
-      if (e.target.matches('input[type=checkbox]')) {
-        if (e.target.checked) RouteStore.selected.add(e.target.value); else RouteStore.selected.delete(e.target.value);
-        RouteStore.save(); this.refreshStatuses(); this.renderCards();
+      if (e.target.matches('input[name="route_carrier"]')) {
+        RouteStore.selected.clear();
+        if (e.target.checked) RouteStore.selected.add(e.target.value);
+        RouteStore.save(); this.refreshStatuses(); this.renderCards(); Publisher.render();
       }
     });
     // Pedidos
@@ -1788,7 +1829,12 @@ const UI = {
     });
     const list = cfg.carriers.slice();
     counts.forEach((v, k) => { if (list.indexOf(k) < 0) list.push(k); });
-    $('#carriers').innerHTML = list.map(c => '<label class="carrier"><input type="checkbox" value="' + esc(c) + '"' + (RouteStore.selected.has(c) ? ' checked' : '') + '>' + esc(c) +
+    if (RouteStore.selected.size > 1) {
+      const first = Array.from(RouteStore.selected)[0];
+      RouteStore.selected = new Set(first ? [first] : []);
+      RouteStore.save();
+    }
+    $('#carriers').innerHTML = list.map(c => '<label class="carrier"><input type="radio" name="route_carrier" value="' + esc(c) + '"' + (RouteStore.selected.has(c) ? ' checked' : '') + '>' + esc(c) +
       (OrderIndex.size() ? '<span class="c" title="Pedidos en el informe">' + (counts.get(c) || 0) + '</span>' : '') + '</label>').join('');
     if (OrderIndex.size() && other.size) {
       const tot = Array.from(other.values()).reduce((a, b) => a + b, 0);
