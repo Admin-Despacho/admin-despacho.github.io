@@ -55,6 +55,12 @@ export const SupabaseAdmin = {
   async saveLocation(p) { return this._rpc('upsert_client_location', { p }); },
   async listInternalLocations() { return sel(this.sb.from('internal_locations').select('*').order('name')); },
   async saveInternalLocation(p) { return this._rpc('upsert_internal_location', { p }); },
+  async geocodeInternalLocation(address, name) {
+    const { data, error } = await this._invoke('geocode-location', { body: { address, name } });
+    if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch (e) { } throw new Error(m); }
+    if (!data || !data.ok) throw new Error((data && data.error) || 'No se pudo encontrar la ubicación.');
+    return data.result;
+  },
   async appSettings() { const r = await sel(this.sb.from('app_settings').select('value').eq('key', 'general').maybeSingle()); return (r && r.value) || {}; },
   async setAppSettings(v) { return this._rpc('set_app_setting', { p_key: 'general', p_value: { ...(await this.appSettings()), ...v } }); },
   async emailHistory() {

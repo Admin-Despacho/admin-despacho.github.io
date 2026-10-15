@@ -588,9 +588,23 @@ const CFG = {
     sec.innerHTML = '<h2><span class="n">G2</span>UBICACIONES TRANSPORTISTA INTERNO</h2><p class="rp-note">Puntos fijos propios (sucursales, depósito u otros destinos internos). Cuando el Transportista Interno marca LLEGUÉ o finaliza una parada vinculada, el GPS se compara con este punto y, si queda fuera del radio permitido, se registra la advertencia FUERA DEL RADIO.</p>' +
       '<div class="utable-wrap"><table class="utable" id="ilocTable"><thead><tr><th>CLAVE</th><th>PUNTO</th><th>DOMICILIO</th><th>LAT, LON</th><th>RADIO</th><th>ACTIVO</th><th>NOTA</th></tr></thead><tbody>' +
       (ls.length ? ls.map(l => '<tr><td><b>' + esc(l.location_key) + '</b></td><td>' + esc(l.name) + '</td><td>' + esc(l.address || '') + '</td><td>' + l.lat + ', ' + l.lon + '</td><td>' + l.radius_m + ' m</td><td>' + (l.active !== false ? 'Sí' : 'No') + '</td><td>' + esc(l.note || '') + '</td></tr>').join('') : '<tr><td colspan="7">Sin ubicaciones internas.</td></tr>') + '</tbody></table></div>' +
-      '<div class="ufilters" id="ilocNew"><input id="ilKey" placeholder="Clave (ej. SAN_JUAN)"><input id="ilName" placeholder="Sucursal / punto"><input id="ilAddr" placeholder="Domicilio"><input id="ilLat" placeholder="Latitud"><input id="ilLon" placeholder="Longitud"><input id="ilRad" placeholder="Radio (m)" value="200"><input id="ilNote" placeholder="Nota"><button class="btn dark" type="button" id="ilSave">GUARDAR PUNTO INTERNO</button></div>' +
+      '<div class="ufilters" id="ilocNew"><input id="ilKey" placeholder="Clave (ej. SAN_JUAN)"><input id="ilName" placeholder="Sucursal / punto"><input id="ilAddr" placeholder="Domicilio"><button class="btn soft" type="button" id="ilGeocode">BUSCAR COORDENADAS</button><input id="ilLat" placeholder="Latitud"><input id="ilLon" placeholder="Longitud"><input id="ilRad" placeholder="Radio (m)" value="200"><input id="ilNote" placeholder="Nota"><button class="btn dark" type="button" id="ilSave">GUARDAR PUNTO INTERNO</button></div><div id="ilGeoMsg" class="rp-note"></div>' +
       '<p class="rp-note">Para asociar automáticamente una parada, la app intenta primero por clave del cliente y luego por nombre o domicilio. Recomendado: usar una clave estable por sucursal/punto.</p>';
     const v = id => sec.querySelector(id).value.trim();
+    sec.querySelector('#ilGeocode').onclick = async () => {
+      const btn = sec.querySelector('#ilGeocode'), out = sec.querySelector('#ilGeoMsg');
+      const address = v('#ilAddr'), name = v('#ilName');
+      if (!address) { out.textContent = 'Ingresá el domicilio antes de buscar las coordenadas.'; return; }
+      btn.disabled = true; out.textContent = 'Buscando ubicación…';
+      try {
+        const g = await api.geocodeInternalLocation(address, name);
+        sec.querySelector('#ilLat').value = g.lat;
+        sec.querySelector('#ilLon').value = g.lon;
+        out.innerHTML = '<b>Ubicación encontrada:</b> ' + esc(g.display_name || address) + ' · Revisá el punto y después guardalo.';
+      } catch (e) {
+        out.textContent = e.message;
+      } finally { btn.disabled = false; }
+    };
     sec.querySelector('#ilSave').onclick = () => run(() => {
       const key = v('#ilKey').toUpperCase().replace(/[^A-Z0-9_-]+/g, '_');
       if (!key || !v('#ilName') || !v('#ilLat') || !v('#ilLon')) throw new Error('Completá clave, punto y coordenadas.');
