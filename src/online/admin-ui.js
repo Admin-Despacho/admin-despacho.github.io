@@ -307,7 +307,7 @@ export async function openHistory(api, me) {
 
 // ================= CONFIGURACIÓN =================
 const SECTIONS = [['transportistas', 'A. TRANSPORTISTAS'], ['plantillas', 'B. PLANTILLAS / COLUMNAS'], ['vehiculos', 'C. VEHÍCULOS Y MANTENIMIENTO'], ['financieras', 'D. REGLAS FINANCIERAS'], ['asignacion', 'D2. REGLAS DE ASIGNACIÓN'], ['financiacion', 'D3. FINANCIACIÓN PROPIA'],
-  ['emails', 'E. EMAILS Y NOTIFICACIONES'], ['pdf', 'F. PDF Y ENVÍOS'], ['ubicaciones', 'G. UBICACIONES'], ['backup', 'H. BACKUP'], ['general', 'I. PARÁMETROS GENERALES']];
+  ['emails', 'E. EMAILS Y NOTIFICACIONES'], ['pdf', 'F. PDF Y ENVÍOS'], ['ubicaciones', 'G. UBICACIONES CLIENTES'], ['ubicaciones_interno', 'G2. UBICACIONES TRANSPORTISTA INTERNO'], ['backup', 'H. BACKUP'], ['general', 'I. PARÁMETROS GENERALES']];
 export async function openConfig(api, me, section) {
   const allowed = SECTIONS.filter(([k]) => {
     if (hasPerm(me, 'settings.manage')) return true;
@@ -582,6 +582,20 @@ const CFG = {
       '<div class="ufilters" id="locNew"><input id="lcKey" placeholder="CUIT / clave del cliente"><input id="lcName" placeholder="Cliente"><input id="lcAddr" placeholder="Domicilio"><input id="lcLat" placeholder="Latitud"><input id="lcLon" placeholder="Longitud"><input id="lcRad" placeholder="Radio (m)" value="200"><input id="lcNote" placeholder="Nota"><button class="btn dark" type="button" id="lcSave">GUARDAR UBICACIÓN</button></div>';
     const v = id => sec.querySelector(id).value.trim();
     sec.querySelector('#lcSave').onclick = () => run(() => api.saveLocation({ client_key: v('#lcKey'), client_name: v('#lcName'), address: v('#lcAddr'), lat: v('#lcLat').replace(',', '.'), lon: v('#lcLon').replace(',', '.'), radius_m: parseInt(v('#lcRad'), 10) || 200, note: v('#lcNote'), active: true }), 'Ubicación guardada.', again);
+  },
+  async ubicaciones_interno(api, me, sec, again) {
+    const ls = await api.listInternalLocations();
+    sec.innerHTML = '<h2><span class="n">G2</span>UBICACIONES TRANSPORTISTA INTERNO</h2><p class="rp-note">Puntos fijos propios (sucursales, depósito u otros destinos internos). Cuando el Transportista Interno marca LLEGUÉ o finaliza una parada vinculada, el GPS se compara con este punto y, si queda fuera del radio permitido, se registra la advertencia FUERA DEL RADIO.</p>' +
+      '<div class="utable-wrap"><table class="utable" id="ilocTable"><thead><tr><th>CLAVE</th><th>PUNTO</th><th>DOMICILIO</th><th>LAT, LON</th><th>RADIO</th><th>ACTIVO</th><th>NOTA</th></tr></thead><tbody>' +
+      (ls.length ? ls.map(l => '<tr><td><b>' + esc(l.location_key) + '</b></td><td>' + esc(l.name) + '</td><td>' + esc(l.address || '') + '</td><td>' + l.lat + ', ' + l.lon + '</td><td>' + l.radius_m + ' m</td><td>' + (l.active !== false ? 'Sí' : 'No') + '</td><td>' + esc(l.note || '') + '</td></tr>').join('') : '<tr><td colspan="7">Sin ubicaciones internas.</td></tr>') + '</tbody></table></div>' +
+      '<div class="ufilters" id="ilocNew"><input id="ilKey" placeholder="Clave (ej. SAN_JUAN)"><input id="ilName" placeholder="Sucursal / punto"><input id="ilAddr" placeholder="Domicilio"><input id="ilLat" placeholder="Latitud"><input id="ilLon" placeholder="Longitud"><input id="ilRad" placeholder="Radio (m)" value="200"><input id="ilNote" placeholder="Nota"><button class="btn dark" type="button" id="ilSave">GUARDAR PUNTO INTERNO</button></div>' +
+      '<p class="rp-note">Para asociar automáticamente una parada, la app intenta primero por clave del cliente y luego por nombre o domicilio. Recomendado: usar una clave estable por sucursal/punto.</p>';
+    const v = id => sec.querySelector(id).value.trim();
+    sec.querySelector('#ilSave').onclick = () => run(() => {
+      const key = v('#ilKey').toUpperCase().replace(/[^A-Z0-9_-]+/g, '_');
+      if (!key || !v('#ilName') || !v('#ilLat') || !v('#ilLon')) throw new Error('Completá clave, punto y coordenadas.');
+      return api.saveInternalLocation({ location_key: key, name: v('#ilName'), address: v('#ilAddr'), lat: v('#ilLat').replace(',', '.'), lon: v('#ilLon').replace(',', '.'), radius_m: parseInt(v('#ilRad'), 10) || 200, note: v('#ilNote'), active: true });
+    }, 'Punto interno guardado.', again);
   },
   async backup(api, me, sec, again) { await backupSection(api, me, sec, again); },
   async general(api, me, sec, again) {

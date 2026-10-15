@@ -53,6 +53,8 @@ export const SupabaseAdmin = {
   async setNotificationSettings(p) { return this._rpc('set_notification_settings', { p }); },
   async listLocations() { return sel(this.sb.from('client_locations').select('*').order('client_key')); },
   async saveLocation(p) { return this._rpc('upsert_client_location', { p }); },
+  async listInternalLocations() { return sel(this.sb.from('internal_locations').select('*').order('name')); },
+  async saveInternalLocation(p) { return this._rpc('upsert_internal_location', { p }); },
   async appSettings() { const r = await sel(this.sb.from('app_settings').select('value').eq('key', 'general').maybeSingle()); return (r && r.value) || {}; },
   async setAppSettings(v) { return this._rpc('set_app_setting', { p_key: 'general', p_value: { ...(await this.appSettings()), ...v } }); },
   async emailHistory() {
