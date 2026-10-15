@@ -8,7 +8,7 @@ const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const appUrl = Deno.env.get('APP_URL') ?? '';
 const resendKey = Deno.env.get('RESEND_API_KEY') ?? '';
-const authFrom = Deno.env.get('AUTH_FROM') ?? Deno.env.get('REPORT_FROM') ?? '';
+const authFrom = Deno.env.get('AUTH_FROM') ?? Deno.env.get('REPORT_FROM') ?? 'fgutierrez@okaccesorios.com';
 const configError = !url ? 'falta SUPABASE_URL' : !serviceKey ? 'falta SUPABASE_SERVICE_ROLE_KEY' : '';
 if (configError) console.error('[admin-users] ' + configError);
 const admin = createClient(url || 'http://invalid', serviceKey || 'invalid', { auth: { persistSession: false, autoRefreshToken: false } });
@@ -47,7 +47,7 @@ const deps = {
   async setCarriersAtomic(id: string, carriers: string[]) { must('carriers', await admin.rpc('set_user_carriers', { p_user: id, p_carriers: carriers })); },
   async updateAuthEmail(id: string, email: string) { authOk('email en Auth', await admin.auth.admin.updateUserById(id, { email, email_confirm: true })); },
   async sendPasswordReset(email: string, redirectTo?: string) {
-    if (!resendKey || !authFrom) throw new Error('correo de recuperación no configurado (RESEND_API_KEY / AUTH_FROM o REPORT_FROM)');
+    if (!resendKey) throw new Error('correo de recuperación no configurado (falta RESEND_API_KEY)');
     const generated = await admin.auth.admin.generateLink({
       type: 'recovery',
       email,
