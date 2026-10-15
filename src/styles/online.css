@@ -606,3 +606,40 @@ body.no-publish #btnPublish{display:none!important}
   font-size:11px;
   color:#718189;
 }
+
+
+/* RC4.1.23 · Despacho responsive según el ancho REAL disponible junto al sidebar.
+   Evita el efecto "encajonado" en notebooks/zoom de Windows: el constructor ocupa
+   todo el panel derecho y los pasos se redistribuyen por ancho del contenedor. */
+.rc4legacy-shell .rc4main,
+.rc4legacy-shell .rc4legacy-body,
+.rc4legacy-shell .rc4legacy-content,
+.rc4legacy-shell .rc4legacy-content > main{
+  width:100%!important;
+  max-width:none!important;
+  min-width:0!important;
+}
+.rc4legacy-shell .rc4legacy-body{
+  container-type:inline-size;
+}
+.rc4legacy-shell .rc4legacy-content .steps{
+  width:100%!important;
+  max-width:none!important;
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
+}
+@container (max-width: 1120px){
+  .rc4legacy-shell .rc4legacy-content .steps{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  }
+  .rc4legacy-shell .rc4legacy-content .step.s3{
+    grid-column:1/-1;
+  }
+}
+@container (max-width: 760px){
+  .rc4legacy-shell .rc4legacy-content .steps{
+    grid-template-columns:1fr!important;
+  }
+  .rc4legacy-shell .rc4legacy-content .step.s3{
+    grid-column:auto;
+  }
+}
