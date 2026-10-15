@@ -1874,7 +1874,7 @@ const UI = {
       ? 'Podés ingresar un N° de pedido. Si escribís "tarea", se despliega la carga de una tarea.'
       : 'Separados por espacio, coma o uno por línea. Si escribís el pedido de envío, se suma el pedido principal (y al revés).';
     let composer = box.querySelector('#internalTaskComposer');
-    const wantsTask = internal && /^\s*tarea\s*$/i.test(ids.value || '');
+    const wantsTask = internal && /^\s*["'“”‘’]*\s*tarea\s*["'“”‘’]*\s*$/i.test(ids.value || '');
     if (!wantsTask) { if (composer) composer.remove(); return; }
     if (composer) return;
     composer = document.createElement('div');
@@ -1906,7 +1906,7 @@ const UI = {
   },
   async searchAndAdd() {
     const txt = $('#ids').value;
-    if (this.isInternalSelected() && /^\s*tarea\s*$/i.test(txt || '')) { this.updateEntryMode(); return; }
+    if (this.isInternalSelected() && /^\s*["'“”‘’]*\s*tarea\s*["'“”‘’]*\s*$/i.test(txt || '')) { this.updateEntryMode(); return; }
     const ids = []; (txt.match(/\d+/g) || []).forEach(x => { const v = String(parseInt(x, 10)); if (ids.indexOf(v) < 0) ids.push(v); });
     const log = $('#log'); log.innerHTML = '';
     if (!ids.length) { log.innerHTML = '<div class="msg warn">Escribí al menos un número de pedido.</div>'; return; }
