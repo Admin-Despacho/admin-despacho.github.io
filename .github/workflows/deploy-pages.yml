@@ -31,11 +31,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify production carrier flow source
+        run: node scripts/verify_production_carrier_flow.mjs
+
       - name: Build
         env:
           VITE_SUPABASE_URL: https://uqwilzzeyfuatlmwzxna.supabase.co
           VITE_SUPABASE_ANON_KEY: sb_publishable_cwLs4qzUgtMuEDEEhsQSfg_n-Q9McXG
         run: npm run build
+
+      - name: Verify production carrier flow artifact
+        run: node scripts/verify_production_carrier_flow.mjs --dist
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
