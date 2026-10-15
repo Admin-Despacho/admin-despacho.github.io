@@ -20,10 +20,13 @@ export class SupabaseApi {
   takeRevokedNotice() { let v = this.revokedNotice; try { v = v || sessionStorage.getItem('okd_revoked') === '1'; sessionStorage.removeItem('okd_revoked'); } catch (e) { } this.revokedNotice = false; return v; }
 
   // Usuario invitado: guarda la contraseña y activa su usuario. Si la activación falla NO se oculta el error.
-  // Olvidé mi contraseña: endpoint propio + Resend. La respuesta siempre es genérica y no revela si el email existe.
+  // Olvidé mi contraseña: Supabase Auth envía el correo por el SMTP configurado del proyecto.
+  // La respuesta de la UI sigue siendo genérica y no revela si el email existe.
   async requestPasswordReset(email) {
+    const base = typeof window !== 'undefined' ? (window.location.origin + window.location.pathname) : 'https://admin-despacho.github.io/';
+    const redirectTo = base + (base.includes('?') ? '&' : '?') + 'nueva-contrasena=1';
     try {
-      await this.sb.functions.invoke('password-recovery', { body: { email: String(email || '').trim() } });
+      await this.sb.auth.resetPasswordForEmail(String(email || '').trim(), { redirectTo });
     } catch (e) { }
     return { ok: true };
   }
