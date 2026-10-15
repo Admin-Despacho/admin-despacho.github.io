@@ -991,7 +991,7 @@ const Publisher = {
   nocList(r) { return ((r.calc && r.calc.creditsAll) || []).filter(x => String(x.t || '').toUpperCase() === 'NOC' && x.amt > 0.004); },
   // PEDIDO ACTUAL y FINANCIACIÓN PROPIA ACTIVA, separados (nunca se mezclan los saldos)
   finHtml(rows) {
-    rows = (rows || []).filter(r => r.stopType !== 'TAREA');
+    rows = (rows || []).filter(r => (!r.stopType || r.stopType === 'PEDIDO'));
     const seen = new Set(), parts = [];
     rows.forEach(r => { const k = rowKey(r); if (seen.has(k)) return; seen.add(k);
       // sin verificación del servidor no se muestran saldos de planes (podrían estar desactualizados)
@@ -1004,7 +1004,7 @@ const Publisher = {
   },
   financingPayload(rows) {
     const out = [], seen = new Set();
-    (rows || []).filter(r => r.stopType !== 'TAREA').forEach(r => FinancingPlans.active(rowKey(r)).forEach(p => { if (seen.has(p.id)) return; seen.add(p.id);
+    (rows || []).filter(r => (!r.stopType || r.stopType === 'PEDIDO')).forEach(r => FinancingPlans.active(rowKey(r)).forEach(p => { if (seen.has(p.id)) return; seen.add(p.id);
       out.push({ plan_id: p.id, comp: p.comp, client_key: p.client_key, client_name: p.client_name || r.cliente, classification: 'FINANCIACION_PROPIA_VIGENTE', frequency: p.frequency, parts: p.parts,
         resolver_version: window.OKFinancing.RESOLVER_VERSION, import_id: p.last_import_id }); }));
     return out;
@@ -1111,7 +1111,7 @@ const Publisher = {
     const items = [], add = (lvl, t) => items.push([lvl, t]);
     if (window.OKD_CFG_STATE && window.OKD_CFG_STATE !== 'OK') add('err', 'CONFIGURACIÓN · SIN CONEXIÓN / REVISAR: la hoja se calculó con la configuración local de contingencia');
     if (this.tplErr) add('err', 'No se pudo verificar la plantilla de columnas de ' + this.tplErr.carrier + ' (' + this.tplErr.msg + '). Usá REINTENTAR.');
-    const deliveryRows = rows.filter(r => r.stopType !== 'TAREA');
+    const deliveryRows = rows.filter(r => (!r.stopType || r.stopType === 'PEDIDO'));
     const finBlocked = deliveryRows.filter(r => FinancingPlans.blocked(rowKey(r)));
     if (finBlocked.length) add('err', 'FINANCIACIÓN PROPIA · REVISAR: la sincronización falló para ' + finBlocked.length + ' entrega(s) con financiación (reintentá antes de publicar)');
     if (carrier && carrier.kind === 'INTERNO') add(vehicles && vehicles.length ? 'ok' : 'err', vehicles && vehicles.length ? 'Ruta interna: vehículo asignado (obligatorio)' : 'Ruta interna sin vehículo activo: dalo de alta en CONFIGURACIÓN → VEHÍCULOS');
@@ -1129,18 +1129,18 @@ const Publisher = {
     return { level: level === 'REVISAR' ? 'REVISAR' : level === 'LISTO' ? 'LISTO' : 'WARN', label: level, items };
   },
   problems() {
-    return this.rows().filter(r => r.stopType !== 'TAREA').filter(r => { const st = baseStatus(r); return r.monto == null || (st.blocking && !(r.calc && r.calc.shipProv && st.issues.every(i => i.level !== 'error' && (i.level !== 'warn' || i.code === 'ENVÍO A CONFIRMAR')))); });
+    return this.rows().filter(r => (!r.stopType || r.stopType === 'PEDIDO')).filter(r => { const st = baseStatus(r); return r.monto == null || (st.blocking && !(r.calc && r.calc.shipProv && st.issues.every(i => i.level !== 'error' && (i.level !== 'warn' || i.code === 'ENVÍO A CONFIRMAR')))); });
   },
   async payload(carrier, responsable) {
     return { sheet_key: RouteStore.sheetId, carrier_id: carrier.id, responsable_id: responsable,
       stops: this.rows().map(r => { const p = Money.parts(r), prov = r.calc && r.calc.shipProv;
         const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null, cristian = ['CT-ESTE', 'CT-ALR'].includes(carrier.id);
-        return { client_name: r.cliente, client_key: r.stopType === 'TAREA' ? ('TASK-' + r.id) : ((r.calc && r.calc.cuit) || Normalizer.name(r.cliente)), zone: this.zone(r, carrier), order_numbers: [r.mainOrder, r.shipOrder].filter(Boolean).map(String),
+        return { client_name: r.cliente, client_key: r.stopType === 'TAREA' ? ('TASK-' + r.id) : (r.stopType === 'UBICACION_INTERNA' ? r.internalLocationKey : ((r.calc && r.calc.cuit) || Normalizer.name(r.cliente))), zone: this.zone(r, carrier), order_numbers: [r.mainOrder, r.shipOrder].filter(Boolean).map(String),
           // Cristian cobra el monto de la hoja: entrega + cobranza con importe esperado (el chofer no lo modifica)
           task: cristian && (r.monto || 0) > 0 ? 'AMBAS' : 'ENTREGA', expected_amount: cristian && (r.monto || 0) > 0 ? r.monto : null,
-          stop_type: r.stopType || 'PEDIDO', instructions: r.taskInstructions || null, contact_name: r.taskContact || null, contact_phone: r.taskPhone || null,
-          customer_email: r.stopType === 'TAREA' ? null : (r.email || (cc && cc.email) || null),
-          merchandise_amount: r.stopType === 'TAREA' ? 0 : (p.main || 0), shipping_fee: r.stopType === 'TAREA' ? 0 : (p.ship || 0), ship_fee_status: prov ? 'PROVISIONAL' : 'SALDO', ship_order: r.shipOrder || null, address: r.domicilio || '', ready: true }; }) };
+          stop_type: r.stopType || 'PEDIDO', internal_location_key: r.internalLocationKey || null, instructions: r.taskInstructions || null, contact_name: r.taskContact || null, contact_phone: r.taskPhone || null,
+          customer_email: (r.stopType && r.stopType !== 'PEDIDO') ? null : (r.email || (cc && cc.email) || null),
+          merchandise_amount: (r.stopType && r.stopType !== 'PEDIDO') ? 0 : (p.main || 0), shipping_fee: (r.stopType && r.stopType !== 'PEDIDO') ? 0 : (p.ship || 0), ship_fee_status: prov ? 'PROVISIONAL' : 'SALDO', ship_order: r.shipOrder || null, address: r.domicilio || '', ready: true }; }) };
   },
   async open() {
     const b = this.bridge(); if (!b) return;
@@ -1162,7 +1162,7 @@ const Publisher = {
     let tpl = null, tplErr = null;
     if (carrier && b.template) { try { tpl = await b.template(carrier.id); } catch (e) { tplErr = e.message || String(e); } }
     this.tplErr = tplErr ? { carrier: carrier.name, msg: tplErr } : null;
-    await FinancingPlans.forClients(rows.filter(r => r.stopType !== 'TAREA').map(rowKey)); // espera la sincronización de financiación pendiente
+    await FinancingPlans.forClients(rows.filter(r => (!r.stopType || r.stopType === 'PEDIDO')).map(rowKey)); // espera la sincronización de financiación pendiente
     const ready = this.readiness(rows, carrier, resp, bad, vehicles, external);
     const nocInfo = await this.nocDetect(rows); // estado REAL de cada NOC en el servidor (nunca solo el Excel)
     const blockMsg = !carrier ? (names.length > 1 ? 'La hoja tiene pedidos de varios transportistas (' + names.join(', ') + '). Prepará una hoja por transportista.' : 'El transportista "' + (names[0] || '') + '" no está dado de alta.')
@@ -1398,6 +1398,19 @@ const RouteStore = {
       transportista: this.selected.size === 1 ? Array.from(this.selected)[0] : 'TRANSPORTE INTERNO',
       carrierOrig: this.selected.size === 1 ? Array.from(this.selected)[0] : 'TRANSPORTE INTERNO',
       src: { entered: 'TAREA', manual: false, task: true }
+    });
+    return row;
+  },
+  newInternalLocation(p) {
+    const row = this.newManual('');
+    Object.assign(row, {
+      manual: false, auto: false, stopType: 'UBICACION_INTERNA', sale: true, reviewed: true,
+      cliente: p.name, domicilio: p.address || '', localidad: '', monto: 0, bultos: 0,
+      payMain: '', payShip: '', obsPago: p.note || '',
+      internalLocationKey: p.location_key, internalRadius: p.radius_m || 200,
+      transportista: this.selected.size === 1 ? Array.from(this.selected)[0] : 'TRANSPORTE INTERNO',
+      carrierOrig: this.selected.size === 1 ? Array.from(this.selected)[0] : 'TRANSPORTE INTERNO',
+      src: { entered: p.name, manual: false, internal_location: true }
     });
     return row;
   },
@@ -1907,6 +1920,28 @@ const UI = {
   async searchAndAdd() {
     const txt = $('#ids').value;
     if (this.isInternalSelected() && /^\s*["'“”‘’]*\s*tarea\s*["'“”‘’]*\s*$/i.test(txt || '')) { this.updateEntryMode(); return; }
+    if (this.isInternalSelected() && !/\d/.test(txt || '') && String(txt || '').trim()) {
+      const log = $('#log'); log.innerHTML = '';
+      const q = Normalizer.name(String(txt).trim());
+      const bridge = window.OKD_BRIDGE && window.OKD_BRIDGE.locations;
+      if (!bridge || !bridge.internal) { log.innerHTML = '<div class="msg err">No se pudieron consultar las ubicaciones internas.</div>'; return; }
+      try {
+        const list = (await bridge.internal()).filter(x => x.active !== false);
+        const hit = list.find(x => Normalizer.name(x.location_key) === q || Normalizer.name(x.name) === q)
+          || list.find(x => Normalizer.name(x.name).includes(q) || Normalizer.name(x.location_key).includes(q) || Normalizer.name(x.address || '').includes(q));
+        if (!hit) { log.innerHTML = '<div class="msg warn"><b>UBICACIÓN INTERNA NO ENCONTRADA.</b> Revisá el nombre guardado en Configuración → G2.</div>'; return; }
+        const exists = RouteStore.rows.some(r => r.stopType === 'UBICACION_INTERNA' && r.internalLocationKey === hit.location_key);
+        if (exists) { log.innerHTML = '<div class="msg">La ubicación <b>' + esc(hit.name) + '</b> ya está en la hoja.</div>'; return; }
+        const row = RouteStore.newInternalLocation(hit);
+        RouteStore.rows.push(row); RouteStore.save(); this.renderTable();
+        log.innerHTML = '<div class="msg ok"><b>UBICACIÓN AGREGADA</b> · ' + esc(hit.name) + '<br>' + esc(hit.address || '') + ' · radio ' + esc(hit.radius_m || 200) + ' m</div>';
+        $('#ids').value = '';
+        return;
+      } catch (e) {
+        log.innerHTML = '<div class="msg err">No se pudo consultar la ubicación interna: ' + esc(e.message || String(e)) + '</div>';
+        return;
+      }
+    }
     const ids = []; (txt.match(/\d+/g) || []).forEach(x => { const v = String(parseInt(x, 10)); if (ids.indexOf(v) < 0) ids.push(v); });
     const log = $('#log'); log.innerHTML = '';
     if (!ids.length) { log.innerHTML = '<div class="msg warn">Escribí al menos un número de pedido.</div>'; return; }
@@ -2066,25 +2101,26 @@ const UI = {
   taskRowHTML(row) {
     const ed = (f, val, ph) => '<textarea class="ed" rows="1" data-f="' + f + '" placeholder="' + esc(ph || '') + '">' + esc(val || '') + '</textarea>';
     const contact = [row.taskContact, row.taskPhone].filter(Boolean).join(' · ');
+    const isLoc = row.stopType === 'UBICACION_INTERNA';
     return '<tr class="main-row task-row' + (row.sale ? '' : ' off') + '" data-id="' + row.id + '">' +
       '<td class="adm ctr"><input type="checkbox" class="big" data-f="sale"' + (row.sale ? ' checked' : '') + ' title="Sale en esta hoja"></td>' +
       '<td class="adm"><span class="task-na">—</span></td>' +
-      '<td class="adm last"><span class="task-chip">TAREA</span></td>' +
+      '<td class="adm last"><span class="task-chip">' + (isLoc ? 'UBICACIÓN' : 'TAREA') + '</span></td>' +
       '<td style="min-width:108px"><input class="ed" data-f="fecha" inputmode="numeric" placeholder="dd/mm/aaaa" value="' + esc(isoToDMY(row.fecha)) + '"></td>' +
-      '<td style="min-width:150px"><span class="task-chip soft">TAREA</span></td>' +
+      '<td style="min-width:150px"><span class="task-chip soft">' + (isLoc ? 'UBICACIÓN INTERNA' : 'TAREA') + '</span></td>' +
       '<td style="min-width:180px"><span class="task-na">—</span></td>' +
       '<td style="min-width:190px">' + ed('cliente', row.cliente, 'Título de la tarea') + '</td>' +
       '<td style="min-width:210px">' + ed('domicilio', row.domicilio, 'Domicilio') + '</td>' +
       '<td style="min-width:125px"><span class="task-na">—</span></td>' +
       '<td style="min-width:120px"><span class="task-na">$ 0,00</span></td>' +
       '<td style="min-width:170px"><span class="task-na">No corresponde</span></td>' +
-      '<td style="min-width:260px">' + ed('taskInstructions', row.taskInstructions, 'Qué tiene que realizar') + (contact ? '<span class="sub">Contacto: ' + esc(contact) + '</span>' : '') + '</td>' +
+      '<td style="min-width:260px">' + (isLoc ? '<span class="sub">Punto guardado · radio ' + esc(row.internalRadius || 200) + ' m</span>' : ed('taskInstructions', row.taskInstructions, 'Qué tiene que realizar') + (contact ? '<span class="sub">Contacto: ' + esc(contact) + '</span>' : '')) + '</td>' +
       '<td style="min-width:185px"><select class="ed" data-f="transportista">' + this.carrierOptions(row.transportista) + '</select></td>' +
       '<td><div class="rowtools"><button type="button" class="ibtn del" data-act="del" title="Quitar de la hoja">✕</button></div></td>' +
       '</tr>';
   },
   rowHTML(row, openDetail) {
-    if (row.stopType === 'TAREA') return this.taskRowHTML(row);
+    if (row.stopType === 'TAREA' || row.stopType === 'UBICACION_INTERNA') return this.taskRowHTML(row);
     const st = rowStatus(row);
     const ed = (f, val, extra) => '<textarea class="ed' + (extra && extra.cls ? ' ' + extra.cls : '') + '" rows="1" data-f="' + f + '"' + (extra && extra.ph ? ' placeholder="' + esc(extra.ph) + '"' : '') + '>' + esc(val) + '</textarea>';
     const inp = (f, val, extra) => '<input class="ed' + (extra && extra.cls ? ' ' + extra.cls : '') + '" data-f="' + f + '" value="' + esc(val) + '"' + (extra && extra.ph ? ' placeholder="' + esc(extra.ph) + '"' : '') + '>';
