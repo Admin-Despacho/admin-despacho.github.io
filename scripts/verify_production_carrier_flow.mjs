@@ -43,6 +43,13 @@ if (!distMode) {
   const sw = readFileSync('dist/sw.js', 'utf8');
   mustContain(sw, '/legacy/despacho-v15.js', 'service-worker precache');
 
+  if (!existsSync('dist/build-info.json')) fail('build fingerprint missing');
+  else {
+    const info = JSON.parse(readFileSync('dist/build-info.json', 'utf8'));
+    if (info.carrier_flow !== 'single-select-external-dispatch-v1') fail('unexpected carrier flow fingerprint');
+    if (info.legacy_sha256 !== sha(built)) fail('build fingerprint legacy hash mismatch');
+  }
+
   const html = readFileSync('dist/index.html', 'utf8');
   mustContain(html, 'id="btnPrint" type="button" hidden', 'built standalone print hidden');
   mustContain(html, 'id="btnPdf" type="button" hidden', 'built standalone PDF hidden');
