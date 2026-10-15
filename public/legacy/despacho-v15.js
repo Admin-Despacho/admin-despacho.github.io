@@ -991,6 +991,7 @@ const Publisher = {
   nocList(r) { return ((r.calc && r.calc.creditsAll) || []).filter(x => String(x.t || '').toUpperCase() === 'NOC' && x.amt > 0.004); },
   // PEDIDO ACTUAL y FINANCIACIÓN PROPIA ACTIVA, separados (nunca se mezclan los saldos)
   finHtml(rows) {
+    rows = (rows || []).filter(r => r.stopType !== 'TAREA');
     const seen = new Set(), parts = [];
     rows.forEach(r => { const k = rowKey(r); if (seen.has(k)) return; seen.add(k);
       // sin verificación del servidor no se muestran saldos de planes (podrían estar desactualizados)
@@ -1003,7 +1004,7 @@ const Publisher = {
   },
   financingPayload(rows) {
     const out = [], seen = new Set();
-    rows.forEach(r => FinancingPlans.active(rowKey(r)).forEach(p => { if (seen.has(p.id)) return; seen.add(p.id);
+    (rows || []).filter(r => r.stopType !== 'TAREA').forEach(r => FinancingPlans.active(rowKey(r)).forEach(p => { if (seen.has(p.id)) return; seen.add(p.id);
       out.push({ plan_id: p.id, comp: p.comp, client_key: p.client_key, client_name: p.client_name || r.cliente, classification: 'FINANCIACION_PROPIA_VIGENTE', frequency: p.frequency, parts: p.parts,
         resolver_version: window.OKFinancing.RESOLVER_VERSION, import_id: p.last_import_id }); }));
     return out;
@@ -1110,7 +1111,8 @@ const Publisher = {
     const items = [], add = (lvl, t) => items.push([lvl, t]);
     if (window.OKD_CFG_STATE && window.OKD_CFG_STATE !== 'OK') add('err', 'CONFIGURACIÓN · SIN CONEXIÓN / REVISAR: la hoja se calculó con la configuración local de contingencia');
     if (this.tplErr) add('err', 'No se pudo verificar la plantilla de columnas de ' + this.tplErr.carrier + ' (' + this.tplErr.msg + '). Usá REINTENTAR.');
-    const finBlocked = rows.filter(r => FinancingPlans.blocked(rowKey(r)));
+    const deliveryRows = rows.filter(r => r.stopType !== 'TAREA');
+    const finBlocked = deliveryRows.filter(r => FinancingPlans.blocked(rowKey(r)));
     if (finBlocked.length) add('err', 'FINANCIACIÓN PROPIA · REVISAR: la sincronización falló para ' + finBlocked.length + ' entrega(s) con financiación (reintentá antes de publicar)');
     if (carrier && carrier.kind === 'INTERNO') add(vehicles && vehicles.length ? 'ok' : 'err', vehicles && vehicles.length ? 'Ruta interna: vehículo asignado (obligatorio)' : 'Ruta interna sin vehículo activo: dalo de alta en CONFIGURACIÓN → VEHÍCULOS');
     add(carrier ? 'ok' : 'err', carrier ? 'Transportista: ' + carrier.name : 'Transportista sin definir o hay más de uno');
@@ -1118,26 +1120,27 @@ const Publisher = {
     else add(resp.length ? 'ok' : 'err', resp.length ? 'Responsable compatible disponible' : 'Sin responsable compatible');
     add(rows.length ? 'ok' : 'err', rows.length + ' entrega(s)');
     if (bad.length) add('err', bad.length + ' pedido(s) con montos/documentos, financiación o NOC por revisar');
-    const noAddr = rows.filter(r => !String(r.domicilio || '').trim() || !String(r.localidad || '').trim()).length; if (noAddr) add('warn', noAddr + ' entrega(s) sin domicilio o localidad');
-    const noBul = rows.filter(r => !(parseInt(r.bultos, 10) > 0)).length; if (noBul) add('warn', noBul + ' entrega(s) con 0 bultos');
-    const warns = rows.filter(r => { const st = baseStatus(r); return !st.blocking && st.issues.some(i => i.level === 'warn'); }).length; if (warns) add('warn', warns + ' entrega(s) con advertencias');
-    const noMail = rows.filter(r => { const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null; return !(r.email || (cc && cc.email)); }).length;
+    const noAddr = rows.filter(r => r.stopType === 'TAREA' ? !String(r.domicilio || '').trim() : (!String(r.domicilio || '').trim() || !String(r.localidad || '').trim())).length; if (noAddr) add('warn', noAddr + ' parada(s) sin domicilio completo');
+    const noBul = deliveryRows.filter(r => !(parseInt(r.bultos, 10) > 0)).length; if (noBul) add('warn', noBul + ' entrega(s) con 0 bultos');
+    const warns = deliveryRows.filter(r => { const st = baseStatus(r); return !st.blocking && st.issues.some(i => i.level === 'warn'); }).length; if (warns) add('warn', warns + ' entrega(s) con advertencias');
+    const noMail = deliveryRows.filter(r => { const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null; return !(r.email || (cc && cc.email)); }).length;
     if (noMail) add('warn', noMail + ' cliente(s) sin email (no reciben avisos)');
     const level = items.some(i => i[0] === 'err') ? 'REVISAR' : items.some(i => i[0] === 'warn') ? 'LISTO CON ADVERTENCIAS' : 'LISTO';
     return { level: level === 'REVISAR' ? 'REVISAR' : level === 'LISTO' ? 'LISTO' : 'WARN', label: level, items };
   },
   problems() {
-    return this.rows().filter(r => { const st = baseStatus(r); return r.monto == null || (st.blocking && !(r.calc && r.calc.shipProv && st.issues.every(i => i.level !== 'error' && (i.level !== 'warn' || i.code === 'ENVÍO A CONFIRMAR')))); });
+    return this.rows().filter(r => r.stopType !== 'TAREA').filter(r => { const st = baseStatus(r); return r.monto == null || (st.blocking && !(r.calc && r.calc.shipProv && st.issues.every(i => i.level !== 'error' && (i.level !== 'warn' || i.code === 'ENVÍO A CONFIRMAR')))); });
   },
   async payload(carrier, responsable) {
     return { sheet_key: RouteStore.sheetId, carrier_id: carrier.id, responsable_id: responsable,
       stops: this.rows().map(r => { const p = Money.parts(r), prov = r.calc && r.calc.shipProv;
         const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null, cristian = ['CT-ESTE', 'CT-ALR'].includes(carrier.id);
-        return { client_name: r.cliente, client_key: (r.calc && r.calc.cuit) || Normalizer.name(r.cliente), zone: this.zone(r, carrier), order_numbers: [r.mainOrder, r.shipOrder].filter(Boolean).map(String),
+        return { client_name: r.cliente, client_key: r.stopType === 'TAREA' ? ('TASK-' + r.id) : ((r.calc && r.calc.cuit) || Normalizer.name(r.cliente)), zone: this.zone(r, carrier), order_numbers: [r.mainOrder, r.shipOrder].filter(Boolean).map(String),
           // Cristian cobra el monto de la hoja: entrega + cobranza con importe esperado (el chofer no lo modifica)
           task: cristian && (r.monto || 0) > 0 ? 'AMBAS' : 'ENTREGA', expected_amount: cristian && (r.monto || 0) > 0 ? r.monto : null,
-          customer_email: r.email || (cc && cc.email) || null,
-          merchandise_amount: p.main || 0, shipping_fee: p.ship || 0, ship_fee_status: prov ? 'PROVISIONAL' : 'SALDO', ship_order: r.shipOrder || null, address: r.domicilio || '', ready: true }; }) };
+          stop_type: r.stopType || 'PEDIDO', instructions: r.taskInstructions || null, contact_name: r.taskContact || null, contact_phone: r.taskPhone || null,
+          customer_email: r.stopType === 'TAREA' ? null : (r.email || (cc && cc.email) || null),
+          merchandise_amount: r.stopType === 'TAREA' ? 0 : (p.main || 0), shipping_fee: r.stopType === 'TAREA' ? 0 : (p.ship || 0), ship_fee_status: prov ? 'PROVISIONAL' : 'SALDO', ship_order: r.shipOrder || null, address: r.domicilio || '', ready: true }; }) };
   },
   async open() {
     const b = this.bridge(); if (!b) return;
@@ -1159,7 +1162,7 @@ const Publisher = {
     let tpl = null, tplErr = null;
     if (carrier && b.template) { try { tpl = await b.template(carrier.id); } catch (e) { tplErr = e.message || String(e); } }
     this.tplErr = tplErr ? { carrier: carrier.name, msg: tplErr } : null;
-    await FinancingPlans.forClients(rows.map(rowKey)); // espera la sincronización de financiación pendiente
+    await FinancingPlans.forClients(rows.filter(r => r.stopType !== 'TAREA').map(rowKey)); // espera la sincronización de financiación pendiente
     const ready = this.readiness(rows, carrier, resp, bad, vehicles, external);
     const nocInfo = await this.nocDetect(rows); // estado REAL de cada NOC en el servidor (nunca solo el Excel)
     const blockMsg = !carrier ? (names.length > 1 ? 'La hoja tiene pedidos de varios transportistas (' + names.join(', ') + '). Prepará una hoja por transportista.' : 'El transportista "' + (names[0] || '') + '" no está dado de alta.')
@@ -1173,7 +1176,7 @@ const Publisher = {
       (carrier && carrier.kind === 'INTERNO' && vehicles.length ? '<label>Vehículo (obligatorio) <select class="ed" id="pubVeh">' + vehicles.map(v => '<option value="' + v.id + '">' + esc(v.name + ' · ' + v.plate) + '</option>').join('') + '</select></label>' : '') +
       (blockMsg ? '<p class="shiperr" id="pubBlock">' + esc(blockMsg) + '</p>' : '') +
       '<div class="ready ' + ready.level + '" id="pubReady"><b>' + ready.label + '</b><ul>' + ready.items.map(i => '<li class="' + i[0] + '">' + esc(i[1]) + '</li>').join('') + '</ul></div>' +
-      '<div class="bulwrap"><table class="bultab"><thead><tr><th>ENTREGA</th><th>BULTOS</th></tr></thead><tbody>' + rows.map((r, i) => '<tr><td>' + esc(r.cliente) + ' <small>' + esc(r.mainOrder || '') + '</small></td><td><input class="ed" data-bul="' + i + '" inputmode="numeric" value="' + (parseInt(r.bultos, 10) || 0) + '"></td></tr>').join('') +
+      '<div class="bulwrap"><table class="bultab"><thead><tr><th>PARADA</th><th>BULTOS</th></tr></thead><tbody>' + rows.map((r, i) => '<tr><td>' + esc(r.cliente) + ' <small>' + esc(r.mainOrder || '') + '</small></td><td><input class="ed" data-bul="' + i + '" inputmode="numeric" value="' + (parseInt(r.bultos, 10) || 0) + '"></td></tr>').join('') +
       '</tbody></table><p class="sheetsum" id="pubSum">' + sheetSummary(rows) + '</p></div>' +
       this.finHtml(rows) + this.nocHtml(rows, nocInfo) +
       (tpl ? '<p class="rp-note">Plantilla de hoja: ' + (tpl.version ? 'v' + tpl.version : 'predeterminada') + '</p>' : '') +
@@ -1384,6 +1387,19 @@ const RouteStore = {
       payMain: 'REVISAR', payShip: 'SIMPLY', payOverride: null, obsPago: '', monto: null, montoManual: false, calc: null,
       linkFlags: [], linkNotes: [], src: { entered: order || '', manual: true }
     };
+  },
+  newTask(p) {
+    const row = this.newManual('');
+    Object.assign(row, {
+      manual: false, auto: false, stopType: 'TAREA', sale: true, reviewed: true,
+      cliente: p.title, domicilio: p.address, localidad: '', monto: 0, bultos: 0,
+      payMain: '', payShip: '', obsPago: p.instructions || '',
+      taskInstructions: p.instructions || '', taskContact: p.contact_name || '', taskPhone: p.contact_phone || '',
+      transportista: this.selected.size === 1 ? Array.from(this.selected)[0] : 'TRANSPORTE INTERNO',
+      carrierOrig: this.selected.size === 1 ? Array.from(this.selected)[0] : 'TRANSPORTE INTERNO',
+      src: { entered: 'TAREA', manual: false, task: true }
+    });
+    return row;
   },
   buildFromResolution(res) {
     const main = res.main, ship = res.ship, base = main || ship;
@@ -1688,12 +1704,13 @@ const UI = {
       if (e.target.matches('input[name="route_carrier"]')) {
         RouteStore.selected.clear();
         if (e.target.checked) RouteStore.selected.add(e.target.value);
-        RouteStore.save(); this.refreshStatuses(); this.renderCards(); Publisher.render();
+        RouteStore.save(); this.refreshStatuses(); this.renderCards(); Publisher.render(); this.updateEntryMode();
       }
     });
-    // Pedidos
+    // Pedidos / paradas internas
     $('#btnSearch').addEventListener('click', () => this.searchAndAdd());
     $('#ids').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.searchAndAdd(); } });
+    $('#ids').addEventListener('input', () => this.updateEntryMode());
     $('#log').addEventListener('click', e => {
       const b = e.target.closest('[data-manual]');
       if (b) { this.addManual(b.dataset.manual); b.disabled = true; b.textContent = 'agregado como manual'; }
@@ -1840,11 +1857,56 @@ const UI = {
       const tot = Array.from(other.values()).reduce((a, b) => a + b, 0);
       $('#otherStates').textContent = tot + ' pedidos del informe tienen estados sin transportista (' + Array.from(other.keys()).slice(0, 4).join(', ') + (other.size > 4 ? '…' : '') + ').';
     } else $('#otherStates').textContent = OrderIndex.size() ? '' : 'Cargá el informe de pedidos para ver cuántos pedidos hay por transportista.';
+    this.updateEntryMode();
   },
 
   /* ----- búsqueda ----- */
+  isInternalSelected() {
+    return Array.from(RouteStore.selected || []).some(x => /^(TRANSPORTE\s+)?INTERNO$/i.test(String(x || '').trim()));
+  },
+  updateEntryMode() {
+    const internal = this.isInternalSelected(), box = document.querySelector('.step.s3'), ids = $('#ids');
+    if (!box || !ids) return;
+    const h = box.querySelector('h2'), help = box.querySelector('.row .help');
+    if (h) h.innerHTML = '<span class="n">3</span>' + (internal ? 'Agregar parada' : 'Ingresar pedidos');
+    ids.placeholder = internal ? 'Ej. 25384, Montecaseros o tarea' : '25384 25385 25378';
+    if (help) help.textContent = internal
+      ? 'Podés ingresar un N° de pedido. Si escribís "tarea", se despliega la carga de una tarea.'
+      : 'Separados por espacio, coma o uno por línea. Si escribís el pedido de envío, se suma el pedido principal (y al revés).';
+    let composer = box.querySelector('#internalTaskComposer');
+    const wantsTask = internal && /^\s*tarea\s*$/i.test(ids.value || '');
+    if (!wantsTask) { if (composer) composer.remove(); return; }
+    if (composer) return;
+    composer = document.createElement('div');
+    composer.id = 'internalTaskComposer'; composer.className = 'internal-task-form';
+    composer.innerHTML =
+      '<b>NUEVA TAREA</b>' +
+      '<label>Título<input class="ed" id="itTitle" placeholder="Ej. Buscar bolsas"></label>' +
+      '<label>Domicilio<input class="ed" id="itAddress" placeholder="Dónde tiene que ir"></label>' +
+      '<label>Observaciones / qué tiene que realizar<textarea class="ed" id="itInstructions" rows="3" placeholder="Indicaciones para el transportista"></textarea></label>' +
+      '<div class="internal-task-grid"><label>Contacto (opcional)<input class="ed" id="itContact" placeholder="Persona o comercio"></label><label>Teléfono (opcional)<input class="ed" id="itPhone" placeholder="Teléfono"></label></div>' +
+      '<div class="internal-task-actions"><button class="btn go" type="button" id="itAdd">AGREGAR TAREA</button><button class="btn soft" type="button" id="itCancel">CANCELAR</button></div>';
+    box.querySelector('#log').before(composer);
+    composer.querySelector('#itCancel').onclick = () => { ids.value = ''; composer.remove(); ids.focus(); };
+    composer.querySelector('#itAdd').onclick = () => {
+      const title = composer.querySelector('#itTitle').value.trim();
+      const address = composer.querySelector('#itAddress').value.trim();
+      const instructions = composer.querySelector('#itInstructions').value.trim();
+      if (!title || !address || !instructions) { toast('Completá título, domicilio y observaciones de la tarea.'); return; }
+      const row = RouteStore.newTask({
+        title, address, instructions,
+        contact_name: composer.querySelector('#itContact').value.trim(),
+        contact_phone: composer.querySelector('#itPhone').value.trim()
+      });
+      RouteStore.rows.push(row); RouteStore.save(); this.renderTable();
+      $('#log').innerHTML = '<div class="msg ok"><b>TAREA AGREGADA</b> · ' + esc(title) + '</div>';
+      ids.value = ''; composer.remove(); ids.focus();
+    };
+    composer.querySelector('#itTitle').focus();
+  },
   async searchAndAdd() {
     const txt = $('#ids').value;
+    if (this.isInternalSelected() && /^\s*tarea\s*$/i.test(txt || '')) { this.updateEntryMode(); return; }
     const ids = []; (txt.match(/\d+/g) || []).forEach(x => { const v = String(parseInt(x, 10)); if (ids.indexOf(v) < 0) ids.push(v); });
     const log = $('#log'); log.innerHTML = '';
     if (!ids.length) { log.innerHTML = '<div class="msg warn">Escribí al menos un número de pedido.</div>'; return; }
@@ -2001,7 +2063,28 @@ const UI = {
     if (cur && list.indexOf(cur) < 0) list.push(cur);
     return '<option value="">— elegir —</option>' + list.map(c => '<option' + (c === cur ? ' selected' : '') + '>' + esc(c) + '</option>').join('');
   },
+  taskRowHTML(row) {
+    const ed = (f, val, ph) => '<textarea class="ed" rows="1" data-f="' + f + '" placeholder="' + esc(ph || '') + '">' + esc(val || '') + '</textarea>';
+    const contact = [row.taskContact, row.taskPhone].filter(Boolean).join(' · ');
+    return '<tr class="main-row task-row' + (row.sale ? '' : ' off') + '" data-id="' + row.id + '">' +
+      '<td class="adm ctr"><input type="checkbox" class="big" data-f="sale"' + (row.sale ? ' checked' : '') + ' title="Sale en esta hoja"></td>' +
+      '<td class="adm"><span class="task-na">—</span></td>' +
+      '<td class="adm last"><span class="task-chip">TAREA</span></td>' +
+      '<td style="min-width:108px"><input class="ed" data-f="fecha" inputmode="numeric" placeholder="dd/mm/aaaa" value="' + esc(isoToDMY(row.fecha)) + '"></td>' +
+      '<td style="min-width:150px"><span class="task-chip soft">TAREA</span></td>' +
+      '<td style="min-width:180px"><span class="task-na">—</span></td>' +
+      '<td style="min-width:190px">' + ed('cliente', row.cliente, 'Título de la tarea') + '</td>' +
+      '<td style="min-width:210px">' + ed('domicilio', row.domicilio, 'Domicilio') + '</td>' +
+      '<td style="min-width:125px"><span class="task-na">—</span></td>' +
+      '<td style="min-width:120px"><span class="task-na">$ 0,00</span></td>' +
+      '<td style="min-width:170px"><span class="task-na">No corresponde</span></td>' +
+      '<td style="min-width:260px">' + ed('taskInstructions', row.taskInstructions, 'Qué tiene que realizar') + (contact ? '<span class="sub">Contacto: ' + esc(contact) + '</span>' : '') + '</td>' +
+      '<td style="min-width:185px"><select class="ed" data-f="transportista">' + this.carrierOptions(row.transportista) + '</select></td>' +
+      '<td><div class="rowtools"><button type="button" class="ibtn del" data-act="del" title="Quitar de la hoja">✕</button></div></td>' +
+      '</tr>';
+  },
   rowHTML(row, openDetail) {
+    if (row.stopType === 'TAREA') return this.taskRowHTML(row);
     const st = rowStatus(row);
     const ed = (f, val, extra) => '<textarea class="ed' + (extra && extra.cls ? ' ' + extra.cls : '') + '" rows="1" data-f="' + f + '"' + (extra && extra.ph ? ' placeholder="' + esc(extra.ph) + '"' : '') + '>' + esc(val) + '</textarea>';
     const inp = (f, val, extra) => '<input class="ed' + (extra && extra.cls ? ' ' + extra.cls : '') + '" data-f="' + f + '" value="' + esc(val) + '"' + (extra && extra.ph ? ' placeholder="' + esc(extra.ph) + '"' : '') + '>';

@@ -643,3 +643,19 @@ body.no-publish #btnPublish{display:none!important}
     grid-column:auto;
   }
 }
+
+
+/* RC4.1.24 · Transporte Interno: alta rápida de TAREA desde el campo de paradas. */
+.internal-task-form{
+  margin:10px 0 4px;padding:12px;border:1px solid #f0d58a;border-radius:12px;background:#fffaf0;
+  display:flex;flex-direction:column;gap:8px;
+}
+.internal-task-form>b{font:700 12px var(--display);letter-spacing:.07em;color:#7b5500}
+.internal-task-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.internal-task-form textarea.ed{min-height:78px;resize:vertical}
+.internal-task-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.internal-task-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+.task-chip{display:inline-block;border-radius:999px;padding:4px 8px;background:#fff4d6;color:#8a5d00;font:700 10.5px var(--display);letter-spacing:.06em}
+.task-chip.soft{background:#eef3f5;color:#43535e}.task-na{color:var(--muted);font-size:12px}
+.task-row td{background:#fffdf7}
+@media(max-width:700px){.internal-task-grid{grid-template-columns:1fr}}

@@ -7,6 +7,9 @@ import { byOrder, currentStop, futureStops } from '../../supabase/functions/_sha
 import { passkeysSupported } from './webauthn.js';
 
 const OUT = { ENTREGADO: 'ENTREGADO', ENTREGA_PARCIAL: 'ENTREGA PARCIAL', NO_ENTREGADO: 'NO ENTREGADO', REPROGRAMAR: 'REPROGRAMAR' };
+const outLabel = (s, k) => s && s.stop_type === 'TAREA'
+  ? ({ ENTREGADO: 'REALIZADO', ENTREGA_PARCIAL: 'REALIZADO PARCIAL', NO_ENTREGADO: 'NO REALIZADO', REPROGRAMAR: 'REPROGRAMAR' }[k] || OUT[k])
+  : OUT[k];
 const LIVE = { live: ['EN VIVO', ''], off: ['SIN CONEXIÓN', 'off'], sync: ['SINCRONIZANDO', 'sync'], rec: ['RECONECTANDO', 'rec'] };
 const uid = () => 'op-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const day = iso => iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Mendoza' }).format(new Date(iso)) : '';
@@ -154,10 +157,11 @@ export class DriverApp {
       '<div class="drv-m">' + r.stops.length + ' entregas · ' + this.badge(r)[0] + (r.started_at ? ' · iniciada ' + hhmm(r.started_at) : '') + (closed ? ' · finalizada ' + hhmm(r.completed_at) : '') + '</div>' +
       (r.approval_status === 'OBSERVADA' && r.review_note ? '<div class="drv-q">ACLARACIÓN SOLICITADA: ' + esc(r.review_note) + '</div>' : '') +
       byOrder(r.stops).map((s, i) => '<div class="drv-stop' + (internal && cur && s.id === cur.id ? ' cur' : '') + (internal && fut.includes(s.id) ? ' fut' : '') + (s.provenance === 'DRIVER' ? ' drv-new' : '') + '" data-s="' + s.id + '"' + (internal && fut.includes(s.id) ? ' draggable="true"' : '') + '><div class="drv-sh"><i>' + (i + 1) + '</i><div><b>' + esc(s.client_name) + '</b>' + (s.provenance === 'DRIVER' ? '<span class="drv-tag">AGREGADA</span>' : '') + (internal && cur && s.id === cur.id ? '<span class="drv-tag">ACTUAL</span>' : '') + (s.action && s.action !== 'ENTREGA' ? ' · ' + esc(s.action) : '') + (s.bultos ? ' · ' + s.bultos + ' bultos' : '') + '<small>' + esc(s.address || '') + (s.order_numbers && s.order_numbers.length ? ' · Pedido ' + esc(s.order_numbers.join(' + ')) : '') + '</small></div>' +
-        (s.outcome !== 'PENDIENTE' ? '<span class="drv-out ' + s.outcome + '">' + OUT[s.outcome] + '</span>' : (internal && fut.includes(s.id) ? '<span class="drv-move"><button type="button" data-up title="Subir">↑</button><button type="button" data-down title="Bajar">↓</button></span>' : '')) + '</div>' +
+        (s.outcome !== 'PENDIENTE' ? '<span class="drv-out ' + s.outcome + '">' + outLabel(s, s.outcome) + '</span>' : (internal && fut.includes(s.id) ? '<span class="drv-move"><button type="button" data-up title="Subir">↑</button><button type="button" data-down title="Bajar">↓</button></span>' : '')) + '</div>' +
+        (s.stop_type === 'TAREA' ? '<small class="drv-note"><b>TAREA</b>' + (s.instructions ? ' · ' + esc(s.instructions) : '') + (s.contact_name || s.contact_phone ? '<br>Contacto: ' + esc([s.contact_name, s.contact_phone].filter(Boolean).join(' · ')) : '') + '</small>' : '') +
         (s.outcome_note || s.outcome_reason ? '<small class="drv-note">' + esc(s.outcome_note || s.outcome_reason) + '</small>' : '') +
         (s.location_warning ? '<small class="drv-note"><b>⚠ ' + esc(s.location_warning) + '</b></small>' : '') +
-        (running ? '<div class="drv-acts">' + Object.keys(OUT).map(k => '<button type="button" class="btn ' + (s.outcome === k ? 'dark' : 'soft') + '" data-o="' + k + '">' + OUT[k] + '</button>').join('') + '</div>' +
+        (running ? '<div class="drv-acts">' + Object.keys(OUT).map(k => '<button type="button" class="btn ' + (s.outcome === k ? 'dark' : 'soft') + '" data-o="' + k + '">' + outLabel(s, k) + '</button>').join('') + '</div>' +
           '<div class="drv-form" hidden></div>' : '') +
         (running && s.outcome === 'PENDIENTE' && cur && s.id === cur.id ? (s.arrived_at ? '<small class="drv-note">Llegada registrada ' + hhmm(s.arrived_at) + (s.arrive_location && s.arrive_location.missing_reason ? ' · sin ubicación' : '') + '</small>' : '<button class="btn soft drv-arrive" type="button" data-arrive>LLEGUÉ A LA PARADA</button>') : '') + '</div>').join('') +
       (internal ? '<button class="btn soft" type="button" id="drvAddOpen">+ AGREGAR PARADA</button><div class="drv-add" id="drvAdd" hidden><input class="ed" id="naName" placeholder="Destino / cliente"><input class="ed" id="naAddr" placeholder="Dirección">' +
