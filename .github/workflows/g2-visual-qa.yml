@@ -25,10 +25,7 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
-      - name: Build
-        env:
-          VITE_SUPABASE_URL: https://uqwilzzeyfuatlmwzxna.supabase.co
-          VITE_SUPABASE_ANON_KEY: sb_publishable_cwLs4qzUgtMuEDEEhsQSfg_n-Q9McXG
+      - name: Build demo bundle for browser QA
         run: npm run build
 
       - name: Install Playwright Chromium
