@@ -32,13 +32,17 @@ const uid = () => 'op-' + Date.now().toString(36) + Math.random().toString(36).s
 const day = iso => iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Mendoza' }).format(new Date(iso)) : '';
 const hhmm = iso => iso ? new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
 const offline = e => e && (e.code === 'OFFLINE' || e.status === 0);
-// Achica la foto del DNI (máx. 1600 px, JPEG) para subirla liviana; si no se puede decodificar se usa el archivo original
+// Foto DNI: comprimir en el celular sin librerías extras (máx. 1200 px, JPEG).
 async function shrink(f) {
   const b64 = async blob => { const u = new Uint8Array(await blob.arrayBuffer()); let t = ''; for (let i = 0; i < u.length; i += 0x8000) t += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(t); };
   try {
-    const bmp = await createImageBitmap(f), k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
-    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.82));
+    const bmp = await createImageBitmap(f), k = Math.min(1, 1200 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close(); // liberar memoria inmediatamente en dispositivos antiguos
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.72));
+    c.width = 0; c.height = 0;
+    if (!blob) throw new Error('No se pudo comprimir la foto del DNI.');
     return { b64: await b64(blob), mime: 'image/jpeg', size: blob.size };
   } catch (e) { return { b64: await b64(f), mime: f.type, size: f.size }; }
 }
