@@ -3133,23 +3133,9 @@ const PdfExporter = {
         if (raw._sub) { data.cell.styles.fillColor = [232, 241, 244]; data.cell.styles.lineColor = [0, 14, 24]; data.cell.styles.lineWidth = 0.35; if (raw._lay) data.cell.styles.textColor = [232, 241, 244]; return; }
         if (raw._ship && shipCols.includes(raw._ci)) data.cell.styles.fillColor = self.soft;
         if (raw._ci === iMonto && raw._pending) { data.cell.styles.fillColor = [253, 236, 234]; data.cell.styles.textColor = [180, 35, 24]; }
-        if (raw._lay) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.textColor = data.cell.styles.fillColor || [255, 255, 255]; }
-      },
-      willDrawCell(data) {
-        if (data.section !== 'body') return;
-        const raw = data.cell.raw;
-        if (raw._lay) { data.cell._rich = raw._lay; data.cell.text = []; }
-      },
-      didDrawCell(data) {
-        if (data.section !== 'body' || !data.cell._rich) return;
-        const cell = data.cell, maxW = cell.width - 2 * PAD;
-        const lh = FS * 0.3528 * 1.15;
-        let y = cell.y + VPAD + FS * 0.3528 * 0.95;
-        cell._rich.forEach(l => {
-          doc.setFontSize(FS); doc.setFont('helvetica', 'bold');
-          doc.setTextColor(...(l.kind === 'ship' ? self.teal : l.kind === 'muted' ? [138, 154, 164] : self.text));
-          doc.splitTextToSize(l.t, maxW).forEach(part => { doc.text(part, cell.x + PAD, y); y += lh; });
-        });
+        // AutoTable debe medir y dividir el texto REAL antes de dibujar: ocultarlo
+        // y pintarlo luego manualmente no ajustaba la altura (cortaba detalles largos).
+        if (raw._lay) data.cell.styles.fontStyle = 'bold';
       },
       didDrawPage(data) { header(); pages = Math.max(pages, data.pageNumber); }
     });
