@@ -1,0 +1,67 @@
+name: G2 Security QA (no deploy)
+
+on:
+  push:
+    branches:
+      - fix/g2-chatgpt-final-review
+    paths:
+      - 'supabase/migrations/20261018174637_20261018180000_g2_revoke_anon_admin_rpc.sql'
+      - 'tests/sql/g2_revision_test.sql'
+      - 'tests/sql/migration_order.txt'
+      - '.github/workflows/g2-security-qa.yml'
+      - 'tests/e2e/generate_synthetic_excel.py'
+      - 'tests/e2e/verify_synthetic_excel.mjs'
+      - 'tests/e2e/run_e2e_g2.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-sql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify only authorized database roles can execute G2 administration
+        env:
+          SQL_TESTS: g2_revision_test
+          SKIP_CONCURRENCY: "1"
+        run: bash tests/sql/run.sh
+
+  synthetic-excel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate synthetic import fixtures
+        run: python3 tests/e2e/generate_synthetic_excel.py
+      - name: Validate fixtures with the production import parser
+        run: node tests/e2e/verify_synthetic_excel.mjs
+
+  g2-integral-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_DEMO_MODE: "true"
+      - name: Install browser test dependencies
+        run: |
+          python3 -m pip install --break-system-packages playwright
+          npx playwright install --with-deps chromium
+      - name: Generate private-free fixture
+        run: python3 tests/e2e/generate_synthetic_excel.py
+      - name: Execute complete G2 UI flow in demo mode
+        env:
+          OKD_FIXTURES: ${{ github.workspace }}/tests/e2e/out/synthetic
+          CHROMIUM_PATH: /home/runner/.cache/ms-playwright/chromium-*/chrome-linux64/chrome
+        run: |
+          export CHROMIUM_PATH="$(find /home/runner/.cache/ms-playwright -path '*/chrome-linux64/chrome' -type f | head -1)"
+          python3 tests/e2e/run_e2e_g2.py

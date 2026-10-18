@@ -253,3 +253,10 @@ select tst.res('DRVLOC-09 Cierre de la segunda visita: RECEPCION_INTERNA con fir
 select tst.res('UNIQ-02 La unicidad sigue vigente para paradas administrativas y no para las del chofer', exists (select 1 from pg_indexes where indexname = 'route_stops_one_admin_internal_location_per_route' and indexdef ilike '%provenance%DRIVER%')
   and not exists (select 1 from pg_indexes where indexname = 'route_stops_one_internal_location_per_route'), '');
 
+-- G2 hardening: el administrador sigue pudiendo invocar, pero anon no tiene EXECUTE.
+select tst.res('SEC-G2-01 RPC admin G2 NO ejecutable por anon',
+  not has_function_privilege('anon', 'public.upsert_internal_location(jsonb)', 'EXECUTE'), '');
+select tst.res('SEC-G2-02 RPC admin G2 disponible para authenticated (guard de permisos interno)',
+  has_function_privilege('authenticated', 'public.upsert_internal_location(jsonb)', 'EXECUTE'), '');
+select tst.res('SEC-G2-03 RPC admin G2 disponible para service_role',
+  has_function_privilege('service_role', 'public.upsert_internal_location(jsonb)', 'EXECUTE'), '');
