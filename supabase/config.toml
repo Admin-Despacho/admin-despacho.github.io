@@ -3,3 +3,7 @@ project_id = "ok-despacho"
 
 [functions.admin-users]
 verify_jwt = true
+
+# Geocodificación de G2: exige sesión (además el handler valida permiso de administrar ubicaciones)
+[functions.geocode-location]
+verify_jwt = true

@@ -589,7 +589,7 @@ const CFG = {
       '<div class="utable-wrap"><table class="utable" id="ilocTable"><thead><tr><th>CLAVE</th><th>PUNTO</th><th>DOMICILIO</th><th>LAT, LON</th><th>RADIO</th><th>ACTIVO</th><th>NOTA</th></tr></thead><tbody>' +
       (ls.length ? ls.map(l => '<tr><td><b>' + esc(l.location_key) + '</b></td><td>' + esc(l.name) + '</td><td>' + esc(l.address || '') + '</td><td>' + l.lat + ', ' + l.lon + '</td><td>' + l.radius_m + ' m</td><td>' + (l.active !== false ? 'Sí' : 'No') + '</td><td>' + esc(l.note || '') + '</td></tr>').join('') : '<tr><td colspan="7">Sin ubicaciones internas.</td></tr>') + '</tbody></table></div>' +
       '<div class="ufilters" id="ilocNew"><input id="ilKey" placeholder="Clave (ej. SAN_JUAN)"><input id="ilName" placeholder="Sucursal / punto"><input id="ilAddr" placeholder="Domicilio"><button class="btn soft" type="button" id="ilGeocode">BUSCAR COORDENADAS</button><input id="ilLat" placeholder="Latitud"><input id="ilLon" placeholder="Longitud"><input id="ilRad" placeholder="Radio (m)" value="200"><input id="ilNote" placeholder="Nota"><button class="btn dark" type="button" id="ilSave">GUARDAR PUNTO INTERNO</button></div><div id="ilGeoMsg" class="rp-note"></div>' +
-      '<p class="rp-note">Para asociar automáticamente una parada, la app intenta primero por clave del cliente y luego por nombre o domicilio. Recomendado: usar una clave estable por sucursal/punto.</p>';
+      '<p class="rp-note">Una parada se vincula a un punto SOLO por su clave (al elegir la ubicación en el constructor). Al publicar, la hoja guarda las coordenadas y el radio de ese momento: editar o desactivar un punto después no cambia hojas ya publicadas.</p>';
     const v = id => sec.querySelector(id).value.trim();
     sec.querySelector('#ilGeocode').onclick = async () => {
       const btn = sec.querySelector('#ilGeocode'), out = sec.querySelector('#ilGeoMsg');
@@ -598,9 +598,17 @@ const CFG = {
       btn.disabled = true; out.textContent = 'Buscando ubicación…';
       try {
         const g = await api.geocodeInternalLocation(address, name);
-        sec.querySelector('#ilLat').value = g.lat;
-        sec.querySelector('#ilLon').value = g.lon;
-        out.innerHTML = '<b>Ubicación encontrada:</b> ' + esc(g.display_name || address) + ' · Revisá el punto y después guardalo.';
+        const PREC = { ADDRESS: 'altura exacta', STREET: 'solo la calle', AREA: 'aproximado (barrio/localidad)' };
+        const pick = c => { sec.querySelector('#ilLat').value = c.lat; sec.querySelector('#ilLon').value = c.lon; sec.dataset.geoSource = c.source || ''; sec.dataset.geoName = c.display_name || '';
+          out.innerHTML = '<b>Punto elegido:</b> ' + esc(c.display_name || address) + ' · <i>' + esc(PREC[c.precision] || '') + '</i> · ' + esc(c.source || '') +
+            ' · <a href="https://www.openstreetmap.org/?mlat=' + c.lat + '&mlon=' + c.lon + '#map=18/' + c.lat + '/' + c.lon + '" target="_blank" rel="noopener">ver en el mapa</a>. Revisá el punto y después guardalo.'; };
+        const list = (g.candidates || []).length ? g.candidates : [g.best || g.result];
+        if (list.length > 1 && (g.ambiguous || g.needs_review)) {
+          // varias coincidencias o resultado impreciso: elegir explícitamente (no se toma el primero a ciegas)
+          out.innerHTML = '<b>' + esc(g.warning || 'Elegí la coincidencia correcta:') + '</b><div class="geo-cands">' + list.map((c, i) => '<label class="chk"><input type="radio" name="geoC" value="' + i + '"> ' +
+            esc(c.display_name) + ' · <i>' + esc(PREC[c.precision] || '') + '</i></label>').join('') + '</div>';
+          out.querySelectorAll('[name="geoC"]').forEach(r => r.onchange = () => pick(list[+r.value]));
+        } else { pick(list[0]); if (g.warning) out.insertAdjacentHTML('beforeend', '<br><b>⚠ ' + esc(g.warning) + '</b>'); }
       } catch (e) {
         out.textContent = e.message;
       } finally { btn.disabled = false; }
@@ -608,7 +616,8 @@ const CFG = {
     sec.querySelector('#ilSave').onclick = () => run(() => {
       const key = v('#ilKey').toUpperCase().replace(/[^A-Z0-9_-]+/g, '_');
       if (!key || !v('#ilName') || !v('#ilLat') || !v('#ilLon')) throw new Error('Completá clave, punto y coordenadas.');
-      return api.saveInternalLocation({ location_key: key, name: v('#ilName'), address: v('#ilAddr'), lat: v('#ilLat').replace(',', '.'), lon: v('#ilLon').replace(',', '.'), radius_m: parseInt(v('#ilRad'), 10) || 200, note: v('#ilNote'), active: true });
+      return api.saveInternalLocation({ location_key: key, name: v('#ilName'), address: v('#ilAddr'), lat: v('#ilLat').replace(',', '.'), lon: v('#ilLon').replace(',', '.'), radius_m: parseInt(v('#ilRad'), 10) || 200, note: v('#ilNote'), active: true,
+        geocode_source: sec.dataset.geoSource || null, geocode_display_name: sec.dataset.geoName || null });
     }, 'Punto interno guardado.', again);
   },
   async backup(api, me, sec, again) { await backupSection(api, me, sec, again); },
