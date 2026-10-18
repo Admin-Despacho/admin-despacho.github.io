@@ -1,0 +1,32 @@
+name: Driver Signature UI QA (no deploy)
+on:
+  push:
+    branches: [feat/driver-signature-colors]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test -- --run
+      - name: Confirm signature and result controls
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const ui = fs.readFileSync('src/online/driver-ui.js','utf8');
+          const css = fs.readFileSync('src/styles/online.css','utf8');
+          for(const c of ['result-done','result-partial','result-failed','result-reschedule']) {assert(ui.includes(c));assert(css.includes(c));}
+          for(const c of ['data-sigexpand','data-modal-done','data-modal-clear','closeModal','data-sigclr']) assert(ui.includes(c));
+          assert(ui.includes("signature_png_b64: cv.toDataURL('image/png')"));
+          console.log('PASS 4 semantic colors, modal controls and unmodified signature serialization');
+          JS
