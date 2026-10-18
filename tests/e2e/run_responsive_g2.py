@@ -63,6 +63,11 @@ async def main():
                                         geolocation={'latitude': -32.8901, 'longitude': -68.8401}, permissions=['geolocation'])
                 pg = await c.new_page(); await login(pg, 'gabriel@okdespacho.demo'); tag = f'movil_{w}x{h}'
                 await pg.screenshot(path=os.path.join(OUT, tag + '_1_mis_hojas.png'), full_page=True); m1 = await pg.evaluate(MEASURE, None)
+                if w <= 380:
+                    pk = await pg.evaluate("""()=>{const x=document.querySelector('.drv-pk'), b=x&&x.querySelector('.btn'); if(!x||!b) return null;
+                      const xr=x.getBoundingClientRect(), br=b.getBoundingClientRect(), cs=getComputedStyle(x);
+                      return {dir:cs.flexDirection, cardW:Math.round(xr.width), btnW:Math.round(br.width), textW:Math.round((x.querySelector('span')||x).getBoundingClientRect().width)};}""")
+                    res('RESP-PK-' + str(w), f'Celular {w}: acceso rápido apilado y legible', bool(pk) and pk['dir'] == 'column' and pk['btnW'] >= pk['cardW'] - 24 and pk['textW'] >= pk['cardW'] - 24, json.dumps(pk))
                 try: await pg.wait_for_selector(f'[data-open="{route["id"]}"]', timeout=8000)
                 except Exception:
                     await pg.screenshot(path=os.path.join(OUT, tag + '_ERROR.png')); print('DBG', (await pg.inner_text('body'))[:300].replace('\n', ' | ')); raise
