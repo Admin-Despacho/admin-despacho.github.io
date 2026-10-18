@@ -6,7 +6,7 @@ const start = source.indexOf('export class DriverApp {');
 assert(start >= 0);
 const classCode = source.slice(start).replace('export class DriverApp', 'class DriverApp');
 const context = vm.createContext({ console, setTimeout: cb => { cb(); return 1; }, clearTimeout, setInterval: () => 1, localStorage: { getItem: () => null, setItem: () => {} }, Date, Math, navigator: { onLine: true } });
-vm.runInContext('const esc = x => x; const ROLE_LABEL = {}; '+classCode+'; globalThis.DriverApp = DriverApp;', context);
+vm.runInContext('const esc = x => x; const ROLE_LABEL = {}; const offline = e => e && (e.code === 'OFFLINE' || e.status === 0); '+classCode+'; globalThis.DriverApp = DriverApp;', context);
 const App = context.DriverApp;
 const app = new App({}, {id:'driver-test'}, ()=>{});
 app.setConn = c => { app.conn=c; };
