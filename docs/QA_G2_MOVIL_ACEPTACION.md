@@ -8,7 +8,7 @@
 - No crear pedidos ficticios, hojas ficticias, cobros, notas de crédito o recibos en Supabase producción.
 - Ejecutar recorridos completos solo con una hoja real autorizada por Operaciones, o con un entorno de ensayo aislado sin cargos y sin conexión a producción.
 - Prohibido aplicar migraciones, `db push`, hacer merge a `main` o desplegar por el solo hecho de completar este documento.
-- La migración `20261018180000_g2_revoke_anon_admin_rpc.sql` permanece pendiente en producción hasta autorización específica.
+- La migración `20261018174637_20261018180000_g2_revoke_anon_admin_rpc.sql` permanece pendiente en producción hasta autorización específica.
 
 ## Registro de dispositivos
 | Campo | Android | iPhone (si disponible) |
