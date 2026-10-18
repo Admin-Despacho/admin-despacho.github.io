@@ -1,0 +1,57 @@
+name: G2 Visual QA (no deploy)
+
+on:
+  push:
+    branches:
+      - fix/g2-chatgpt-final-review
+
+permissions:
+  contents: read
+
+jobs:
+  visual:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build demo bundle for browser QA
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: |
+          python3 -m pip install --user playwright
+          python3 -m playwright install --with-deps chromium
+          CHROME="$(find "$HOME/.cache/ms-playwright" -type f \( -path '*/chrome-linux/chrome' -o -path '*/chrome-linux64/chrome' \) | head -1)"
+          if [ -z "$CHROME" ]; then
+            echo "Chromium executable not found" >&2
+            exit 1
+          fi
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+          sudo mkdir -p /opt/pw-browsers/chromium-1194/chrome-linux
+          sudo ln -sf "$CHROME" /opt/pw-browsers/chromium-1194/chrome-linux/chrome
+          "$CHROME" --version
+
+      - name: Responsive G2 full matrix
+        run: python3 tests/e2e/run_responsive_g2.py
+
+      - name: Push service worker
+        run: python3 tests/e2e/run_push_sw.py
+
+      - name: Upload responsive screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2-responsive-current
+          path: tests/e2e/out/responsive
+          if-no-files-found: warn
