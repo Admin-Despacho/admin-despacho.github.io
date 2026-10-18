@@ -39,6 +39,10 @@ export function demoSeed() {
     ],
     passwords: {},            // contraseñas cambiadas en la demo (por defecto: "demo")
     history: ['u-gabriel', 'u-cristian'], // usuarios con hojas/firmas/eventos (no se eliminan, se archivan)
+    // G2 (ubicaciones internas de Mendoza). "San Juan" es la calle San Juan de Mendoza.
+    internalLocations: [
+      { location_key: 'MONTECASEROS', name: 'Montecaseros - casa central', address: 'Montecaseros 1234, Mendoza', lat: -32.8900, lon: -68.8400, radius_m: 200, active: true, note: null, updated_at: '2026-10-01T12:00:00.000Z' },
+      { location_key: 'SAN_JUAN', name: 'Sucursal San Juan', address: 'San Juan 500, Mendoza', lat: -32.8950, lon: -68.8450, radius_m: 150, active: true, note: null, updated_at: '2026-10-01T12:00:00.000Z' }],
     vehicles: [{ id: 'vh-1', name: 'Kangoo', plate: 'AB123CD', active: true, brand: 'Renault', model: 'Kangoo', type: 'Utilitario', year: 2019, notes: '', current_km: 50000, last_service_km: 41000, last_service_date: '2026-03-01', service_interval_km: 10000, habitual_driver_id: 'u-gabriel' }],
     audit: [], mails: [], seq: 1
   };
@@ -260,6 +264,10 @@ export class DemoApi {
     if (p.stops.some(x => !x.ready)) throw err('Hay pedidos con revisión pendiente o sin monto.', 'NOT_READY', 409);
     const ords = [...new Set(p.stops.flatMap(x => x.order_numbers || []))];
     this._reserve(p.sheet_key, ords, me); // falla si algún pedido está en otra hoja
+    this._orphanCheck(p.sheet_key, ords);
+    const ruled = p.stops.map(x => this._stopRules(x, carrier));
+    { const keys = ruled.filter(x => x.stop_type === 'UBICACION_INTERNA').map(x => x.internal_location_key); const dup = keys.find((k, i) => keys.indexOf(k) !== i);
+      if (dup) throw err('duplicate key value violates unique constraint "route_stops_one_internal_location_per_route" (' + dup + ')', 'DUPLICATE_INTERNAL_LOCATION', 409); }
     // Correlativo por transportista/base, continuo (CT Este y Alrededores comparten el 01)
     const code = carrier.sequence_code || SEQ_CODE[carrier.id]; this.db.sequences = this.db.sequences || {}; const n = this.db.sequences[code] = (this.db.sequences[code] || 0) + 1;
     const now = new Date().toISOString();
@@ -267,7 +275,9 @@ export class DemoApi {
       responsable_id: resp.id, responsable_name: resp.full_name, operational_status: 'PUBLICADA', sheet_key: p.sheet_key, published_at: now, published_by: me.id,
       notified_at: null, viewed_at: null, started_at: null, completed_at: null, sheet_snapshot: p,
       version: 1, approval_status: 'NO_REQUERIDA', events: [],
-      stops: p.stops.map((x, i) => ({ id: 'st-' + this.db.seq + '-' + i, seq: i + 1, sequence_number: i + 1, provenance: 'PUBLISHED', action: x.action || 'ENTREGA', client_name: x.client_name, client_key: x.client_key, zone: x.zone || null, order_numbers: x.order_numbers || [], address: x.address || '', bultos: x.bultos || null,
+      stops: ruled.map((x, i) => ({ id: 'st-' + this.db.seq + '-' + i, seq: i + 1,
+        stop_type: x.stop_type, instructions: x.instructions, contact_name: x.contact_name, contact_phone: x.contact_phone, internal_location_key: x.internal_location_key,
+        expected_lat: x.expected_lat, expected_lon: x.expected_lon, expected_radius_m: x.expected_radius_m, internal_location_updated_at: x.internal_location_updated_at, sequence_number: i + 1, provenance: 'PUBLISHED', action: x.action || 'ENTREGA', client_name: x.client_name, client_key: x.client_key, zone: x.zone || null, order_numbers: x.order_numbers || [], address: x.address || '', bultos: x.bultos || null,
         merchandise_amount: x.merchandise_amount || 0, shipping_fee: x.shipping_fee || 0, shipping_fee_source: x.ship_fee_status === 'PROVISIONAL' ? 'CONFIRMED_FALLBACK' : 'SALDO', outcome: 'PENDIENTE',
         task: x.task || 'ENTREGA', expected_amount: x.expected_amount ?? null, customer_email: x.customer_email || null, collection_status: 'PENDIENTE' })) };
     if (carrier.kind === 'INTERNO' && !p.vehicle_id) throw err('VEHICLE_REQUIRED: la ruta interna necesita un vehículo activo', 'VEHICLE_REQUIRED', 409);
@@ -278,11 +288,53 @@ export class DemoApi {
     (p.financing || []).forEach(e => { const f = (this.db.finPlans || []).find(x => x.id === e.plan_id); (this.db.finSnapshots = this.db.finSnapshots || []).push({ route_id: r.id, route_version: 1, comp: e.comp || (f && f.comp),
       client_key: e.client_key || (f && f.client_key), classification: e.classification || 'FINANCIACION_PROPIA_VIGENTE', parts: e.parts || (f && f.parts) || [], frequency: f ? f.frequency : e.frequency,
       source_pending: f ? f.source_pending : null, noc_adjustments: f ? f.noc_adjustments : null, operational_pending: f ? f.operational_pending : null, source_import: e.import_id || (f && f.last_import_id), resolver_version: e.resolver_version, plan_id: e.plan_id, created_at: now }); });
-    Object.values(this.db.reservations).filter(x => x.sheet_key === p.sheet_key).forEach(x => { x.status = 'PUBLICADA'; x.route_id = r.id; x.number = r.number; });
+    Object.entries(this.db.reservations).filter(([o, x]) => x.sheet_key === p.sheet_key && ords.includes(o)).forEach(([, x]) => { x.status = 'PUBLICADA'; x.route_id = r.id; x.number = r.number; });   // solo las de las paradas
     this.db.notifs = this.db.notifs || [];
     if (!this.db.notifs.some(x => x.user_id === resp.id && x.route_id === r.id)) this.db.notifs.push({ id: 'nt-' + this.db.seq, user_id: resp.id, route_id: r.id, type: 'NUEVA_HOJA_PUBLICADA', title: 'NUEVA HOJA PUBLICADA', body: 'Hoja ' + r.number + ' · ' + r.stops.length + ' entregas', created_at: now, read_at: null });
     this._audit(me, 'ROUTE_PUBLISHED', r.id, null, { number: r.number, carrier: carrier.id, responsable: resp.id });
     this._save(); return r;
+  }
+  // Reservas huérfanas: pedidos reservados por el borrador que no están en ninguna parada → se rechaza (como publish_route)
+  _orphanCheck(sheetKey, ords) {
+    const orf = Object.entries(this.db.reservations || {}).filter(([o, x]) => x.sheet_key === sheetKey && x.status === 'BORRADOR' && !ords.includes(o)).map(([o]) => o).sort();
+    if (orf.length) throw err('ORPHAN_RESERVATIONS: hay pedidos reservados que no están en la hoja: ' + orf.join(', '), 'ORPHAN_RESERVATIONS', 409);
+  }
+  // Reglas por tipo de parada (= trigger trg_zz_stop_type_rules del servidor)
+  _stopRules(x, carrier) {
+    const t = x.stop_type || 'PEDIDO', o = Object.assign({}, x, { stop_type: t, instructions: String(x.instructions || '').trim() || null, contact_name: x.contact_name || null, contact_phone: x.contact_phone || null });
+    if (['TAREA', 'UBICACION_INTERNA'].includes(t) && carrier.kind !== 'INTERNO') throw err('STOP_TYPE_REQUIRES_INTERNAL: ' + t + ' solo se publica con Transporte Interno', 'STOP_TYPE_REQUIRES_INTERNAL', 409);
+    if (t === 'UBICACION_INTERNA') {
+      if (!x.internal_location_key) throw err('INTERNAL_LOCATION_REQUIRED: la ubicación interna no tiene clave G2', 'INTERNAL_LOCATION_REQUIRED', 409);
+      const l = (this.db.internalLocations || []).find(y => y.location_key === x.internal_location_key);
+      if (!l || l.active === false) throw err('INTERNAL_LOCATION_INACTIVE: ' + x.internal_location_key + ' no existe o está desactivada en G2', 'INTERNAL_LOCATION_INACTIVE', 409);
+      Object.assign(o, { client_name: l.name, address: l.address || '', client_key: l.location_key, expected_lat: l.lat, expected_lon: l.lon, expected_radius_m: l.radius_m, internal_location_updated_at: l.updated_at || null });
+    } else Object.assign(o, { internal_location_key: null, expected_lat: null, expected_lon: null, expected_radius_m: null, internal_location_updated_at: null });
+    if (t !== 'PEDIDO') Object.assign(o, { merchandise_amount: 0, shipping_fee: 0, customer_email: null, task: 'ENTREGA', expected_amount: null });
+    return o;
+  }
+  _canReadG2(me) { return ['settings.manage', 'locations.manage', 'locations.view', 'routes.create'].some(p => hasPerm(me, p)); }
+  async listInternalLocations() {
+    this._refresh(); const me = await this.me(); if (!this._canReadG2(me)) return [];   // como la RLS: sin permiso, lista vacía
+    return (this.db.internalLocations || []).slice().sort((a, b) => a.name.localeCompare(b.name)).map(x => ({ ...x }));
+  }
+  async saveInternalLocation(p) {
+    this._refresh(); const me = await this.me();
+    if (!hasPerm(me, 'settings.manage') && !hasPerm(me, 'locations.manage')) throw err('FORBIDDEN', 'FORBIDDEN', 403);
+    const key = String(p.location_key || '').trim().toUpperCase();
+    if (!key || !String(p.name || '').trim() || p.lat == null || p.lon == null || p.lat === '' || p.lon === '') throw err('BAD_LOCATION: completá clave, nombre y coordenadas', 'BAD_LOCATION', 400);
+    const rad = Number(p.radius_m || 200); if (!(rad >= 10 && rad <= 5000)) throw err('BAD_LOCATION: el radio debe estar entre 10 y 5000 m', 'BAD_LOCATION', 400);
+    const L = this.db.internalLocations = this.db.internalLocations || [];
+    if (L.some(x => x.active !== false && x.location_key !== key && x.name.trim().toLowerCase() === String(p.name).trim().toLowerCase())) throw err('DUPLICATE_LOCATION_NAME: ya existe otra ubicación activa con ese nombre', 'DUPLICATE_LOCATION_NAME', 409);
+    const prev = L.find(x => x.location_key === key), now = new Date().toISOString();
+    const row = { location_key: key, name: String(p.name).trim(), address: String(p.address || '').trim() || null, lat: Number(p.lat), lon: Number(p.lon), radius_m: rad, active: p.active !== false, note: p.note || null,
+      geocode_source: p.geocode_source || (prev && prev.geocode_source) || null, geocode_display_name: p.geocode_display_name || (prev && prev.geocode_display_name) || null, updated_at: now };
+    if (prev) Object.assign(prev, row); else L.push(row);
+    this._audit(me, 'INTERNAL_LOCATION_SAVED', key, prev ? { ...prev } : null, row); this._save(); return row;
+  }
+  async geocodeInternalLocation(address) {
+    this._refresh(); const me = await this.me();
+    if (!hasPerm(me, 'settings.manage') && !hasPerm(me, 'locations.manage')) throw err('Solo quien administra ubicaciones (G2) puede buscar coordenadas.', 'FORBIDDEN', 403);
+    throw err('Modo demo: sin conexión al geocodificador. Cargá las coordenadas a mano.', 'DEMO_NO_GEOCODER', 400);
   }
   // Borrador con dueño (equivale a route_drafts / _draft del servidor)
   _draft(sheetKey, me, create, needDraft = true) {
@@ -338,9 +390,16 @@ export class DemoApi {
     this._onTheWay(r); this._audit(me, 'ROUTE_STARTED', r.id); this._save(); await this.sendCustomerQueued(); return r;
   }
   // Ubicación puntual (nunca inventada): lat/lon o motivo
-  _loc(p) {
+  _loc(p, st) {
     if (!p) throw err('LOCATION_REQUIRED: registrá la ubicación o indicá por qué no se pudo', 'LOCATION_REQUIRED', 400);
-    if (p.lat != null && p.lon != null) return { lat: +p.lat, lon: +p.lon, accuracy: p.accuracy != null ? +p.accuracy : null, at: new Date().toISOString() };
+    if (p.lat != null && p.lon != null) {
+      const o = { lat: +p.lat, lon: +p.lon, accuracy: p.accuracy != null ? +p.accuracy : null, at: new Date().toISOString() };
+      if (st && st.expected_lat != null) {   // ubicación interna: SIEMPRE contra el snapshot de la publicación
+        const d = Math.round(6371000 * 2 * Math.asin(Math.sqrt(Math.sin((o.lat - st.expected_lat) * Math.PI / 360) ** 2 + Math.cos(o.lat * Math.PI / 180) * Math.cos(st.expected_lat * Math.PI / 180) * Math.sin((o.lon - st.expected_lon) * Math.PI / 360) ** 2)));
+        Object.assign(o, { validation_source: 'INTERNAL_SNAPSHOT', validation_key: st.internal_location_key, expected_lat: st.expected_lat, expected_lon: st.expected_lon, radius_m: st.expected_radius_m, distance_m: d, outside_m: d > st.expected_radius_m ? d : null });
+      }
+      return o;
+    }
     if (!String(p.missing_reason || '').trim()) throw err('LOCATION_REASON_REQUIRED: sin ubicación hay que indicar el motivo', 'LOCATION_REASON_REQUIRED', 400);
     return { missing_reason: String(p.missing_reason).trim(), at: new Date().toISOString() };
   }
@@ -350,7 +409,7 @@ export class DemoApi {
     this._mine(r.id); const st = r.stops.find(x => x.id === stopId);
     if (r.operational_status !== 'EN_CURSO') throw err('La hoja no está en curso.', 'BAD_STATE', 409);
     if (st.arrived_at) return st;
-    st.arrive_location = this._loc(location); st.arrived_at = new Date().toISOString(); this._save(); return st;
+    st.arrive_location = this._loc(location, st); st.arrived_at = new Date().toISOString(); this._save(); return st;
   }
   // Storage privado (demo): el chofer sube, no descarga; solo identity_docs.view obtiene un enlace temporal
   async uploadIdentityDoc(cuil, file) {
@@ -381,7 +440,7 @@ export class DemoApi {
     return null;
   }
   _onTheWay(r) {
-    const cur = currentStop(r.stops); if (!cur || !cur.customer_email) return;
+    const cur = currentStop(r.stops); if (!cur || !cur.customer_email || (cur.stop_type && cur.stop_type !== 'PEDIDO')) return;   // solo pedidos comerciales
     this._queueCustomer(r, cur, 'ON_THE_WAY');
   }
   _queueCustomer(r, st, kind, recipient) {
@@ -410,10 +469,11 @@ export class DemoApi {
     if (!['ENTREGADO', 'ENTREGA_PARCIAL', 'NO_ENTREGADO', 'REPROGRAMAR'].includes(outcome)) throw err('Resultado inválido.', 'BAD_OUTCOME', 400);
     if (outcome === 'ENTREGA_PARCIAL' && !String(note || '').trim()) throw err('Entrega parcial exige observación.', 'NOTE_REQUIRED', 400);
     if (['NO_ENTREGADO', 'REPROGRAMAR'].includes(outcome) && !String(reason || '').trim()) throw err('Indicá el motivo.', 'REASON_REQUIRED', 400);
-    const ev = (extra && extra.evidence) || {}, col = extra && extra.collection, cristian = ['CT-ESTE', 'CT-ALR'].includes(r.carrier_id);
+    const type = st.stop_type || 'PEDIDO', commercial = type === 'PEDIDO', task = type === 'TAREA';
+    const ev = (extra && extra.evidence) || {}, col = commercial ? extra && extra.collection : null, cristian = commercial && ['CT-ESTE', 'CT-ALR'].includes(r.carrier_id);
     let cuil = null;
     if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome)) {
-      if (!String(ev.receiver_name || '').trim() || !ev.signature_png_b64) throw err('EVIDENCE_REQUIRED: nombre del receptor y firma obligatorios', 'EVIDENCE_REQUIRED', 400);
+      if (!task && (!String(ev.receiver_name || '').trim() || !ev.signature_png_b64)) throw err('EVIDENCE_REQUIRED: nombre del receptor y firma obligatorios', 'EVIDENCE_REQUIRED', 400);
       if (cristian) { cuil = String(ev.cuil || '').replace(/\D/g, ''); if (cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
       else { cuil = String(ev.cuil || '').replace(/\D/g, '') || null; if (cuil && cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
       // RC4.1: email del receptor (segunda pantalla), opcional; si viene debe ser válido
@@ -425,18 +485,25 @@ export class DemoApi {
       if (cristian && ev.dni_storage_path) { const o = (this.db.storage || {})[ev.dni_storage_path];
         if (!new RegExp('^' + cuil + '/[0-9a-f-]{36}\\.(jpg|png)$').test(ev.dni_storage_path) || !o || o.owner !== me.id) throw err('DNI_UPLOAD_INVALID', 'DNI_UPLOAD_INVALID', 400); }
     }
-    if (['COBRANZA', 'AMBAS'].includes(st.task)) {
+    if (commercial && ['COBRANZA', 'AMBAS'].includes(st.task)) {
       if (!col || !col.status || col.status === 'PENDIENTE') throw err('COLLECTION_REQUIRED: indicá el resultado de la cobranza', 'COLLECTION_REQUIRED', 400);
       if (['COBRO_PARCIAL', 'NO_COBRADO'].includes(col.status) && !String(col.note || '').trim()) throw err('COLLECTION_NOTE_REQUIRED: cobro parcial exige observación y no cobrado exige motivo', 'COLLECTION_NOTE_REQUIRED', 400);
       if (['COBRADO', 'COBRO_PARCIAL'].includes(col.status) && !(Number(col.amount) > 0)) throw err('Indicá el importe cobrado.', 'COLLECTION_AMOUNT_REQUIRED', 400);
     }
-    const loc = this._loc(extra && extra.location);
+    const loc = this._loc(extra && extra.location, st);
     Object.assign(st, { outcome, outcome_at: new Date().toISOString(), outcome_by: me.id, outcome_note: note || null, outcome_reason: reason || null, finish_location: loc });
     if (['COBRANZA', 'AMBAS'].includes(st.task)) Object.assign(st, { collection_status: col.status, collected_amount: col.amount != null ? Number(col.amount) : null, payment_mode: col.mode || null, collection_note: col.note || null });
-    if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome)) {
+    if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome) && !commercial) {
+      // TAREA / traslado interno: nunca email, Recibido Conforme, identidad ni cobranza. La recepción interna queda con su evidencia PROPIA.
+      if (ev.signature_png_b64) { st.receiver_name = String(ev.receiver_name || '').trim() || null; this.db.evidence = this.db.evidence || {};
+        if (!this.db.evidence[st.id]) this.db.evidence[st.id] = { receiver_name: st.receiver_name || 'Sin receptor (tarea)', signature_png_b64: ev.signature_png_b64, created_by: me.id, at: new Date().toISOString(),
+          evidence_kind: type === 'UBICACION_INTERNA' ? 'RECEPCION_INTERNA' : 'TAREA', receiver_email: null, client_key: st.client_key || null }; }
+      if (type === 'UBICACION_INTERNA') this._audit(me, 'INTERNAL_TRANSFER_RECEIVED', st.id, null, { route_id: r.id, route_number: r.number, internal_location_key: st.internal_location_key, location_name: st.client_name,
+        address: st.address, order_numbers: st.order_numbers, outcome, receiver_name: st.receiver_name, transported_by: me.id, at: new Date().toISOString(), gps: loc });
+    } else if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome)) {
       st.receiver_name = String(ev.receiver_name).trim(); // el nombre sí; firma y CUIL/DNI solo en evidencia privada
       this.db.evidence = this.db.evidence || {};
-      if (!this.db.evidence[st.id]) this.db.evidence[st.id] = { receiver_name: st.receiver_name, signature_png_b64: ev.signature_png_b64, cuil, created_by: me.id, at: new Date().toISOString(), receiver_email: vEmail, receiver_dni: vDni, client_key: st.client_key || null };
+      if (!this.db.evidence[st.id]) this.db.evidence[st.id] = { evidence_kind: 'ENTREGA_CLIENTE', receiver_name: st.receiver_name, signature_png_b64: ev.signature_png_b64, cuil, created_by: me.id, at: new Date().toISOString(), receiver_email: vEmail, receiver_dni: vDni, client_key: st.client_key || null };
       this.db.identity = this.db.identity || {};
       if (cristian && ev.dni_storage_path) { const id0 = this.db.identity[cuil]; if (!id0 || !id0.storage_path) this.db.identity[cuil] = Object.assign(id0 || {}, { storage_path: ev.dni_storage_path, mime: this.db.storage[ev.dni_storage_path].mime, registered_by: me.id, registered_at: new Date().toISOString() }); }
       // Perfil reutilizable (misma capa de identidad): nombre, DNI, email y cliente
@@ -466,7 +533,10 @@ export class DemoApi {
     if (!String(stop.client_name || '').trim()) throw err('Indicá el destino.', 'NAME_REQUIRED', 400);
     const maxSeq = Math.max(...r.stops.map(s => s.seq)), maxN = Math.max(...r.stops.map(s => s.sequence_number));
     const st = { id: stop.id || 'st-' + (++this.db.seq) + '-d', seq: maxSeq + 1, sequence_number: maxN + 1, provenance: 'DRIVER', client_name: stop.client_name, address: stop.address || '', action: stop.action || 'ENTREGA',
-      bultos: stop.bultos ? Number(stop.bultos) : null, order_numbers: [], outcome: 'PENDIENTE', added_by: me.id, added_at: new Date().toISOString(), shipping_fee: 0, merchandise_amount: 0 };
+      bultos: stop.bultos ? Number(stop.bultos) : null, order_numbers: [], outcome: 'PENDIENTE', added_by: me.id, added_at: new Date().toISOString(), shipping_fee: 0, merchandise_amount: 0,
+      // como el servidor: TAREA operativa futura, sin pedidos ni ubicación G2 aunque el celular mande otra cosa
+      stop_type: 'TAREA', instructions: String(stop.instructions || '').trim() || null, contact_name: String(stop.contact_name || '').trim() || null, contact_phone: String(stop.contact_phone || '').trim() || null,
+      internal_location_key: null, expected_lat: null, expected_lon: null, expected_radius_m: null, customer_email: null, task: 'ENTREGA' };
     r.stops.push(st); r.version++; r.events = r.events || [];
     r.events.push({ type: 'INTERNAL_STOP_ADDED', stop_id: st.id, version: r.version, user_id: me.id, at: new Date().toISOString(), client_op_id: opId, offline: !!offline, after: stop });
     this._onTheWay(r); this._audit(me, 'INTERNAL_STOP_ADDED', r.id, null, stop); this._save(); return r;
