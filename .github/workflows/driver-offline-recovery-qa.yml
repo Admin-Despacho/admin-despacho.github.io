@@ -1,0 +1,23 @@
+name: Driver Offline Recovery QA (no deploy)
+on:
+  push:
+    branches: [fix/driver-offline-queue-recovery]
+    paths:
+      - 'src/online/driver-ui.js'
+      - 'tests/e2e/test_driver_offline_queue.mjs'
+      - '.github/workflows/driver-offline-recovery-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node tests/e2e/test_driver_offline_queue.mjs
