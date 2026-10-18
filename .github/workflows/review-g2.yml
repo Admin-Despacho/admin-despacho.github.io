@@ -1,0 +1,43 @@
+name: G2 Review QA (no deploy)
+
+on:
+  push:
+    branches:
+      - "fix/g2-chatgpt-final-review"
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Offline driver regression
+        run: npx vitest run tests/unit/driver-offline.test.js
+
+      - name: Production source verifier
+        run: node scripts/verify_production_carrier_flow.mjs
+
+      - name: Build
+        env:
+          VITE_SUPABASE_URL: https://uqwilzzeyfuatlmwzxna.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_cwLs4qzUgtMuEDEEhsQSfg_n-Q9McXG
+        run: npm run build
+
+      - name: SQL G2 / TAREA / push regression
+        env:
+          SQL_TESTS: g2_revision_test
+        run: bash tests/sql/run.sh
