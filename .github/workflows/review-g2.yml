@@ -42,3 +42,11 @@ jobs:
           SQL_TESTS: g2_revision_test
           SKIP_CONCURRENCY: "1"
         run: bash tests/sql/run.sh
+
+      - name: Diagnose legacy R-08 reservation race
+        continue-on-error: true
+        env:
+          SQL_TESTS: g2_revision_test
+        run: |
+          sed -i 's#>/dev/null 2>&1 ##g' tests/sql/concurrency.sh
+          bash tests/sql/run.sh
