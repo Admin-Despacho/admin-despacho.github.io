@@ -31,7 +31,7 @@ jobs:
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           const a=fs.readFileSync('src/online/admin-ui.js','utf8');
-          const b=fs.readFileSync('supabase/migrations/20261018192000_carrier_auto_sequence.sql','utf8');
+          const b=fs.readFileSync('supabase/migrations/20261018190731_20261018192000_carrier_auto_sequence.sql','utf8');
           assert(a.includes('id="ncCode" readonly'));
           assert(a.includes('const code = null'));
           assert(b.includes('pg_advisory_xact_lock'));
