@@ -5,7 +5,7 @@ on:
     branches:
       - fix/g2-chatgpt-final-review
     paths:
-      - 'supabase/migrations/20261018180000_g2_revoke_anon_admin_rpc.sql'
+      - 'supabase/migrations/20261018174637_20261018180000_g2_revoke_anon_admin_rpc.sql'
       - 'tests/sql/g2_revision_test.sql'
       - 'tests/sql/migration_order.txt'
       - '.github/workflows/g2-security-qa.yml'
