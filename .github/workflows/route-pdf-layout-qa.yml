@@ -1,0 +1,33 @@
+name: Route PDF Layout QA (no deploy)
+on:
+  push:
+    branches: [fix/pdf-route-long-details]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pdf-layout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Confirm AutoTable measures actual PDF text
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const code=fs.readFileSync('public/legacy/despacho-v15.js','utf8');
+          const pdf=code.slice(code.indexOf('/* ---------------- PdfExporter'));
+          assert(pdf.includes("overflow: 'linebreak'"));
+          assert(pdf.includes("rowPageBreak: 'avoid'"));
+          assert(!pdf.includes("cell._rich ="));
+          assert(!pdf.includes("data.cell.text = []"));
+          assert(pdf.includes("rich ? lay.map(x => x.t).join('\\n')"));
+          console.log('PASS: multiline cell content remains visible for AutoTable height calculation');
+          JS
