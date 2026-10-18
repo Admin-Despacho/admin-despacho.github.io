@@ -27,7 +27,23 @@ begin
    select coalesce(max(v),0)+1 into n from (
      select sequence_code::integer as v from public.carriers where sequence_code ~ '^[0-9]{2}$'
      union all
-     select code::integer from public.route_sequences where code ~ '^[0-9]{2}$'
+     select rs.code::integer from public.route_sequences rs where rs.code ~ '^[0-9]{2}
+   ) all_codes;
+   if n > 99 then raise exception 'NO_SEQUENCE_CODE: límite de 99 códigos alcanzado' using errcode='23514'; end if;
+   code := lpad(n::text,2,'0');
+ end if;
+ insert into public.carriers(id,name,kind,active,sequence_code,report_group,emails,notes)
+ values(cid,upper(p->>'name'),coalesce(p->>'kind','EXTERNO'),coalesce((p->>'active')::boolean,true),code,
+        nullif(p->>'report_group',''),
+        coalesce((select array_agg(x) from jsonb_array_elements_text(coalesce(p->'emails','[]'::jsonb)) x),'{}'),p->>'notes')
+ on conflict(id) do update set name=excluded.name,kind=excluded.kind,active=excluded.active,
+   report_group=excluded.report_group,emails=excluded.emails,notes=excluded.notes
+ returning * into c;
+ insert into public.audit_log(actor_id,action,target_type,target_id,after)
+ values(auth.uid(),'CARRIER_SAVED','carrier',c.id,to_jsonb(c));
+ return c;
+end; $$;
+
    ) all_codes;
    if n > 99 then raise exception 'NO_SEQUENCE_CODE: límite de 99 códigos alcanzado' using errcode='23514'; end if;
    code := lpad(n::text,2,'0');
