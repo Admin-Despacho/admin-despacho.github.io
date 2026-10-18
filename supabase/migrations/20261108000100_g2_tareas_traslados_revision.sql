@@ -444,3 +444,27 @@ begin
   return r;
 end; $$;
 
+-- =====================================================================
+-- 6 · Web Push: toma ATÓMICA de trabajos (sin envíos duplicados aunque haya varias ejecuciones a la vez) y reintentos con espera
+-- =====================================================================
+alter table public.push_jobs add column if not exists locked_at timestamptz;
+alter table public.push_jobs add column if not exists next_attempt_at timestamptz;
+alter table public.push_jobs drop constraint if exists push_jobs_status_check;
+alter table public.push_jobs add constraint push_jobs_status_check check (status in ('QUEUED','SENDING','SENT','ERROR','SKIPPED'));
+-- Solo service_role (Edge Function). Cada trabajo lo toma UNA sola ejecución (FOR UPDATE SKIP LOCKED).
+-- Reintenta ERROR hasta 5 intentos respetando next_attempt_at; recupera SENDING trabado más de 10 minutos (ejecución caída).
+create or replace function public.claim_push_jobs(p_limit int default 50) returns setof public.push_jobs
+language plpgsql security definer set search_path = public as $$
+begin
+  return query
+  update public.push_jobs j set status = 'SENDING', locked_at = now(), attempt_count = j.attempt_count + 1
+   where j.id in (select id from public.push_jobs
+                   where status = 'QUEUED'
+                      or (status = 'ERROR' and attempt_count < 5 and coalesce(next_attempt_at, now()) <= now())
+                      or (status = 'SENDING' and locked_at < now() - interval '10 minutes')
+                   order by created_at for update skip locked limit greatest(1, least(coalesce(p_limit, 50), 200)))
+  returning j.*;
+end $$;
+revoke execute on function public.claim_push_jobs(int) from public, anon, authenticated;
+grant execute on function public.claim_push_jobs(int) to service_role;
+

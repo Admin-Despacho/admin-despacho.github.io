@@ -170,3 +170,30 @@ select tst.res('KPI-01 TAREA no realizada NO suma a las incidencias de entrega d
   (select k from t_k1)::text || ' → ' || (public.dashboard_admin()->'kpis'->>'incidencias'));
 commit;
 
+-- ===== Web Push: un trabajo por notificación, toma atómica y reintentos =====
+select tst.res('PUSH-01 Publicar la hoja generó UN trabajo push para el chofer (NUEVA_HOJA_PUBLICADA)', (select count(*) from public.push_jobs j join public.notifications n on n.id = j.notification_id
+  where n.user_id = :'G' and n.type = 'NUEVA_HOJA_PUBLICADA' and n.route_id = (select id from t_r)) = 1, '');
+begin; select tst.u(:'A'); set local role authenticated;
+select tst.expect('PUSH-02 Un usuario (ni Admin) NO puede tomar trabajos push', $q$ select * from public.claim_push_jobs(10) $q$, '%permission denied%');
+commit;
+update public.push_jobs set status = 'SKIPPED';   -- dejar solo los de esta prueba
+insert into public.notifications(user_id, route_id, route_version, type, title, body) values (:'G', (select id from t_r), 7, 'HOJA_CORREGIDA', 'HOJA CORREGIDA', 'prueba push');
+begin; set local role service_role;
+create temp table t_c1 as select * from public.claim_push_jobs(10);
+create temp table t_c2 as select * from public.claim_push_jobs(10);
+commit;
+select tst.res('PUSH-03 Toma atómica: la 1ª ejecución toma el trabajo, la 2ª no lo vuelve a tomar (sin envío duplicado)', (select count(*) from t_c1) = 1 and (select count(*) from t_c2) = 0
+  and (select status from public.push_jobs where id = (select id from t_c1)) = 'SENDING' and (select attempt_count from t_c1) = 1, '');
+update public.push_jobs set status = 'ERROR', next_attempt_at = now() - interval '1 minute' where id = (select id from t_c1);
+begin; set local role service_role; create temp table t_c3 as select * from public.claim_push_jobs(10); commit;
+update public.push_jobs set status = 'ERROR', next_attempt_at = now() + interval '1 hour' where id = (select id from t_c1);
+begin; set local role service_role; create temp table t_c4 as select * from public.claim_push_jobs(10); commit;
+update public.push_jobs set status = 'ERROR', attempt_count = 5, next_attempt_at = now() - interval '1 minute' where id = (select id from t_c1);
+begin; set local role service_role; create temp table t_c5 as select * from public.claim_push_jobs(10); commit;
+select tst.res('PUSH-04 Reintento: un ERROR vencido se reintenta; con espera pendiente no; con 5 intentos se abandona', (select count(*) from t_c3) = 1 and (select attempt_count from t_c3) = 2
+  and (select count(*) from t_c4) = 0 and (select count(*) from t_c5) = 0, '');
+update public.push_jobs set status = 'SENDING', attempt_count = 1, locked_at = now() - interval '11 minutes' where id = (select id from t_c1);
+begin; set local role service_role; create temp table t_c6 as select * from public.claim_push_jobs(10); commit;
+select tst.res('PUSH-05 Un envío trabado (ejecución caída > 10 min) se recupera', (select count(*) from t_c6) = 1, '');
+update public.push_jobs set status = 'SKIPPED';
+

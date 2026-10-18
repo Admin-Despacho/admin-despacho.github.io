@@ -23,6 +23,7 @@ $PSQL -d okd -f "$HERE/post_migration_grants.sql" >/dev/null
 TESTS="${SQL_TESTS:-fase1_test fase1_1_test fase2a_test fase2a1_test fase2b1_test fase2b11_test fase2b2_test fase2b3_test rc1_test rc11_test rc12_test}"
 for t in $TESTS; do $PSQL -d okd -f "$HERE/$t.sql" >/dev/null; done
 [ -n "${SKIP_CONCURRENCY:-}" ] || bash "$HERE/concurrency.sh" "$PSQL"
+case " $TESTS " in *" g2_revision_test "*) bash "$HERE/push_concurrency.sh" "$PSQL";; esac
 OUT="$($PSQL -d okd -f "$HERE/zz_summary.sql")"
 echo "$OUT" | grep -E "^(PASS|FAIL|TOTAL)"
 echo "$OUT" | grep -q "^FAIL" && exit 1 || exit 0

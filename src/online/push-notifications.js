@@ -62,3 +62,15 @@ export async function initPushNotifications(api, me) {
   }
   return { supported:true, enabled:false, denied:true };
 }
+
+// Al CERRAR SESIÓN: el dispositivo deja de recibir avisos de ese usuario (servidor + navegador). Si no hay conexión, igual se
+// da de baja en el navegador; el servidor la marcará vencida en el próximo envío (410). Nunca bloquea el cierre de sesión.
+export async function revokePushOnLogout(api) {
+  try {
+    if (!capable()) return;
+    const reg = await navigator.serviceWorker.getRegistration(); if (!reg) return;
+    const sub = await reg.pushManager.getSubscription(); if (!sub) return;
+    await Promise.race([api.revokePushSubscription ? api.revokePushSubscription(sub.endpoint).catch(() => null) : null, new Promise(r => setTimeout(r, 2500))]);
+    await sub.unsubscribe().catch(() => null);
+  } catch (_) { /* nunca impide cerrar sesión */ }
+}
