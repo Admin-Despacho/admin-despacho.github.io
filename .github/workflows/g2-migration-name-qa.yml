@@ -1,0 +1,21 @@
+name: G2 Migration Name QA (no deploy)
+
+on:
+  push:
+    branches:
+      - fix/g2-chatgpt-final-review
+
+permissions:
+  contents: read
+
+jobs:
+  sql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run G2 SQL suite after migration rename
+        env:
+          SQL_TESTS: g2_revision_test
+          SKIP_CONCURRENCY: "1"
+        run: bash tests/sql/run.sh
