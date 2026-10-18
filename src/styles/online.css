@@ -701,3 +701,21 @@ body:has(.drv-stop .drv-form:not([hidden])) .drv-foot{position:static}
 .drv-locopt b{display:block}.drv-locopt small{display:block;color:var(--muted)}
 .drv-locpick{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;padding:8px 10px;margin:6px 0;border-radius:10px;background:var(--mist,#eef3f5);overflow-wrap:anywhere}
 .drv-locpick span{font-size:11.5px;color:var(--muted);letter-spacing:.04em}.drv-locpick small{grid-column:1/-1;color:var(--muted)}
+
+
+/* Transportista interno: colores semánticos para los resultados */
+#drv .drv-result-btn.result-done{background:#d9f5e5;color:#126337;border:1px solid #75c69a}
+#drv .drv-result-btn.result-partial{background:#fff0ae;color:#694800;border:1px solid #ebc456}
+#drv .drv-result-btn.result-failed{background:#fde0df;color:#9d2228;border:1px solid #ec9296}
+#drv .drv-result-btn.result-reschedule{background:#ffe4ce;color:#894000;border:1px solid #f4aa6d}
+#drv .drv-result-btn.selected{outline:3px solid currentColor;outline-offset:-3px;font-weight:900}
+#drv .sigbox canvas{width:100%;max-width:100%;height:160px}
+#drv .sig-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px}
+.drv-sign-modal{position:fixed;inset:0;z-index:99999;background:rgba(0,14,24,.88);display:flex;align-items:center;justify-content:center;padding:14px}
+.drv-sign-panel{width:min(96vw,800px);max-height:96dvh;overflow:auto;background:white;color:#001622;border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:10px}
+.drv-sign-panel p{margin:0}
+.drv-sign-stage{border:2px dashed #7d99a5;border-radius:12px;background:#fff;min-height:260px;display:flex;align-items:stretch}
+.drv-sign-stage canvas{width:100%;height:min(46dvh,350px);max-width:none;touch-action:none;cursor:crosshair}
+.drv-sign-controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.drv-sign-controls button{min-height:50px}
+@media(max-width:420px){.drv-sign-panel{padding:12px}.drv-sign-stage{min-height:235px}}

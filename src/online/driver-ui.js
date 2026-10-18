@@ -207,7 +207,7 @@ export class DriverApp {
         stopInfo(s) +
         (s.outcome_note || s.outcome_reason ? '<small class="drv-note">' + esc(s.outcome_note || s.outcome_reason) + '</small>' : '') +
         (s.location_warning ? '<small class="drv-note"><b>⚠ ' + esc(s.location_warning) + '</b></small>' : '') +
-        (running ? '<div class="drv-acts">' + Object.keys(OUT).map(k => '<button type="button" class="btn ' + (s.outcome === k ? 'dark' : 'soft') + '" data-o="' + k + '">' + outLabel(s, k) + '</button>').join('') + '</div>' +
+        (running ? '<div class="drv-acts">' + Object.keys(OUT).map(k => '<button type="button" class="btn drv-result-btn ' + (k === 'ENTREGADO' ? 'result-done' : k === 'ENTREGA_PARCIAL' ? 'result-partial' : k === 'NO_ENTREGADO' ? 'result-failed' : k === 'REPROGRAMAR' ? 'result-reschedule' : '') + (s.outcome === k ? ' selected' : '') + '" data-o="' + k + '">' + outLabel(s, k) + '</button>').join('') + '</div>' +
           '<div class="drv-form" hidden></div>' : '') +
         (running && s.outcome === 'PENDIENTE' && cur && s.id === cur.id ? (s.arrived_at ? '<small class="drv-note">Llegada registrada ' + hhmm(s.arrived_at) + (s.arrive_location && s.arrive_location.missing_reason ? ' · sin ubicación' : '') + '</small>' : '<button class="btn soft drv-arrive" type="button" data-arrive>LLEGUÉ A LA PARADA</button>') : '') + '</div>').join('') +
       (internal ? '<button class="btn soft" type="button" id="drvAddOpen">+ AGREGAR PARADA</button><div class="drv-add" id="drvAdd" hidden><b class="drv-ft">NUEVA PARADA</b>' +
@@ -338,7 +338,7 @@ export class DriverApp {
     form.innerHTML = '<b class="drv-ft">' + outLabel(st, o) + '</b>' +
       (transfer && delivered ? '<div class="drv-rec"><b>RECEPCIÓN INTERNA DE TRASLADO</b><small>' + esc(st.client_name) + ((st.order_numbers || []).length ? ' · pedidos ' + esc(st.order_numbers.join(', ')) : '') + '</small></div>' : '') +
       (task && o === 'ENTREGADO' ? '<input class="ed" data-f="txt" placeholder="Observación (opcional)">' : '') +
-      (sign ? '<input class="ed" data-f="recv" placeholder="' + (transfer ? 'Nombre de quien recibe en la sucursal (obligatorio)' : 'Nombre de quien recibe (obligatorio)') + '"><div class="sigbox"><canvas width="300" height="120" data-sig></canvas><button type="button" class="linkbtn" data-sigclr>Borrar firma</button></div>' : '') +
+      (sign ? '<input class="ed" data-f="recv" placeholder="' + (transfer ? 'Nombre de quien recibe en la sucursal (obligatorio)' : 'Nombre de quien recibe (obligatorio)') + '"><div class="sigbox"><canvas width="600" height="240" data-sig></canvas><div class="sig-actions"><button type="button" class="btn soft" data-sigexpand>FIRMAR EN PANTALLA GRANDE</button><button type="button" class="linkbtn" data-sigclr>Borrar firma</button></div></div>' : '') +
       // pedido comercial: CUIL/DNI (Cristian) y email del cliente (Recibido Conforme). Nunca en traslado interno ni en TAREA.
       (sign && commercial ? (cristian ? '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') +
         '<input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Email del cliente (opcional · Recibido Conforme)"><span class="drv-mailhint" data-mailhint></span>' : '') +
@@ -355,7 +355,29 @@ export class DriverApp {
       cv.onpointerdown = e => { down = true; cv.setPointerCapture(e.pointerId); ctx.beginPath(); ctx.moveTo(...pos(e)); };
       cv.onpointermove = e => { if (!down) return; ctx.lineTo(...pos(e)); ctx.stroke(); drawn = true; };
       cv.onpointerup = () => { down = false; };
-      form.querySelector('[data-sigclr]').onclick = () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; }; }
+      const origin = cv.parentElement;
+      const expand = form.querySelector('[data-sigexpand]');
+      let modal = null;
+      const closeModal = () => {
+        if (!modal) return;
+        origin.insertBefore(cv, origin.firstChild);
+        modal.remove(); modal = null;
+        expand.focus();
+      };
+      expand.onclick = () => {
+        if (modal) return;
+        modal = document.createElement('div'); modal.className = 'drv-sign-modal';
+        modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); modal.setAttribute('aria-label', 'Firmar recepción');
+        modal.innerHTML = '<div class="drv-sign-panel"><b>FIRMA DE QUIEN RECIBE</b><p>Firmá con el dedo en el espacio de abajo.</p><div class="drv-sign-stage"></div><div class="drv-sign-controls"><button type="button" class="btn soft" data-modal-clear>BORRAR FIRMA</button><button type="button" class="btn dark" data-modal-done>LISTO</button></div></div>';
+        document.body.appendChild(modal);
+        modal.querySelector('.drv-sign-stage').appendChild(cv);
+        modal.querySelector('[data-modal-clear]').onclick = () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; };
+        modal.querySelector('[data-modal-done]').onclick = closeModal;
+        modal.onkeydown = ev => { if (ev.key === 'Escape') { ev.preventDefault(); closeModal(); } };
+        modal.querySelector('[data-modal-done]').focus();
+      };
+      form.querySelector('[data-sigclr]').onclick = () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; };
+    }
     // Autocompletar con el perfil reutilizable (CUIL → DNI → cliente). Sin conexión, simplemente no se completa.
     const em = form.querySelector('[data-f="email"]'), hint = form.querySelector('[data-mailhint]'), rv = form.querySelector('[data-f="recv"]');
     const fill = async cuil => {
