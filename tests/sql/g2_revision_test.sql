@@ -111,6 +111,8 @@ select tst.res('GPS-01 Llegada validada contra el SNAPSHOT (punto original, radi
 
 -- ===== Cierre por tipo: traslado y TAREA no son entrega comercial =====
 begin; select tst.u(:'G'); set local role authenticated;
+select tst.expect('REC-01 Recepción interna con pedidos SIN firma/receptor → rechazada', format($q$ select public.set_stop_outcome(%L, 'ENTREGADO', null, null, 'g2-out-0', '{"location":{"lat":-32.8901,"lon":-68.8401}}') $q$,
+  (select id from t_s where stop_type = 'UBICACION_INTERNA')), 'EVIDENCE_REQUIRED%');
 select public.set_stop_outcome((select id from t_s where stop_type = 'UBICACION_INTERNA'), 'ENTREGADO', null, null, 'g2-out-1',
   '{"evidence":{"receiver_name":"Encargado sucursal","signature_png_b64":"iVBORw0KGgo=","email":"cliente@x.com"},"location":{"lat":-32.8901,"lon":-68.8401}}');
 select public.set_stop_outcome((select id from t_s where stop_type = 'TAREA'), 'ENTREGADO', 'Bolsas retiradas', null, 'g2-out-2', '{"location":{"lat":-32.88,"lon":-68.83}}');
@@ -120,6 +122,14 @@ select tst.res('LOC-07 Traslado interno cerrado: sin email al cliente, sin Recib
   and not exists (select 1 from public.delivery_receipts where stop_id = (select id from t_s where stop_type = 'UBICACION_INTERNA'))
   and (select collection_status from public.route_stops where id = (select id from t_s where stop_type = 'UBICACION_INTERNA')) is distinct from 'COBRADO'
   and (select receiver_email from public.stop_evidence where stop_id = (select id from t_s where stop_type = 'UBICACION_INTERNA')) is null, '');
+select tst.res('REC-02 Evidencia de RECEPCIÓN INTERNA (no entrega cliente): receptor + firma guardados con su tipo propio',
+  evidence_kind = 'RECEPCION_INTERNA' and receiver_name = 'Encargado sucursal' and signature_sha256 is not null and created_by = :'G' and receiver_email is null, evidence_kind)
+  from public.stop_evidence where stop_id = (select id from t_s where stop_type = 'UBICACION_INTERNA');
+select tst.res('REC-03 Auditoría "INTERNAL_TRANSFER_RECEIVED": sucursal, pedidos, quién recibió, quién trasladó, hoja, GPS real y esperado',
+  after->>'internal_location_key' = 'MONTECASEROS' and after->'order_numbers' = '["71001","71002","71003","71004"]'::jsonb and after->>'receiver_name' = 'Encargado sucursal'
+  and after->>'transported_by' = :'G' and after->>'route_number' is not null and (after->'gps'->>'expected_lat')::float8 = -32.89 and (after->'gps') ? 'lat', after::text)
+  from public.audit_log where action = 'INTERNAL_TRANSFER_RECEIVED' and target_id = (select id::text from t_s where stop_type = 'UBICACION_INTERNA');
+select tst.res('REC-04 La TAREA sin firma no genera evidencia de entrega', not exists (select 1 from public.stop_evidence where stop_id = (select id from t_s where stop_type = 'TAREA')), '');
 select tst.res('LOC-08 Trazabilidad: los pedidos quedan asociados a la parada de traslado de esa hoja', (select order_numbers from public.route_stops where id = (select id from t_s where stop_type = 'UBICACION_INTERNA')) = array['71001','71002','71003','71004']
   and (select count(*) from public.order_reservations where route_id = (select id from t_r) and order_id in ('71001','71002','71003','71004')) = 4, '');
 select tst.res('TAR-02 TAREA REALIZADA sin firma ni receptor (GPS + observación); sin email, sin comprobante', outcome = 'ENTREGADO' and outcome_note = 'Bolsas retiradas' and finish_location ? 'lat'

@@ -4,6 +4,38 @@
 -- Reglas de negocio: UBICACION_INTERNA = traslado interno (no es entrega comercial); TAREA = parada operativa; solo PEDIDO es comercial.
 
 -- =====================================================================
+-- 0 · Defensivo frente al drift: producción registra 20261015153841_internal_route_task_metadata (no está en el repo)
+--     y el repo tiene 20261015153500_internal_route_tasks. Esto deja columnas y trigger iguales en ambos casos (idempotente).
+-- =====================================================================
+alter table public.route_stops add column if not exists stop_type text not null default 'PEDIDO';
+alter table public.route_stops add column if not exists instructions text;
+alter table public.route_stops add column if not exists contact_name text;
+alter table public.route_stops add column if not exists contact_phone text;
+alter table public.route_stops add column if not exists internal_location_key text references public.internal_locations(location_key);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conrelid='public.route_stops'::regclass and conname='route_stops_stop_type_check') then
+    alter table public.route_stops add constraint route_stops_stop_type_check check (stop_type in ('PEDIDO','UBICACION_INTERNA','TAREA'));
+  end if;
+end $$;
+create or replace function public._fill_stop_metadata_from_snapshot() returns trigger
+language plpgsql security definer set search_path=public as $$
+declare s jsonb;
+begin
+  select sheet_snapshot->'stops'->(new.seq-1) into s from public.routes where id=new.route_id;
+  if s is not null and new.provenance is distinct from 'DRIVER' then
+    new.stop_type:=coalesce(nullif(s->>'stop_type',''),new.stop_type,'PEDIDO');
+    new.instructions:=nullif(s->>'instructions','');
+    new.contact_name:=nullif(s->>'contact_name','');
+    new.contact_phone:=nullif(s->>'contact_phone','');
+    if coalesce(s->>'internal_location_key','')<>'' then new.internal_location_key:=s->>'internal_location_key'; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_fill_stop_metadata_from_snapshot on public.route_stops;
+create trigger trg_fill_stop_metadata_from_snapshot before insert on public.route_stops for each row execute function public._fill_stop_metadata_from_snapshot();
+revoke execute on function public._fill_stop_metadata_from_snapshot() from public,anon,authenticated;
+
+-- =====================================================================
 -- 1 · G2: lectura para quien prepara hojas; escritura sigue restringida a la RPC (settings.manage / locations.manage)
 -- =====================================================================
 drop policy if exists internal_locations_admin_read on public.internal_locations;
@@ -72,6 +104,13 @@ end $$;
 revoke execute on function public._stop_type_rules() from public, anon, authenticated;
 drop trigger if exists trg_zz_stop_type_rules on public.route_stops;
 create trigger trg_zz_stop_type_rules before insert on public.route_stops for each row execute function public._stop_type_rules();
+-- Recepción interna de traslado: misma infraestructura de firma, significado PROPIO (no es Recibido Conforme comercial)
+alter table public.stop_evidence add column if not exists evidence_kind text not null default 'ENTREGA_CLIENTE';
+do $$ begin
+  if not exists (select 1 from pg_constraint where conrelid='public.stop_evidence'::regclass and conname='stop_evidence_kind_check') then
+    alter table public.stop_evidence add constraint stop_evidence_kind_check check (evidence_kind in ('ENTREGA_CLIENTE','RECEPCION_INTERNA','TAREA'));
+  end if;
+end $$;
 -- Anti-duplicado: una sola parada por ubicación interna en cada hoja (una "segunda visita" requeriría un mecanismo explícito que no existe)
 create unique index if not exists route_stops_one_internal_location_per_route on public.route_stops(route_id, internal_location_key) where stop_type = 'UBICACION_INTERNA';
 -- Snapshot para hojas YA publicadas/en curso (mejor dato disponible: el punto actual), solo con clave explícita
@@ -280,9 +319,18 @@ begin
   if p_outcome in ('ENTREGADO','ENTREGA_PARCIAL') then
     -- La entrega guarda el email USADO (inmutable aunque el perfil cambie después)
     if sig is not null then
-      insert into public.stop_evidence(stop_id, receiver_name, signature_png, signature_sha256, receiver_cuil, created_by, receiver_email, receiver_dni)
-      values (p_stop, nullif(trim(ev->>'receiver_name'), ''), sig, encode(sha256(sig), 'hex'), v_cuil, auth.uid(), case when v_commercial then v_email end, v_dni)
+      insert into public.stop_evidence(stop_id, receiver_name, signature_png, signature_sha256, receiver_cuil, created_by, receiver_email, receiver_dni, evidence_kind)
+      values (p_stop, coalesce(nullif(trim(ev->>'receiver_name'), ''), 'Sin receptor (tarea)'), sig, encode(sha256(sig), 'hex'), v_cuil, auth.uid(), case when v_commercial then v_email end, v_dni,
+              case when st.stop_type = 'UBICACION_INTERNA' then 'RECEPCION_INTERNA' when v_task then 'TAREA' else 'ENTREGA_CLIENTE' end)
       on conflict (stop_id) do nothing;
+    end if;
+    -- RECEPCIÓN INTERNA DE TRASLADO: queda trazado qué pedidos llegaron a qué sucursal, quién recibió, quién trasladó, cuándo y dónde
+    if st.stop_type = 'UBICACION_INTERNA' then
+      insert into public.audit_log(actor_id, action, target_type, target_id, after)
+      values (auth.uid(), 'INTERNAL_TRANSFER_RECEIVED', 'route_stop', p_stop::text, jsonb_build_object(
+        'route_id', st.route_id, 'route_number', r.number, 'internal_location_key', st.internal_location_key, 'location_name', st.client_name, 'address', st.address,
+        'order_numbers', to_jsonb(st.order_numbers), 'outcome', p_outcome, 'receiver_name', trim(ev->>'receiver_name'), 'signature_sha256', encode(sha256(sig), 'hex'),
+        'transported_by', auth.uid(), 'at', now(), 'gps', loc));
     end if;
     -- Perfil reutilizable (misma capa de identidad que el DNI): nombre, DNI y email para próximas entregas
     if v_commercial and v_cuil is not null then perform public._upsert_identity_profile(v_cuil, trim(ev->>'receiver_name'), v_dni, v_email, st.client_key); end if;
