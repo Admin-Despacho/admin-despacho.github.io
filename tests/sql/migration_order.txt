@@ -38,6 +38,6 @@
 20261015132000_password_recovery_rate_limits.sql
 20261015145947_internal_transport_locations.sql
 20261015153500_internal_route_tasks.sql
-20261108000100_g2_tareas_traslados_revision.sql
-20261108000200_g2_driver_location_stops.sql
+20261018165305_g2_tareas_traslados_revision.sql
+20261018165341_g2_driver_location_stops.sql
 

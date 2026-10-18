@@ -1,4 +1,4 @@
--- OK DESPACHO ONLINE — Parche G2 (incremental sobre 20261108000100, forward-only, sin borrar datos):
+-- OK DESPACHO ONLINE — Parche G2 (incremental sobre 20261018165305, forward-only, sin borrar datos):
 -- 1) el Transportista Interno puede agregar durante el recorrido una UBICACIÓN INTERNA G2 existente (incluida una SEGUNDA visita);
 -- 2) la unicidad de ubicación interna por hoja aplica SOLO a las paradas administrativas (constructor), no a las agregadas por el chofer;
 -- 3) los avisos de hojas internas cuentan PARADAS, no entregas.

@@ -6,7 +6,7 @@
 ## A. Archivos modificados
 | Archivo | Cambio |
 |---|---|
-| `supabase/migrations/20261108000200_g2_driver_location_stops.sql` | **NUEVA** (no se modificó la `…000100`) |
+| `supabase/migrations/20261018165341_g2_driver_location_stops.sql` | **NUEVA** (no se modificó la `…000100`) |
 | `src/online/driver-ui.js` | "+ AGREGAR PARADA" con TIPO DE PARADA (TAREA / UBICACIÓN INTERNA), búsqueda G2 de solo lectura y contadores "paradas" en hojas internas |
 | `src/online/supabase-api.js` | `driverInternalLocations()` |
 | `src/online/demo-api.js` | mismas reglas en la demo: G2 elegida por el chofer, snapshot al agregar, "paradas" en avisos internos |
@@ -18,8 +18,8 @@
 ## B. Commit
 Ver `git log 1aeaccb..HEAD`. El parche va en `patches_incremental/`.
 
-## C. Migración nueva: `20261108000200_g2_driver_location_stops.sql`
-Forward-only, sin borrar datos, **NO aplicada**. Va después de `20261108000100`.
+## C. Migración nueva: `20261018165341_g2_driver_location_stops.sql`
+Forward-only, sin borrar datos, **NO aplicada**. Va después de `20261018165305`.
 
 1. Reemplaza el índice único (ver G).
 2. `driver_internal_locations()`: el chofer ve las G2 activas (clave, nombre, domicilio, radio), **sin coordenadas**. No puede leer ni modificar la tabla `internal_locations`.

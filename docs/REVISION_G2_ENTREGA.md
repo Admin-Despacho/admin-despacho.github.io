@@ -137,7 +137,7 @@ Las pruebas obligatorias 1 a 13 están cubiertas:
 - **Parada agregada por el chofer hacia una ubicación G2** (por ejemplo, "volver a Montecaseros"): hoy queda como TAREA sin GPS de G2. No se inventó una regla. **Necesita decisión.**
 
 ## F. MIGRACIONES
-- **Archivo:** `supabase/migrations/20261108000100_g2_tareas_traslados_revision.sql` (forward-only, sin borrar datos; **NO aplicada**).
+- **Archivo:** `supabase/migrations/20261018165305_g2_tareas_traslados_revision.sql` (forward-only, sin borrar datos; **NO aplicada**).
 - **Orden:** va después de todas, tanto por número como por fecha real. No se renombró ninguna migración.
 
 **Drift detectado contra el historial real de producción:**
@@ -168,7 +168,7 @@ Por eso la migración es **defensiva**: crea las columnas de TAREA solo si falta
 2. Ejecutar las dos verificaciones anteriores.
 3. Revisar el SQL.
 4. Aplicarlo con el editor SQL o con `supabase migration up` **solo** sobre esta migración. Sin `db push` y sin `--include-all`.
-5. Registrar la versión `20261108000100` en `supabase_migrations.schema_migrations` si se aplicó a mano.
+5. Registrar la versión `20261018165305` en `supabase_migrations.schema_migrations` si se aplicó a mano.
 6. Desplegar las Edge Functions `geocode-location` y `push-notifications`.
 7. Opcional: programar `push-notifications` con `x-cron-secret`.
 
@@ -187,7 +187,7 @@ En el repo, alinear el drift con `migration repair` (decisión de quien administ
 ## H. ARCHIVOS MODIFICADOS
 - **Constructor:** `public/legacy/despacho-v15.js`.
 - **App:** `src/main.js`, `src/online/admin-ui.js`, `src/online/demo-api.js`, `src/online/driver-ui.js`, `src/online/push-notifications.js`, `src/online/supabase-admin.js`, `src/styles/online.css`.
-- **Supabase:** `supabase/config.toml`, `supabase/functions/geocode-location/{index.ts, handler.js, handler.test.js}`, `supabase/functions/push-notifications/index.ts`, `supabase/migrations/20261108000100_g2_tareas_traslados_revision.sql`.
+- **Supabase:** `supabase/config.toml`, `supabase/functions/geocode-location/{index.ts, handler.js, handler.test.js}`, `supabase/functions/push-notifications/index.ts`, `supabase/migrations/20261018165305_g2_tareas_traslados_revision.sql`.
 - **Pruebas:** `tests/sql/{g2_revision_test.sql, migration_order.txt, prod_drift_stubs.sql, push_concurrency.sh, run.sh}`, `tests/e2e/{run_e2e_g2.py, run_push_sw.py, run_responsive_g2.py}`.
 - **Documentación:** `docs/REVISION_G2_ENTREGA.md`.
 
