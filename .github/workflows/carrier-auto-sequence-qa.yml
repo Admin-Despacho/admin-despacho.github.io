@@ -1,0 +1,41 @@
+name: Carrier Auto Sequence QA (no deploy)
+on:
+  push:
+    branches: [fix/carrier-auto-sequence]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: SQL G2 regression (isolated)
+        env:
+          SQL_TESTS: g2_revision_test
+        run: bash tests/sql/run.sh
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Assert automated creation and immutable field
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const a=fs.readFileSync('src/online/admin-ui.js','utf8');
+          const b=fs.readFileSync('supabase/migrations/20261018190731_20261018192000_carrier_auto_sequence.sql','utf8');
+          assert(a.includes('id="ncCode" readonly'));
+          assert(a.includes('const code = null'));
+          assert(b.includes('pg_advisory_xact_lock'));
+          assert(b.includes('IMMUTABLE_CODE'));
+          assert(b.includes('public.route_sequences'));
+          console.log('PASS UI + server-side atomic and immutable code checks');
+          JS
