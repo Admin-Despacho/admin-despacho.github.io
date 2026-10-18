@@ -290,7 +290,7 @@ export class DemoApi {
       source_pending: f ? f.source_pending : null, noc_adjustments: f ? f.noc_adjustments : null, operational_pending: f ? f.operational_pending : null, source_import: e.import_id || (f && f.last_import_id), resolver_version: e.resolver_version, plan_id: e.plan_id, created_at: now }); });
     Object.entries(this.db.reservations).filter(([o, x]) => x.sheet_key === p.sheet_key && ords.includes(o)).forEach(([, x]) => { x.status = 'PUBLICADA'; x.route_id = r.id; x.number = r.number; });   // solo las de las paradas
     this.db.notifs = this.db.notifs || [];
-    if (!this.db.notifs.some(x => x.user_id === resp.id && x.route_id === r.id)) this.db.notifs.push({ id: 'nt-' + this.db.seq, user_id: resp.id, route_id: r.id, type: 'NUEVA_HOJA_PUBLICADA', title: 'NUEVA HOJA PUBLICADA', body: 'Hoja ' + r.number + ' · ' + r.stops.length + (carrier.kind === 'INTERNO' ? ' paradas' : ' entregas'), created_at: now, read_at: null });
+    if (!this.db.notifs.some(x => x.user_id === resp.id && x.route_id === r.id)) this.db.notifs.push({ id: 'nt-' + this.db.seq, user_id: resp.id, route_id: r.id, type: 'NUEVA_HOJA_PUBLICADA', title: 'NUEVA HOJA PUBLICADA', body: 'Hoja ' + r.number + ' · ' + r.stops.length + (carrier.kind === 'INTERNO' ? (r.stops.length === 1 ? ' parada' : ' paradas') : (r.stops.length === 1 ? ' entrega' : ' entregas')), created_at: now, read_at: null });
     this._audit(me, 'ROUTE_PUBLISHED', r.id, null, { number: r.number, carrier: carrier.id, responsable: resp.id });
     this._save(); return r;
   }

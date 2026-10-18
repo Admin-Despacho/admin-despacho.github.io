@@ -120,8 +120,22 @@ export class DriverApp {
     if (op.kind === 'outcome') Object.assign(r.stops.find(s => s.id === op.args.stop) || {}, { outcome: op.args.outcome, outcome_note: op.args.note, outcome_reason: op.args.reason, outcome_at: t });
     if (op.kind === 'finalize') Object.assign(r, { operational_status: 'COMPLETADA', completed_at: t, km_end: op.args.km ?? r.km_end });
     if (op.kind === 'arrive') Object.assign(r.stops.find(s => s.id === op.args.stop) || {}, { arrived_at: t, arrive_location: op.args.location });
-    if (op.kind === 'addStop' && !r.stops.some(s => s.id === op.args.stop.id)) { const n = Math.max(...r.stops.map(s => s.sequence_number ?? s.seq)) + 1;
-      r.stops.push({ id: op.args.stop.id, seq: n, sequence_number: n, provenance: 'DRIVER', client_name: op.args.stop.client_name, address: op.args.stop.address, action: op.args.stop.action, bultos: op.args.stop.bultos, outcome: 'PENDIENTE', order_numbers: [] }); r.version = (r.version || 1) + 1; }
+    if (op.kind === 'addStop' && !r.stops.some(s => s.id === op.args.stop.id)) {
+      const s = op.args.stop || {};
+      const n = Math.max(0, ...r.stops.map(x => x.sequence_number ?? x.seq ?? 0)) + 1;
+      const stopType = s.stop_type === 'UBICACION_INTERNA' ? 'UBICACION_INTERNA' : 'TAREA';
+      r.stops.push({
+        id: s.id, seq: n, sequence_number: n, provenance: 'DRIVER',
+        stop_type: stopType, client_name: s.client_name, client_key: stopType === 'UBICACION_INTERNA' ? (s.internal_location_key || null) : null,
+        address: s.address, action: s.action || 'ENTREGA', bultos: s.bultos || null,
+        instructions: s.instructions || null, contact_name: s.contact_name || null, contact_phone: s.contact_phone || null,
+        internal_location_key: stopType === 'UBICACION_INTERNA' ? (s.internal_location_key || null) : null,
+        expected_lat: null, expected_lon: null, expected_radius_m: null, internal_location_updated_at: null,
+        outcome: 'PENDIENTE', order_numbers: [], merchandise_amount: 0, shipping_fee: 0,
+        customer_email: null, task: 'ENTREGA', expected_amount: null
+      });
+      r.version = (r.version || 1) + 1;
+    }
     if (op.kind === 'reorder') { const base = Math.min(...op.args.order.map(id => (r.stops.find(s => s.id === id) || {}).sequence_number || 0)); op.args.order.forEach((id, i) => { const s = r.stops.find(x => x.id === id); if (s) s.sequence_number = base + i; }); r.version = (r.version || 1) + 1; }
   }
   _applyQueue() { this.queue.forEach(op => this._applyLocal(op)); }

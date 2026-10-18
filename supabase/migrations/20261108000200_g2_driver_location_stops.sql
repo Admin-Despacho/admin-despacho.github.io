@@ -65,14 +65,23 @@ end; $$;
 -- =====================================================================
 -- 4 · Avisos de hojas internas: "N paradas" (mezcla de traslados, tareas y entregas). Externos sin cambios ("entregas").
 -- =====================================================================
-create or replace function public.trg_notification_internal_wording() returns trigger language plpgsql security definer set search_path = public as $$
+create or replace function public.trg_notification_internal_wording() returns trigger language plpgsql security definer set search_path = public as $
+declare v_count integer;
 begin
   if new.type in ('NUEVA_HOJA_PUBLICADA','HOJA_CORREGIDA') and new.route_id is not null and new.body is not null
      and exists (select 1 from public.routes r join public.carriers c on c.id = r.carrier_id where r.id = new.route_id and c.kind = 'INTERNO') then
-    new.body := regexp_replace(new.body, '(\d+) entregas', '\1 paradas', 'g');
+    select ((regexp_match(new.body, '([0-9]+) entregas?'))[1])::integer into v_count;
+    if v_count is not null then
+      new.body := regexp_replace(
+        new.body,
+        '[0-9]+ entregas?',
+        v_count::text || case when v_count = 1 then ' parada' else ' paradas' end,
+        'g'
+      );
+    end if;
   end if;
   return new;
-end $$;
+end $;
 revoke execute on function public.trg_notification_internal_wording() from public, anon, authenticated;
 drop trigger if exists trg_notification_internal_wording on public.notifications;
 create trigger trg_notification_internal_wording before insert on public.notifications for each row execute function public.trg_notification_internal_wording();

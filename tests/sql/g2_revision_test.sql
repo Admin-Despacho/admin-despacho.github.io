@@ -197,6 +197,18 @@ begin; set local role service_role; create temp table t_c6 as select * from publ
 select tst.res('PUSH-05 Un envío trabado (ejecución caída > 10 min) se recupera', (select count(*) from t_c6) = 1, '');
 update public.push_jobs set status = 'SKIPPED';
 
+-- ===== Wording singular/plural de avisos internos =====
+insert into public.notifications(user_id, route_id, route_version, type, title, body)
+values (:'G', (select id from t_r), 998, 'HOJA_CORREGIDA', 'HOJA CORREGIDA', 'Hoja singular · 1 entrega');
+select tst.res('WORD-SING-01 Aviso interno singular: 1 parada (nunca 1 paradas / 1 entrega)',
+  exists (
+    select 1 from public.notifications
+    where user_id = :'G' and route_id = (select id from t_r) and route_version = 998
+      and type = 'HOJA_CORREGIDA' and body = 'Hoja singular · 1 parada'
+  ),
+  coalesce((select body from public.notifications where user_id = :'G' and route_id = (select id from t_r) and route_version = 998 and type = 'HOJA_CORREGIDA'), 'SIN AVISO')
+);
+
 -- ===== PARCHE: el chofer agrega una UBICACIÓN INTERNA G2 (segunda visita a Montecaseros) =====
 select tst.res('WORD-01 Aviso de hoja interna cuenta PARADAS (no entregas)', (select bool_and(body ~ ' paradas$') and bool_and(body !~ 'entregas') and count(*) >= 1 from public.notifications where user_id = :'G' and type = 'NUEVA_HOJA_PUBLICADA' and route_id = (select id from t_r)),
   (select string_agg(body, ' | ') from public.notifications where user_id = :'G' and type = 'NUEVA_HOJA_PUBLICADA' and route_id = (select id from t_r)));
