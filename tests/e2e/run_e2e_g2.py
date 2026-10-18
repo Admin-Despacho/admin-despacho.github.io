@@ -22,7 +22,11 @@ async def login(pg, email):
     await pg.goto(URL); await pg.wait_for_timeout(700)
     if await pg.locator('#loginEmail').count() == 0 or not await pg.is_visible('#loginEmail'):
         await pg.evaluate('()=>window.OKD_LOGOUT && window.OKD_LOGOUT()'); await pg.wait_for_timeout(1500); await pg.goto(URL); await pg.wait_for_timeout(700)
-    await pg.fill('#loginEmail', email); await pg.fill('#loginPass', 'demo'); await pg.click('#loginBtn'); await pg.wait_for_timeout(2600)
+    for _ in range(3):   # el formulario puede volver a dibujarse al cargar: completar, verificar y reintentar
+        await pg.wait_for_selector('#loginEmail', state='visible', timeout=10000); await pg.wait_for_timeout(300)
+        await pg.fill('#loginEmail', email); await pg.fill('#loginPass', 'demo')
+        if await pg.input_value('#loginEmail') == email: break
+    await pg.click('#loginBtn'); await pg.wait_for_timeout(2600)
     await pin(pg)
 async def sign(pg, sel):
     b = await pg.locator(sel).bounding_box(); await pg.mouse.move(b['x'] + 20, b['y'] + 30); await pg.mouse.down(); await pg.mouse.move(b['x'] + 120, b['y'] + 70, steps=6); await pg.mouse.up()
