@@ -35,7 +35,7 @@ jobs:
         run: |
           python3 -m pip install --user playwright
           python3 -m playwright install --with-deps chromium
-          CHROME="$(find "$HOME/.cache/ms-playwright" -type f -path '*/chrome-linux/chrome' | head -1)"
+          CHROME="$(find "$HOME/.cache/ms-playwright" -type f \( -path '*/chrome-linux/chrome' -o -path '*/chrome-linux64/chrome' \) | head -1)"
           if [ -z "$CHROME" ]; then
             echo "Chromium executable not found" >&2
             exit 1
