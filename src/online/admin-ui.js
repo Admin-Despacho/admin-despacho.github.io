@@ -337,20 +337,19 @@ const CFG = {
   async transportistas(api, me, sec, again) {
     const cs = await api.listCarriers();
     const canManage = hasPerm(me, 'settings.manage') || hasPerm(me, 'carriers.manage');
-    sec.innerHTML = '<h2><span class="n">A</span>TRANSPORTISTAS</h2><p class="rp-note">Código de correlativo de 2 dígitos (Cristian Este y Alrededores comparten 01). La secuencia es continua y nunca se reutiliza.</p>' +
-      (canManage ? '<div class="cfgform" id="carrierNew"><h3>NUEVO TRANSPORTISTA</h3><label>ID / código interno <input id="ncId" placeholder="Ej. UCO"></label><label>Nombre <input id="ncName" placeholder="Nombre del transportista"></label><label>Tipo <select id="ncKind"><option>EXTERNO</option><option>INTERNO</option></select></label><label>Código correlativo <input id="ncCode" maxlength="2" inputmode="numeric" placeholder="00"></label><label>Email <input id="ncEmail" type="email" placeholder="opcional"></label><button class="btn dark" type="button" id="ncSave">CREAR TRANSPORTISTA</button></div>' : '') +
+    sec.innerHTML = '<h2><span class="n">A</span>TRANSPORTISTAS</h2><p class="rp-note">El código de 2 dígitos se asigna automáticamente al crear un transportista y permanece fijo. Cristian Este y Alrededores comparten 01.</p>' +
+      (canManage ? '<div class="cfgform" id="carrierNew"><h3>NUEVO TRANSPORTISTA</h3><label>ID / código interno <input id="ncId" placeholder="Ej. UCO"></label><label>Nombre <input id="ncName" placeholder="Nombre del transportista"></label><label>Tipo <select id="ncKind"><option>EXTERNO</option><option>INTERNO</option></select></label><label>Código correlativo <input id="ncCode" readonly placeholder="Se asigna al guardar"></label><label>Email <input id="ncEmail" type="email" placeholder="opcional"></label><button class="btn dark" type="button" id="ncSave">CREAR TRANSPORTISTA</button></div>' : '') +
       '<div class="utable-wrap"><table class="utable" id="carrTable"><thead><tr><th>ID</th><th>NOMBRE</th><th>TIPO</th><th>CÓDIGO</th><th>ACTIVO</th><th>EMAILS</th><th>RESPONSABLES</th><th></th></tr></thead><tbody>' +
       cs.map(c => '<tr data-cid="' + c.id + '"><td>' + esc(c.id) + '</td><td><input class="ed" data-f="name" value="' + esc(c.name) + '"></td><td><select data-f="kind"><option' + (c.kind === 'EXTERNO' ? ' selected' : '') + '>EXTERNO</option><option' + (c.kind === 'INTERNO' ? ' selected' : '') + '>INTERNO</option></select></td>' +
-        '<td><input class="ed" data-f="code" size="3" value="' + esc(c.sequence_code || '') + '"></td><td><input type="checkbox" data-f="active"' + (c.active !== false ? ' checked' : '') + '></td><td><input class="ed" data-f="emails" value="' + esc((c.emails || []).join(', ')) + '"></td>' +
+        '<td><input class="ed" data-f="code" size="3" readonly title="Código permanente" value="' + esc(c.sequence_code || '') + '"></td><td><input type="checkbox" data-f="active"' + (c.active !== false ? ' checked' : '') + '></td><td><input class="ed" data-f="emails" value="' + esc((c.emails || []).join(', ')) + '"></td>' +
         '<td><button class="btn soft" type="button" data-resp>VER</button></td><td><button class="btn dark" type="button" data-save>GUARDAR</button></td></tr>').join('') + '</tbody></table></div><div id="carrResp"></div>';
     const ncSave = sec.querySelector('#ncSave');
     if (ncSave) ncSave.onclick = () => run(() => {
       const id = sec.querySelector('#ncId').value.trim().toUpperCase();
       const name = sec.querySelector('#ncName').value.trim();
-      const code = sec.querySelector('#ncCode').value.trim();
+      const code = null;
       const email = sec.querySelector('#ncEmail').value.trim();
       if (!id || !name) throw new Error('Completá ID y nombre del transportista.');
-      if (!/^\\d{2}$/.test(code)) throw new Error('El código correlativo debe tener exactamente 2 dígitos.');
       return api.upsertCarrier({ id, name, kind: sec.querySelector('#ncKind').value, sequence_code: code, active: true, report_group: null, emails: email ? [email] : [], notes: null });
     }, 'Transportista creado.', again);
     sec.querySelectorAll('tr[data-cid]').forEach(tr => {
