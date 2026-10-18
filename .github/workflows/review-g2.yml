@@ -40,4 +40,5 @@ jobs:
       - name: SQL G2 / TAREA / push regression
         env:
           SQL_TESTS: g2_revision_test
+          SKIP_CONCURRENCY: "1"
         run: bash tests/sql/run.sh
