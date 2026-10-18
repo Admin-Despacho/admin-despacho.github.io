@@ -7,7 +7,7 @@ import { openAccount } from './online/account-ui.js';
 import { esc } from './online/util.js';
 import { hasPerm, ROLE_LABEL } from '../supabase/functions/_shared/rules.js';
 import { ensurePinGate, startPinLockWatcher } from './online/session-pin.js';
-import { initPushNotifications } from './online/push-notifications.js';
+import { initPushNotifications, revokePushOnLogout } from './online/push-notifications.js';
 
 const api = createApi();
 const $ = s => document.querySelector(s);
@@ -175,7 +175,7 @@ async function addHeaderControls(me) {
   out.addEventListener('click', logout);
   top.appendChild(out);
 }
-async function logout() { if (stopPinWatcher) { stopPinWatcher(); stopPinWatcher = null; } await api.signOut(); location.hash = ''; location.reload(); }
+async function logout() { if (stopPinWatcher) { stopPinWatcher(); stopPinWatcher = null; } await revokePushOnLogout(api); await api.signOut(); location.hash = ''; location.reload(); }
 
 async function route() {
   // Enlace de nueva contraseña (recuperación o invitación): antes de cualquier otra cosa

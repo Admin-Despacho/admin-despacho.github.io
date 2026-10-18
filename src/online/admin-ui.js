@@ -157,7 +157,9 @@ export async function openHistory(api, me) {
       (r.vehicle_plate ? '<p class="rp-note">Vehículo ' + esc(r.vehicle_name || '') + ' · ' + esc(r.vehicle_plate) + ' · km ' + (r.km_start ?? '—') + ' → ' + (r.km_end ?? '—') + (r.km_start != null && r.km_end != null ? ' · ' + fmt(r.km_end - r.km_start) + ' km' : '') + '</p>' : '') +
       screenTable(r.sheet_snapshot && r.sheet_snapshot.screen_model) +
       '<div class="utable-wrap"><table class="utable"><thead><tr><th>#</th><th>CLIENTE</th><th>PEDIDOS</th><th>BULTOS</th><th>RESULTADO</th>' + (me.role === 'ADMIN' ? '<th>ENTREGA</th>' : '') + '</tr></thead><tbody>' +
-      stops.map((s, i) => '<tr data-stop="' + s.id + '"><td>' + (i + 1) + '</td><td>' + esc(s.client_name) + (s.provenance === 'DRIVER' ? ' <em>(agregada)</em>' : '') + '</td><td>' + esc((s.order_numbers || []).join(' + ')) + '</td><td>' + (s.bultos || 0) + '</td><td>' + esc(String(s.outcome || '').replace('_', ' ')) + (s.outcome_reason || s.outcome_note ? ' · ' + esc(s.outcome_reason || s.outcome_note) : '') + '</td>' + (me.role === 'ADMIN' ? '<td><button class="btn soft" type="button" data-delivery-detail>VER ENTREGA</button></td>' : '') + '</tr>').join('') + '</tbody></table></div><div id="deliveryTraceBox"></div>' +
+      stops.map((s, i) => '<tr data-stop="' + s.id + '"><td>' + (i + 1) + '</td><td>' + (s.stop_type === 'UBICACION_INTERNA' ? '<span class="tchip">TRASLADO INTERNO</span> ' : s.stop_type === 'TAREA' ? '<span class="tchip">TAREA</span> ' : '') + esc(s.client_name) + (s.provenance === 'DRIVER' ? ' <em>(agregada)</em>' : '') +
+        (s.address && s.stop_type && s.stop_type !== 'PEDIDO' ? '<br><small>' + esc(s.address) + '</small>' : '') + (s.instructions ? '<br><small data-hist-obs><b>' + (s.stop_type === 'TAREA' ? 'Instrucciones' : 'Observación') + ':</b> ' + esc(s.instructions) + '</small>' : '') +
+        (s.contact_name || s.contact_phone ? '<br><small>Contacto: ' + esc([s.contact_name, s.contact_phone].filter(Boolean).join(' · ')) + '</small>' : '') + '</td><td>' + esc((s.order_numbers || []).join(' + ')) + '</td><td>' + (s.bultos || 0) + '</td><td>' + esc(String(s.outcome || '').replace('_', ' ')) + (s.outcome_reason || s.outcome_note ? ' · ' + esc(s.outcome_reason || s.outcome_note) : '') + '</td>' + (me.role === 'ADMIN' ? '<td><button class="btn soft" type="button" data-delivery-detail>VER ENTREGA</button></td>' : '') + '</tr>').join('') + '</tbody></table></div><div id="deliveryTraceBox"></div>' +
       '<h3 class="dsub">PDF / VERSIONES</h3><div class="utable-wrap"><table class="utable" id="hPdfs"><thead><tr><th>VERSIÓN</th><th>ARCHIVO</th><th>GENERADO</th><th>POR</th><th>ESTADO</th><th></th></tr></thead><tbody>' +
       (d.pdfs.length ? d.pdfs.map(p => '<tr data-v="' + p.route_version + '"><td>v' + p.route_version + '</td><td>' + esc(p.file_name || '') + '</td><td>' + dt(p.generated_at) + '</td><td>' + esc(p.generated_by_name || '') + '</td><td>' + p.status + (p.error ? ' · ' + esc(p.error) : '') + '</td>' +
         '<td>' + (p.status === 'OK' ? '<button class="btn soft" type="button" data-pdf>PDF</button>' : '<button class="btn dark" type="button" data-retry>REINTENTAR PDF</button>') + '</td></tr>').join('') : '<tr><td colspan="6">Sin PDF registrado.</td></tr>') + '</tbody></table></div>' +
@@ -222,7 +224,7 @@ export async function openHistory(api, me) {
       try {
         const tr = await api.deliveryTrace(row.dataset.stop), s = tr.stop || {}, ev = tr.evidence, rc = tr.receipt, mails = tr.emails || [];
         const sig = ev && signatureSrc(ev.signature_png);
-        traceBox.innerHTML = '<section class="delivery-trace-panel"><div class="delivery-trace-head"><div><h3>TRAZABILIDAD DE ENTREGA</h3><p>' + esc(s.client_name || '') + ' · ' + esc((s.order_numbers || []).join(' + ') || 'Sin pedido') + '</p></div><button class="btn soft" type="button" data-close-trace>CERRAR</button></div>' +
+        traceBox.innerHTML = '<section class="delivery-trace-panel"><div class="delivery-trace-head"><div><h3>' + (s.stop_type === 'UBICACION_INTERNA' ? 'TRAZABILIDAD DE TRASLADO INTERNO' : s.stop_type === 'TAREA' ? 'TRAZABILIDAD DE TAREA' : 'TRAZABILIDAD DE ENTREGA') + '</h3><p>' + esc(s.client_name || '') + ' · ' + esc((s.order_numbers || []).join(' + ') || 'Sin pedido') + '</p></div><button class="btn soft" type="button" data-close-trace>CERRAR</button></div>' +
           '<div class="delivery-trace-grid">' +
             '<div><span>Resultado</span><b>' + esc(String(s.outcome || 'PENDIENTE').replaceAll('_',' ')) + '</b></div>' +
             '<div><span>Realizado por</span><b>' + esc(tr.outcome_by_name || '—') + '</b></div>' +
@@ -234,7 +236,8 @@ export async function openHistory(api, me) {
             (s.outcome_note || s.outcome_reason ? '<div class="wide"><span>Observación / motivo</span><b>' + esc(s.outcome_note || s.outcome_reason) + '</b></div>' : '') +
             (s.collection_status && s.collection_status !== 'PENDIENTE' ? '<div><span>Cobranza</span><b>' + esc(s.collection_status.replaceAll('_',' ')) + '</b></div><div><span>Importe</span><b>' + (s.collected_amount != null ? fmtMoney(s.collected_amount) : '—') + '</b></div><div><span>Medio</span><b>' + esc(s.payment_mode || '—') + '</b></div>' : '') +
           '</div>' +
-          '<div class="delivery-evidence"><div><h4>RECEPCIÓN</h4><p><b>Recibió:</b> ' + esc(ev && ev.receiver_name || 'Sin evidencia registrada') + '</p>' + (ev && ev.created_at ? '<p><b>Registrada:</b> ' + dt(ev.created_at) + '</p>' : '') + '</div>' +
+          '<div class="delivery-evidence"><div><h4>' + (s.stop_type === 'UBICACION_INTERNA' ? 'RECEPCIÓN INTERNA DE TRASLADO' : s.stop_type === 'TAREA' ? 'TAREA' : 'RECEPCIÓN') + '</h4>' +
+          (s.stop_type === 'UBICACION_INTERNA' ? '<p><b>Ubicación:</b> ' + esc(s.client_name || '') + ' · ' + esc(s.address || '') + '</p><p><b>Pedidos trasladados:</b> ' + esc((s.order_numbers || []).join(', ') || '—') + '</p><p><i>Traslado entre sucursales: no es entrega al cliente.</i></p>' : '') + '<p><b>Recibió:</b> ' + esc(ev && ev.receiver_name || 'Sin evidencia registrada') + '</p>' + (ev && ev.created_at ? '<p><b>Registrada:</b> ' + dt(ev.created_at) + '</p>' : '') + '</div>' +
           '<div class="signature-card"><h4>FIRMA</h4>' + (sig ? '<img src="' + sig + '" alt="Firma de recepción">' : '<p>Sin firma disponible.</p>') + '</div></div>' +
           (rc ? '<div class="receipt-card"><h4>RECIBIDO CONFORME</h4><p><b>Comprobante:</b> ' + esc(rc.receipt_number || '—') + ' · <b>Generado:</b> ' + (rc.generated_at ? dt(rc.generated_at) : '—') + '</p><p><b>Email:</b> ' + esc(rc.recipient_email || '—') + '</p></div>' : '') +
           (mails.length ? '<div class="email-trace"><h4>EMAILS DE LA ENTREGA</h4>' + mails.map(m => '<div><b>' + esc(m.kind || '') + '</b><span>' + esc(m.status || '') + (m.sent_at ? ' · ' + dt(m.sent_at) : '') + (m.error ? ' · ' + esc(m.error) : '') + '</span></div>').join('') + '</div>' : '') +
@@ -589,7 +592,7 @@ const CFG = {
       '<div class="utable-wrap"><table class="utable" id="ilocTable"><thead><tr><th>CLAVE</th><th>PUNTO</th><th>DOMICILIO</th><th>LAT, LON</th><th>RADIO</th><th>ACTIVO</th><th>NOTA</th></tr></thead><tbody>' +
       (ls.length ? ls.map(l => '<tr><td><b>' + esc(l.location_key) + '</b></td><td>' + esc(l.name) + '</td><td>' + esc(l.address || '') + '</td><td>' + l.lat + ', ' + l.lon + '</td><td>' + l.radius_m + ' m</td><td>' + (l.active !== false ? 'Sí' : 'No') + '</td><td>' + esc(l.note || '') + '</td></tr>').join('') : '<tr><td colspan="7">Sin ubicaciones internas.</td></tr>') + '</tbody></table></div>' +
       '<div class="ufilters" id="ilocNew"><input id="ilKey" placeholder="Clave (ej. SAN_JUAN)"><input id="ilName" placeholder="Sucursal / punto"><input id="ilAddr" placeholder="Domicilio"><button class="btn soft" type="button" id="ilGeocode">BUSCAR COORDENADAS</button><input id="ilLat" placeholder="Latitud"><input id="ilLon" placeholder="Longitud"><input id="ilRad" placeholder="Radio (m)" value="200"><input id="ilNote" placeholder="Nota"><button class="btn dark" type="button" id="ilSave">GUARDAR PUNTO INTERNO</button></div><div id="ilGeoMsg" class="rp-note"></div>' +
-      '<p class="rp-note">Para asociar automáticamente una parada, la app intenta primero por clave del cliente y luego por nombre o domicilio. Recomendado: usar una clave estable por sucursal/punto.</p>';
+      '<p class="rp-note">Una parada se vincula a un punto SOLO por su clave (al elegir la ubicación en el constructor). Al publicar, la hoja guarda las coordenadas y el radio de ese momento: editar o desactivar un punto después no cambia hojas ya publicadas.</p>';
     const v = id => sec.querySelector(id).value.trim();
     sec.querySelector('#ilGeocode').onclick = async () => {
       const btn = sec.querySelector('#ilGeocode'), out = sec.querySelector('#ilGeoMsg');
@@ -598,9 +601,17 @@ const CFG = {
       btn.disabled = true; out.textContent = 'Buscando ubicación…';
       try {
         const g = await api.geocodeInternalLocation(address, name);
-        sec.querySelector('#ilLat').value = g.lat;
-        sec.querySelector('#ilLon').value = g.lon;
-        out.innerHTML = '<b>Ubicación encontrada:</b> ' + esc(g.display_name || address) + ' · Revisá el punto y después guardalo.';
+        const PREC = { ADDRESS: 'altura exacta', STREET: 'solo la calle', AREA: 'aproximado (barrio/localidad)' };
+        const pick = c => { sec.querySelector('#ilLat').value = c.lat; sec.querySelector('#ilLon').value = c.lon; sec.dataset.geoSource = c.source || ''; sec.dataset.geoName = c.display_name || '';
+          out.innerHTML = '<b>Punto elegido:</b> ' + esc(c.display_name || address) + ' · <i>' + esc(PREC[c.precision] || '') + '</i> · ' + esc(c.source || '') +
+            ' · <a href="https://www.openstreetmap.org/?mlat=' + c.lat + '&mlon=' + c.lon + '#map=18/' + c.lat + '/' + c.lon + '" target="_blank" rel="noopener">ver en el mapa</a>. Revisá el punto y después guardalo.'; };
+        const list = (g.candidates || []).length ? g.candidates : [g.best || g.result];
+        if (list.length > 1 && (g.ambiguous || g.needs_review)) {
+          // varias coincidencias o resultado impreciso: elegir explícitamente (no se toma el primero a ciegas)
+          out.innerHTML = '<b>' + esc(g.warning || 'Elegí la coincidencia correcta:') + '</b><div class="geo-cands">' + list.map((c, i) => '<label class="chk"><input type="radio" name="geoC" value="' + i + '"> ' +
+            esc(c.display_name) + ' · <i>' + esc(PREC[c.precision] || '') + '</i></label>').join('') + '</div>';
+          out.querySelectorAll('[name="geoC"]').forEach(r => r.onchange = () => pick(list[+r.value]));
+        } else { pick(list[0]); if (g.warning) out.insertAdjacentHTML('beforeend', '<br><b>⚠ ' + esc(g.warning) + '</b>'); }
       } catch (e) {
         out.textContent = e.message;
       } finally { btn.disabled = false; }
@@ -608,7 +619,8 @@ const CFG = {
     sec.querySelector('#ilSave').onclick = () => run(() => {
       const key = v('#ilKey').toUpperCase().replace(/[^A-Z0-9_-]+/g, '_');
       if (!key || !v('#ilName') || !v('#ilLat') || !v('#ilLon')) throw new Error('Completá clave, punto y coordenadas.');
-      return api.saveInternalLocation({ location_key: key, name: v('#ilName'), address: v('#ilAddr'), lat: v('#ilLat').replace(',', '.'), lon: v('#ilLon').replace(',', '.'), radius_m: parseInt(v('#ilRad'), 10) || 200, note: v('#ilNote'), active: true });
+      return api.saveInternalLocation({ location_key: key, name: v('#ilName'), address: v('#ilAddr'), lat: v('#ilLat').replace(',', '.'), lon: v('#ilLon').replace(',', '.'), radius_m: parseInt(v('#ilRad'), 10) || 200, note: v('#ilNote'), active: true,
+        geocode_source: sec.dataset.geoSource || null, geocode_display_name: sec.dataset.geoName || null });
     }, 'Punto interno guardado.', again);
   },
   async backup(api, me, sec, again) { await backupSection(api, me, sec, again); },

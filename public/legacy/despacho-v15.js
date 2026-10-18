@@ -1120,6 +1120,11 @@ const Publisher = {
     else add(resp.length ? 'ok' : 'err', resp.length ? 'Responsable compatible disponible' : 'Sin responsable compatible');
     add(rows.length ? 'ok' : 'err', rows.length + ' entrega(s)');
     if (bad.length) add('err', bad.length + ' pedido(s) con montos/documentos, financiación o NOC por revisar');
+    // Borradores de la versión anterior: pedidos de una ubicación interna cargados como filas sueltas → hay que rehacerlos como UNA parada
+    const legacyLoc = rows.filter(r => (!r.stopType || r.stopType === 'PEDIDO') && (r.internalLocationKey || r.locationGroup));
+    if (legacyLoc.length) add('err', legacyLoc.length + ' pedido(s) quedaron como paradas sueltas de una ubicación interna (versión anterior): quitalos y volvé a cargarlos desde la ubicación (una sola parada)');
+    const dupLoc = rows.filter(r => r.stopType === 'UBICACION_INTERNA').map(r => r.internalLocationKey).filter((k, i, a) => a.indexOf(k) !== i);
+    if (dupLoc.length) add('err', 'La ubicación ' + dupLoc[0] + ' está repetida en la hoja: dejá una sola parada');
     const noAddr = rows.filter(r => r.stopType === 'TAREA' ? !String(r.domicilio || '').trim() : (!String(r.domicilio || '').trim() || !String(r.localidad || '').trim())).length; if (noAddr) add('warn', noAddr + ' parada(s) sin domicilio completo');
     const noBul = deliveryRows.filter(r => !(parseInt(r.bultos, 10) > 0)).length; if (noBul) add('warn', noBul + ' entrega(s) con 0 bultos');
     const warns = deliveryRows.filter(r => { const st = baseStatus(r); return !st.blocking && st.issues.some(i => i.level === 'warn'); }).length; if (warns) add('warn', warns + ' entrega(s) con advertencias');
@@ -1135,12 +1140,12 @@ const Publisher = {
     return { sheet_key: RouteStore.sheetId, carrier_id: carrier.id, responsable_id: responsable,
       stops: this.rows().map(r => { const p = Money.parts(r), prov = r.calc && r.calc.shipProv;
         const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null, cristian = ['CT-ESTE', 'CT-ALR'].includes(carrier.id);
-        return { client_name: r.cliente, client_key: r.stopType === 'TAREA' ? ('TASK-' + r.id) : (r.stopType === 'UBICACION_INTERNA' ? r.internalLocationKey : ((r.calc && r.calc.cuit) || Normalizer.name(r.cliente))), zone: this.zone(r, carrier), order_numbers: [r.mainOrder, r.shipOrder].filter(Boolean).map(String),
+        return { client_name: r.cliente, client_key: r.stopType === 'TAREA' ? ('TASK-' + r.id) : (r.stopType === 'UBICACION_INTERNA' ? r.internalLocationKey : ((r.calc && r.calc.cuit) || Normalizer.name(r.cliente))), zone: this.zone(r, carrier), order_numbers: RouteStore.stopOrders(r),
           // Cristian cobra el monto de la hoja: entrega + cobranza con importe esperado (el chofer no lo modifica)
           task: cristian && (r.monto || 0) > 0 ? 'AMBAS' : 'ENTREGA', expected_amount: cristian && (r.monto || 0) > 0 ? r.monto : null,
-          stop_type: r.stopType || 'PEDIDO', internal_location_key: r.internalLocationKey || null, instructions: r.taskInstructions || (r.locationObservation || null), contact_name: r.taskContact || null, contact_phone: r.taskPhone || null,
+          stop_type: r.stopType || 'PEDIDO', internal_location_key: r.internalLocationKey || null, instructions: RouteStore.stopInstructions(r) || null, contact_name: r.taskContact || null, contact_phone: r.taskPhone || null,
           customer_email: (r.stopType && r.stopType !== 'PEDIDO') ? null : (r.email || (cc && cc.email) || null),
-          merchandise_amount: (r.stopType && r.stopType !== 'PEDIDO') ? 0 : (p.main || 0), shipping_fee: (r.stopType && r.stopType !== 'PEDIDO') ? 0 : (p.ship || 0), ship_fee_status: prov ? 'PROVISIONAL' : 'SALDO', ship_order: r.shipOrder || null, address: r.domicilio || '', ready: true }; }) };
+          merchandise_amount: (r.stopType && r.stopType !== 'PEDIDO') ? 0 : (p.main || 0), shipping_fee: (r.stopType && r.stopType !== 'PEDIDO') ? 0 : (p.ship || 0), ship_fee_status: prov ? 'PROVISIONAL' : 'SALDO', ship_order: (r.stopType && r.stopType !== 'PEDIDO') ? null : (r.shipOrder || null), address: r.domicilio || '', ready: true }; }) };
   },
   async open() {
     const b = this.bridge(); if (!b) return;
@@ -1235,7 +1240,21 @@ const Publisher = {
           m.remove(); toast('Hoja ' + r.number + ' publicada · disponible en tiempo real para ' + RouteStore.published.responsable); SheetTabs.render();
           await this.afterPublish(r, pl.pdf_model, true); this.render();
         }
-      } catch (e) { const er = m.querySelector('#pubErr'); er.textContent = e.message; er.hidden = false; ev.target.disabled = false; }
+      } catch (e) {
+        const er = m.querySelector('#pubErr'); er.hidden = false; ev.target.disabled = false;
+        const msg = String(e.message || e), orf = /ORPHAN_RESERVATIONS/.test(msg) ? (msg.split(':').pop() || '').split(',').map(x => x.trim()).filter(Boolean) : [];
+        // Reserva huérfana (pedidos reservados por este borrador que NO están en ninguna parada): el servidor no los publica en silencio.
+        const inSheet = new Set(RouteStore.rows.filter(r => r.sale).flatMap(r => RouteStore.stopOrders(r)));
+        const free = orf.filter(x => !inSheet.has(x));
+        if (free.length) {
+          er.innerHTML = 'Hay pedidos reservados por este borrador que no están en la hoja: <b>' + esc(free.join(', ')) + '</b>. No se publicó nada. <button class="btn soft" type="button" id="pubFreeOrf">LIBERARLOS Y REINTENTAR</button>';
+          er.querySelector('#pubFreeOrf').onclick = async () => {
+            const ob = window.OKD_BRIDGE && window.OKD_BRIDGE.orders;
+            try { await ob.release(RouteStore.sheetId, free); RouteStore.log({ tipo: 'reservas huérfanas liberadas', pedidos: free.join(', ') }); er.hidden = true; ev.target.click(); }
+            catch (x) { er.textContent = 'No se pudieron liberar: ' + (x.message || x); }
+          };
+        } else er.textContent = msg;
+      }
     };
   },
   // ===== PDF automático al publicar (RC1.2): se guarda en Storage privado; la descarga es aparte y nunca revierte la publicación =====
@@ -1375,9 +1394,14 @@ const RouteStore = {
   find(id) { return this.rows.find(r => r.id === id); },
   usedOrders() {
     const s = new Map();
-    this.rows.forEach(r => { if (r.mainOrder) s.set(String(r.mainOrder).trim(), r); if (r.hasShip && r.shipOrder) s.set(String(r.shipOrder).trim(), r); });
+    this.rows.forEach(r => { if (r.mainOrder) s.set(String(r.mainOrder).trim(), r); if (r.hasShip && r.shipOrder) s.set(String(r.shipOrder).trim(), r);
+      (r.locationOrders || []).forEach(o => { if (o.main) s.set(String(o.main), r); if (o.ship) s.set(String(o.ship), r); }); });   // pedidos trasladados a una ubicación interna
     return s;
   },
+  // Observación / instrucciones de la parada: UNA sola fuente (no se usa obsPago, que es la observación de PAGO)
+  stopInstructions(r) { return String((r.stopType === 'TAREA' ? r.taskInstructions : r.stopType === 'UBICACION_INTERNA' ? (r.instructions != null ? r.instructions : r.locationObservation) : r.instructions) || '').trim(); },
+  // Todos los números de una parada (pedido principal + envío; en ubicación interna, todos los pedidos trasladados)
+  stopOrders(r) { return r.stopType === 'UBICACION_INTERNA' ? (r.locationOrders || []).flatMap(o => [o.main, o.ship]).filter(Boolean).map(String) : [r.mainOrder, r.shipOrder].filter(Boolean).map(String); },
   newManual(order) {
     return {
       id: uid(), auto: false, manual: true, sale: true, cobradoMain: 'No', cobradoShip: 'No', reviewed: false, fecha: this.sheetDate || todayISO(),
@@ -1393,7 +1417,7 @@ const RouteStore = {
     Object.assign(row, {
       manual: false, auto: false, stopType: 'TAREA', sale: true, reviewed: true,
       cliente: p.title, domicilio: p.address, localidad: '', monto: 0, bultos: 0,
-      payMain: '', payShip: '', obsPago: p.instructions || '',
+      payMain: '', payShip: '', obsPago: '',
       taskInstructions: p.instructions || '', taskContact: p.contact_name || '', taskPhone: p.contact_phone || '',
       transportista: this.selected.size === 1 ? Array.from(this.selected)[0] : 'TRANSPORTE INTERNO',
       carrierOrig: this.selected.size === 1 ? Array.from(this.selected)[0] : 'TRANSPORTE INTERNO',
@@ -1406,7 +1430,7 @@ const RouteStore = {
     Object.assign(row, {
       manual: false, auto: false, stopType: 'UBICACION_INTERNA', sale: true, reviewed: true,
       cliente: p.name, domicilio: p.address || '', localidad: '', monto: 0, bultos: 0,
-      payMain: '', payShip: '', obsPago: p.note || '',
+      payMain: '', payShip: '', obsPago: '', instructions: '', locationOrders: [],
       internalLocationKey: p.location_key, internalRadius: p.radius_m || 200,
       transportista: this.selected.size === 1 ? Array.from(this.selected)[0] : 'TRANSPORTE INTERNO',
       carrierOrig: this.selected.size === 1 ? Array.from(this.selected)[0] : 'TRANSPORTE INTERNO',
@@ -1881,58 +1905,65 @@ const UI = {
     const box = document.querySelector('.step.s3'), ids = $('#ids'), log = $('#log');
     if (!box) return;
     const old = box.querySelector('#internalLocationComposer'); if (old) old.remove();
+    // Si la ubicación YA está en la hoja: se abre esa misma parada (sumar/quitar pedidos, editar observación). Nunca un duplicado.
+    const existing = RouteStore.rows.find(r => r.stopType === 'UBICACION_INTERNA' && r.internalLocationKey === hit.location_key) || null;
+    const prevOrders = existing ? (existing.locationOrders || []).map(o => String(o.main)) : [];
     const composer = document.createElement('div');
     composer.id = 'internalLocationComposer'; composer.className = 'internal-task-form internal-location-form';
     composer.innerHTML =
-      '<b>UBICACIÓN INTERNA</b><div class="internal-location-head"><strong>' + esc(hit.name) + '</strong><span>' + esc(hit.address || '') + '</span><small>GPS guardado · radio ' + esc(hit.radius_m || 200) + ' m</small></div>' +
-      '<label>¿Lleva pedidos a esta ubicación?<textarea class="ed" id="ilOrders" rows="2" placeholder="Ej. 25384 25385 25378"></textarea></label>' +
-      '<label>Observación de la parada (opcional)<textarea class="ed" id="ilObs" rows="3" placeholder="Ej. Dejar cajas vacías en depósito."></textarea></label>' +
-      '<div class="internal-task-actions"><button class="btn go" type="button" id="ilAddStop">AGREGAR PARADA</button><button class="btn soft" type="button" id="ilCancelStop">CANCELAR</button></div>';
+      '<b>UBICACIÓN INTERNA' + (existing ? ' · YA ESTÁ EN LA HOJA (editando la misma parada)' : '') + '</b><div class="internal-location-head"><strong>' + esc(hit.name) + '</strong><span>' + esc(hit.address || '') +
+      '</span><small>Traslado interno entre sucursales (no es entrega al cliente) · GPS guardado · radio ' + esc(hit.radius_m || 200) + ' m</small></div>' +
+      '<label>Pedidos que se trasladan a esta ubicación<textarea class="ed" id="ilOrders" rows="2" placeholder="Ej. 25384 25385 25390">' + esc(prevOrders.join(' ')) + '</textarea></label>' +
+      '<label>Observación de la parada (la ve el Transportista Interno)<textarea class="ed" id="ilObs" rows="3" placeholder="Ej. Dejar cajas vacías.">' + esc(existing ? RouteStore.stopInstructions(existing) : '') + '</textarea></label>' +
+      '<div class="internal-task-actions"><button class="btn go" type="button" id="ilAddStop">' + (existing ? 'GUARDAR CAMBIOS' : 'AGREGAR PARADA') + '</button><button class="btn soft" type="button" id="ilCancelStop">CANCELAR</button></div>';
     box.querySelector('#log').before(composer);
     composer.querySelector('#ilCancelStop').onclick = () => { composer.remove(); ids.value = ''; ids.focus(); };
     composer.querySelector('#ilAddStop').onclick = async () => {
+      const btn = composer.querySelector('#ilAddStop');
       const raw = composer.querySelector('#ilOrders').value;
-      const orderIds = []; (raw.match(/\d+/g) || []).forEach(x => { const v = String(parseInt(x,10)); if (v && !orderIds.includes(v)) orderIds.push(v); });
+      const orderIds = []; (raw.match(/\d+/g) || []).forEach(x => { const v = String(parseInt(x, 10)); if (v && !orderIds.includes(v)) orderIds.push(v); });
       const obs = composer.querySelector('#ilObs').value.trim();
-      const rows = [];
-      // Si hay pedidos, deben existir en el informe y no pueden estar ya usados en otra hoja.
+      const keep = existing ? (existing.locationOrders || []).filter(o => orderIds.includes(String(o.main))) : [];
+      const removed = existing ? (existing.locationOrders || []).filter(o => !orderIds.includes(String(o.main))) : [];
+      const added = [];
+      // 1) resolver y validar TODOS antes de reservar nada
+      const used = RouteStore.usedOrders();
       for (const id of orderIds) {
-        const used = RouteStore.usedOrders();
-        if (used.has(id)) { toast('El pedido ' + id + ' ya está en esta hoja.'); return; }
+        if (keep.some(o => String(o.main) === id)) continue;
+        const u = used.get(id); if (u && u !== existing) { toast('El pedido ' + id + ' ya está en esta hoja.'); return; }
         const otherTab = SheetTabs.orderInOther(id);
         if (otherTab) { toast('El pedido ' + id + ' ya está en otra hoja (' + otherTab + ').'); return; }
         const res = ShippingMatcher.resolve(id);
-        if (!res || res.shipPending) { toast('El pedido ' + id + ' no se encontró correctamente en el informe.'); return; }
-        const r = RouteStore.buildFromResolution(res);
-        r.stopType = 'PEDIDO';
-        r.transportista = 'TRANSPORTE INTERNO';
-        r.carrierOrig = 'TRANSPORTE INTERNO';
-        r.domicilio = hit.address || r.domicilio || '';
-        r.internalLocationKey = hit.location_key;
-        r.internalRadius = hit.radius_m || 200;
-        r.locationGroup = hit.location_key;
-        if (obs) r.opNotes = (r.opNotes || []).concat(obs);
-        rows.push(r);
+        if (!res || res.shipPending || !(res.main || res.ship)) { toast('El pedido ' + id + ' no se encontró correctamente en el informe.'); return; }
+        const base = res.main || res.ship;
+        // se conserva el pedido de envío relacionado (trazabilidad), pero NO es otra parada física
+        const mainId = String(res.main ? res.main.id : (res.mainRef || id)), shipId = res.ship && String(res.ship.id) !== mainId ? String(res.ship.id) : null;
+        if (orderIds.includes(mainId) && mainId !== id && added.some(o => o.main === mainId)) continue;   // envío + su principal tipeados juntos: un solo par
+        if (keep.some(o => o.main === mainId) || (used.get(mainId) && used.get(mainId) !== existing)) { toast('El pedido ' + mainId + ' ya está en esta hoja.'); return; }
+        added.push({ main: mainId, ship: shipId, cliente: base.cliente || '' });
       }
-      if (rows.length) {
-        for (const r of rows) {
-          const ob = window.OKD_BRIDGE && window.OKD_BRIDGE.orders;
-          if (ob) {
-            try { await ob.reserve(RouteStore.sheetId, [r.mainOrder, r.shipOrder].filter(Boolean).map(String)); }
-            catch (e) { toast('No se pudo reservar el pedido ' + (r.mainOrder || '') + ': ' + (e.message || e)); return; }
-          }
+      const nums = list => list.flatMap(o => [o.main, o.ship]).filter(Boolean).map(String);
+      const ob = window.OKD_BRIDGE && window.OKD_BRIDGE.orders;
+      btn.disabled = true;
+      try {
+        // 2) reservar TODOS los nuevos en UNA sola operación (atómica en el servidor: si uno falla, no queda ninguno reservado)
+        if (ob && added.length) {
+          try { await ob.reserve(RouteStore.sheetId, nums(added)); }
+          catch (e) { toast('No se reservó ningún pedido: ' + (e.message || e)); return; }
         }
-        RouteStore.rows.push(...rows);
-      } else {
-        const row = RouteStore.newInternalLocation(hit);
-        row.locationGroup = hit.location_key;
-        row.locationObservation = obs;
-        if (obs) row.obsPago = obs;
-        RouteStore.rows.push(row);
-      }
-      RouteStore.save(); CalculationEngine.computeAll(RouteStore.rows); this.renderTable();
-      log.innerHTML = '<div class="msg ok"><b>PARADA AGREGADA</b> · ' + esc(hit.name) + (orderIds.length ? '<br>Pedidos: ' + esc(orderIds.join(', ')) : '') + (obs ? '<br>Obs.: ' + esc(obs) : '') + '</div>';
-      ids.value = ''; composer.remove(); ids.focus();
+        // 3) liberar los que se quitaron de la parada (borrador)
+        if (ob && removed.length && !RouteStore.published) await ob.release(RouteStore.sheetId, nums(removed)).catch(() => {});
+        // 4) UNA sola fila UBICACION_INTERNA (nombre y domicilio de G2, de solo lectura)
+        const row = existing || RouteStore.newInternalLocation(hit);
+        row.cliente = hit.name; row.domicilio = hit.address || ''; row.internalLocationKey = hit.location_key; row.internalRadius = hit.radius_m || 200;
+        row.locationOrders = keep.concat(added); row.instructions = obs; delete row.locationObservation; row.obsPago = '';
+        row.audit = (row.audit || []).concat({ at: new Date().toISOString(), what: existing ? 'UBICACION_EDITADA' : 'UBICACION_AGREGADA', orders: nums(row.locationOrders) });
+        if (!existing) RouteStore.rows.push(row);
+        RouteStore.save(); CalculationEngine.computeAll(RouteStore.rows); this.renderTable();
+        log.innerHTML = '<div class="msg ok"><b>' + (existing ? 'PARADA ACTUALIZADA' : 'PARADA AGREGADA') + '</b> · ' + esc(hit.name) +
+          (row.locationOrders.length ? '<br>Pedidos (una sola parada): ' + esc(row.locationOrders.map(o => o.main).join(', ')) : '') + (obs ? '<br>Observación: ' + esc(obs) : '') + '</div>';
+        ids.value = ''; composer.remove(); ids.focus();
+      } finally { btn.disabled = false; }
     };
     composer.querySelector('#ilOrders').focus();
   },
@@ -1986,10 +2017,18 @@ const UI = {
       if (!bridge || !bridge.internal) { log.innerHTML = '<div class="msg err">No se pudieron consultar las ubicaciones internas.</div>'; return; }
       try {
         const list = (await bridge.internal()).filter(x => x.active !== false);
-        const hit = list.find(x => Normalizer.name(x.location_key) === q || Normalizer.name(x.name) === q)
-          || list.find(x => Normalizer.name(x.name).includes(q) || Normalizer.name(x.location_key).includes(q) || Normalizer.name(x.address || '').includes(q));
-        if (!hit) { log.innerHTML = '<div class="msg warn"><b>UBICACIÓN INTERNA NO ENCONTRADA.</b> Revisá el nombre guardado en Configuración → G2.</div>'; return; }
-        this.openInternalLocationComposer(hit);
+        if (!list.length) { log.innerHTML = '<div class="msg err"><b>NO HAY UBICACIONES INTERNAS DISPONIBLES.</b> No hay puntos activos en G2 o tu usuario no tiene permiso para verlos.</div>'; return; }
+        // coincidencia exacta por clave o nombre; si no, sugerencias (nunca se elige la primera coincidencia parcial a ciegas)
+        const exact = list.find(x => Normalizer.name(x.location_key) === q || Normalizer.name(x.name) === q);
+        const partial = exact ? [] : list.filter(x => Normalizer.name(x.name).includes(q) || Normalizer.name(x.location_key).includes(q) || Normalizer.name(x.address || '').includes(q));
+        const hit = exact || (partial.length === 1 ? partial[0] : null);
+        if (hit) { this.openInternalLocationComposer(hit); return; }
+        if (partial.length > 1) {
+          log.innerHTML = '<div class="msg warn"><b>VARIAS UBICACIONES COINCIDEN.</b> Elegí una:<div class="ilpick">' + partial.map((x, i) => '<button class="btn soft" type="button" data-ilpick="' + i + '">' + esc(x.name) + '</button>').join(' ') + '</div></div>';
+          log.querySelectorAll('[data-ilpick]').forEach(b => b.onclick = () => { log.innerHTML = ''; this.openInternalLocationComposer(partial[+b.dataset.ilpick]); });
+          return;
+        }
+        log.innerHTML = '<div class="msg warn"><b>UBICACIÓN INTERNA NO ENCONTRADA.</b> Revisá el nombre guardado en Configuración → G2.</div>';
         return;
       } catch (e) {
         log.innerHTML = '<div class="msg err">No se pudo consultar la ubicación interna: ' + esc(e.message || String(e)) + '</div>';
@@ -2162,14 +2201,19 @@ const UI = {
       '<td class="adm last"><span class="task-chip">' + (isLoc ? 'UBICACIÓN' : 'TAREA') + '</span></td>' +
       '<td style="min-width:108px"><input class="ed" data-f="fecha" inputmode="numeric" placeholder="dd/mm/aaaa" value="' + esc(isoToDMY(row.fecha)) + '"></td>' +
       '<td style="min-width:150px"><span class="task-chip soft">' + (isLoc ? 'UBICACIÓN INTERNA' : 'TAREA') + '</span></td>' +
-      '<td style="min-width:180px"><span class="task-na">—</span></td>' +
-      '<td style="min-width:190px">' + ed('cliente', row.cliente, 'Título de la tarea') + '</td>' +
-      '<td style="min-width:210px">' + ed('domicilio', row.domicilio, 'Domicilio') + '</td>' +
+      // pedidos: en una ubicación interna, todos los trasladados quedan agrupados en ESTA parada
+      '<td style="min-width:180px">' + (isLoc && (row.locationOrders || []).length ? '<span class="loc-orders" data-locorders>' + (row.locationOrders || []).map(o => esc(o.main) + (o.ship ? ' <small>(+ envío ' + esc(o.ship) + ')</small>' : '')).join('<br>') + '</span>' : '<span class="task-na">—</span>') + '</td>' +
+      // ubicación interna: nombre y domicilio vienen de G2 y son de SOLO LECTURA (el GPS valida contra ese mismo punto)
+      '<td style="min-width:190px">' + (isLoc ? '<span class="ro" data-ro="cliente" title="Dato de G2 (solo lectura)">' + esc(row.cliente) + '</span>' : ed('cliente', row.cliente, 'Título de la tarea')) + '</td>' +
+      '<td style="min-width:210px">' + (isLoc ? '<span class="ro" data-ro="domicilio" title="Dato de G2 (solo lectura)">' + esc(row.domicilio) + '</span>' : ed('domicilio', row.domicilio, 'Domicilio')) + '</td>' +
       '<td style="min-width:125px"><span class="task-na">—</span></td>' +
       '<td style="min-width:120px"><span class="task-na">$ 0,00</span></td>' +
       '<td style="min-width:170px"><span class="task-na">No corresponde</span></td>' +
-      '<td style="min-width:260px">' + (isLoc ? '<span class="sub">Punto guardado · radio ' + esc(row.internalRadius || 200) + ' m</span>' : ed('taskInstructions', row.taskInstructions, 'Qué tiene que realizar') + (contact ? '<span class="sub">Contacto: ' + esc(contact) + '</span>' : '')) + '</td>' +
-      '<td style="min-width:185px"><select class="ed" data-f="transportista">' + this.carrierOptions(row.transportista) + '</select></td>' +
+      // observación / instrucciones de la parada (fuente única, la ve el chofer; NO es observación de pago)
+      '<td style="min-width:260px">' + (isLoc ? ed('instructions', RouteStore.stopInstructions(row), 'Observación de la parada (ej. Dejar cajas vacías)') + '<span class="sub">Traslado interno · GPS radio ' + esc(row.internalRadius || 200) + ' m · <a href="#" data-act="editloc">editar pedidos</a></span>'
+        : ed('taskInstructions', row.taskInstructions, 'Qué tiene que realizar') + (contact ? '<span class="sub">Contacto: ' + esc(contact) + '</span>' : '')) + '</td>' +
+      // TAREA y UBICACIÓN INTERNA son solo de Transporte Interno (el servidor también lo exige)
+      '<td style="min-width:185px"><span class="task-chip soft">TRANSPORTE INTERNO</span></td>' +
       '<td><div class="rowtools"><button type="button" class="ibtn del" data-act="del" title="Quitar de la hoja">✕</button></div></td>' +
       '</tr>';
   },
@@ -2397,6 +2441,7 @@ const UI = {
       RouteStore.save(); return;
     }
     if (f === 'payBoth') { row.payMain = t.value; row.payShip = t.value; row.payMainManual = true; row.payShipManual = true; t.classList.toggle('need', !t.value.trim() || t.value.trim() === 'REVISAR'); this.updateStatus(row); RouteStore.save(); return; }
+    if (row.stopType === 'UBICACION_INTERNA' && (f === 'cliente' || f === 'domicilio')) return;   // datos de G2: solo lectura
     row[f] = t.value;
     if (f === 'payMain') row.payMainManual = true;
     if (f === 'payShip') row.payShipManual = true;
@@ -2437,11 +2482,17 @@ const UI = {
       else main.insertAdjacentHTML('afterend', this.detailHTML(row));
       return;
     }
+    if (act === 'editloc') {
+      e.preventDefault && e.preventDefault();
+      const b = window.OKD_BRIDGE && window.OKD_BRIDGE.locations;
+      if (b && b.internal) b.internal().then(list => { const hit = list.find(x => x.location_key === row.internalLocationKey); if (hit) this.openInternalLocationComposer(hit); else toast('La ubicación ya no está activa en G2.'); });
+      return;
+    }
     if (act === 'del') {
       if (!confirm('¿Quitar esta entrega de la hoja?')) return;
       RouteStore.rows = RouteStore.rows.filter(r => r !== row);
       const ob = window.OKD_BRIDGE && window.OKD_BRIDGE.orders; // liberar la reserva del borrador
-      if (ob && !RouteStore.published) ob.release(RouteStore.sheetId, [row.mainOrder, row.shipOrder].filter(Boolean).map(String)).catch(() => {});
+      if (ob && !RouteStore.published) ob.release(RouteStore.sheetId, RouteStore.stopOrders(row)).catch(() => {});
       CalculationEngine.computeAll(RouteStore.rows); RouteStore.save(); this.renderTable(); return;
     }
     if (act === 'recalc') {
@@ -2665,6 +2716,17 @@ const ExportModel = {
     const data = rows.map(r => {
       const cells = [];
       cells.push([L(isoToDMY(r.fecha))]);
+      if (r.stopType === 'UBICACION_INTERNA' || r.stopType === 'TAREA') {
+        // Traslado interno / tarea: no es entrega comercial. Mismas columnas aprobadas; la observación va con la parada, NUNCA en "observaciones de pago".
+        const loc = r.stopType === 'UBICACION_INTERNA', obs = RouteStore.stopInstructions(r), contact = [r.taskContact, r.taskPhone].filter(Boolean).join(' · ');
+        cells.push(loc && (r.locationOrders || []).length ? (r.locationOrders || []).map(o => L(o.main + (o.ship ? ' + envío ' + o.ship : ''), '', 'main')) : [L(loc ? '—' : 'TAREA')]);
+        cells.push([L('—')]);
+        cells.push([L(r.cliente, loc ? 'UBICACIÓN INTERNA (TRASLADO):' : 'TAREA:', 'main')].concat(obs ? [L(obs, 'OBSERVACIÓN:')] : [], contact ? [L(contact, 'CONTACTO:')] : []));
+        cells.push([L(r.domicilio)]); cells.push([L(r.localidad)]);
+        cells.push([L('No corresponde')]); cells.push([L('—')]); cells.push([L('')]); cells.push([L('TRANSPORTE INTERNO')]);
+        if (withOps) cells.push([L('')]);
+        return { r, cells, ship: false, pending: false };
+      }
       cells.push(r.hasShip
         ? [L(r.mainOrder || '—', 'MERCADERÍA:', 'main'), L(r.shipOrder || '—', 'ENVÍO:', 'ship')]
         : [L(r.mainOrder)]);

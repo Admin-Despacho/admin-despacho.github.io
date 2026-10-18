@@ -665,3 +665,34 @@ body.no-publish #btnPublish{display:none!important}
 .internal-location-head{display:flex;flex-direction:column;gap:3px;padding:9px 10px;border:1px solid #c9eef1;border-radius:10px;background:#fff}
 .internal-location-head strong{font-size:14px}
 .internal-location-head span,.internal-location-head small{font-size:12px;color:var(--muted)}
+/* ===== Traslado interno / TAREA (revisión G2): tarjeta del chofer y fila del constructor ===== */
+.drv-loc{margin:6px 0 2px;padding:8px 10px;border-radius:10px;background:var(--mist,#eef3f5);font-size:13px;line-height:1.35;overflow-wrap:anywhere}
+.drv-loc>b{font-size:11.5px;letter-spacing:.05em}
+.drv-locorders{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.drv-locorders>b{font-size:11.5px;margin-right:2px}
+.drv-locorders span{background:#fff;border:1px solid var(--line,#d9e3e8);border-radius:999px;padding:2px 8px;font-size:12.5px;font-variant-numeric:tabular-nums}
+.drv-obs{margin-top:6px;border-left:3px solid var(--cyan,#16d6e5);padding:2px 0 2px 8px}
+.drv-obs b{display:block;font-size:11.5px;letter-spacing:.05em}
+.drv-obs span{display:block;white-space:pre-wrap}
+.drv-rec{margin:4px 0 8px;padding:8px 10px;border:1px dashed var(--line,#c9d7dc);border-radius:10px}
+.drv-rec b{display:block;font-size:12px;letter-spacing:.04em}
+.drv-rec small{display:block;overflow-wrap:anywhere}
+.drv-add textarea.ed{width:100%;min-height:52px}
+.loc-orders{font-variant-numeric:tabular-nums;line-height:1.5}
+td .ro{display:block;padding:6px 2px;color:inherit;cursor:default}
+.ilpick{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.geo-cands{display:grid;gap:4px;margin-top:6px}
+.tchip{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;border:1px solid var(--line,#d9e3e8);border-radius:999px;padding:1px 7px;margin-right:4px}
+/* Responsive (revisión G2): área táctil mínima en botones de enlace de la app del chofer, sin cambiar su aspecto */
+#drv .linkbtn,.drv .linkbtn,.sigbox .linkbtn,#drvBack{min-height:36px;min-width:44px;padding:6px 8px;display:inline-flex;align-items:center}
+/* Mientras se completa una parada (firma, receptor, GUARDAR), el pie fijo no la tapa: pasa a su lugar normal al final de la hoja */
+body:has(.drv-stop .drv-form:not([hidden])) .drv-foot{position:static}
+/* + AGREGAR PARADA: tipo de parada y selector G2 (cómodo en celular) */
+.drv-type b{display:block;font-size:11.5px;letter-spacing:.05em;margin:4px 0}
+.drv-seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.drv-seg .btn{min-height:44px;justify-content:center;white-space:normal;line-height:1.15}
+.drv-loclist{display:grid;gap:6px;margin:6px 0;max-height:260px;overflow-y:auto}
+.drv-locopt{display:block;width:100%;text-align:left;min-height:48px;padding:8px 10px;border:1px solid var(--line,#d9e3e8);border-radius:10px;background:#fff;color:inherit;cursor:pointer;overflow-wrap:anywhere}
+.drv-locopt b{display:block}.drv-locopt small{display:block;color:var(--muted)}
+.drv-locpick{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;padding:8px 10px;margin:6px 0;border-radius:10px;background:var(--mist,#eef3f5);overflow-wrap:anywhere}
+.drv-locpick span{font-size:11.5px;color:var(--muted);letter-spacing:.04em}.drv-locpick small{grid-column:1/-1;color:var(--muted)}
