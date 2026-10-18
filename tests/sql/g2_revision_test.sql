@@ -260,3 +260,27 @@ select tst.res('SEC-G2-02 RPC admin G2 disponible para authenticated (guard de p
   has_function_privilege('authenticated', 'public.upsert_internal_location(jsonb)', 'EXECUTE'), '');
 select tst.res('SEC-G2-03 RPC admin G2 disponible para service_role',
   has_function_privilege('service_role', 'public.upsert_internal_location(jsonb)', 'EXECUTE'), '');
+
+-- Numeración automática independiente por transportista (fixtures aisladas).
+create temp table carrier_preflight as
+  select coalesce(max(v),0) as max_code from (
+    select sequence_code::int as v from public.carriers where sequence_code ~ '^[0-9]{2}$'
+    union all select code::int from public.route_sequences where code ~ '^[0-9]{2}$'
+  ) t;
+begin;
+select tst.u(:'A');
+set local role authenticated;
+select public.upsert_carrier('{"id":"SEQ-TEST-A","name":"Transportista Sintetico A","kind":"EXTERNO","active":true,"emails":[]}');
+select public.upsert_carrier('{"id":"SEQ-TEST-B","name":"Transportista Sintetico B","kind":"EXTERNO","active":true,"emails":[]}');
+select tst.expect('SEQ-03 Impide cambiar código existente', $q$ select public.upsert_carrier('{"id":"SEQ-TEST-A","name":"Transportista Sintetico A","sequence_code":"01","kind":"EXTERNO"}') $q$, 'IMMUTABLE_CODE%');
+commit;
+select tst.res('SEQ-01 Asignación automática consecutiva',
+  (select sequence_code::int from public.carriers where id='SEQ-TEST-A') = (select max_code+1 from carrier_preflight)
+  and (select sequence_code::int from public.carriers where id='SEQ-TEST-B') = (select max_code+2 from carrier_preflight), '');
+begin;
+select tst.u(:'A');
+set local role authenticated;
+select public.upsert_carrier('{"id":"SEQ-TEST-A","name":"Nombre Editado","kind":"EXTERNO","active":false,"emails":[]}');
+commit;
+select tst.res('SEQ-02 Código permanente al editar/desactivar',
+  (select sequence_code::int from public.carriers where id='SEQ-TEST-A')=(select max_code+1 from carrier_preflight), '');
