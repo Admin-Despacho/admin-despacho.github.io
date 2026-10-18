@@ -138,7 +138,7 @@ select tst.res('TAR-02 TAREA REALIZADA sin firma ni receptor (GPS + observación
 -- ===== Parada dinámica agregada por el Transportista Interno =====
 create temp table t_v as select version from public.routes where id = (select id from t_r); grant select on t_v to public;
 begin; select tst.u(:'G'); set local role authenticated;
-select public.add_internal_stop((select id from t_r), '{"client_name":"Banco Nación","address":"San Martín 1100, Mendoza","instructions":"Depositar efectivo","contact_name":"Caja","contact_phone":"261444","order_numbers":["99999"],"stop_type":"UBICACION_INTERNA","internal_location_key":"SAN_JUAN"}', (select version from t_v), 'g2-add-1');
+select public.add_internal_stop((select id from t_r), '{"client_name":"Banco Nación","address":"San Martín 1100, Mendoza","instructions":"Depositar efectivo","contact_name":"Caja","contact_phone":"261444","order_numbers":["99999"]}', (select version from t_v), 'g2-add-1');
 commit;
 select tst.res('DRV-01 Parada del chofer: provenance DRIVER, TAREA, usuario y fecha, instrucciones/contacto, al final del recorrido, sin pedidos ni G2',
   provenance = 'DRIVER' and stop_type = 'TAREA' and added_by = :'G' and added_at is not null and instructions = 'Depositar efectivo' and contact_name = 'Caja'
@@ -196,4 +196,48 @@ update public.push_jobs set status = 'SENDING', attempt_count = 1, locked_at = n
 begin; set local role service_role; create temp table t_c6 as select * from public.claim_push_jobs(10); commit;
 select tst.res('PUSH-05 Un envío trabado (ejecución caída > 10 min) se recupera', (select count(*) from t_c6) = 1, '');
 update public.push_jobs set status = 'SKIPPED';
+
+-- ===== PARCHE: el chofer agrega una UBICACIÓN INTERNA G2 (segunda visita a Montecaseros) =====
+select tst.res('WORD-01 Aviso de hoja interna cuenta PARADAS (no entregas)', (select bool_and(body ~ ' paradas$') and bool_and(body !~ 'entregas') and count(*) >= 1 from public.notifications where user_id = :'G' and type = 'NUEVA_HOJA_PUBLICADA' and route_id = (select id from t_r)),
+  (select string_agg(body, ' | ') from public.notifications where user_id = :'G' and type = 'NUEVA_HOJA_PUBLICADA' and route_id = (select id from t_r)));
+begin; select tst.u(:'A'); set local role authenticated;
+-- G2 reactivado y movido: el snapshot de la parada nueva debe tomar ESTE punto, y la original conservar el suyo
+select public.upsert_internal_location('{"location_key":"MONTECASEROS","name":"Montecaseros - casa central","address":"Montecaseros 1529, Ciudad Mendoza","lat":-32.8000,"lon":-68.8000,"radius_m":120,"active":true}');
+commit;
+begin; select tst.u(:'G'); set local role authenticated;
+select tst.res('DRVLOC-00 El chofer ve las G2 activas para elegir (sin coordenadas)', exists (select 1 from public.driver_internal_locations() where location_key = 'MONTECASEROS' and address = 'Montecaseros 1529, Ciudad Mendoza'), '');
+create temp table t_v2 as select version from public.routes where id = (select id from t_r); grant select on t_v2 to public;
+select public.add_internal_stop((select id from t_r), '{"id":"5e5e5e5e-0000-0000-0000-000000000001","stop_type":"UBICACION_INTERNA","internal_location_key":"montecaseros","client_name":"lo que sea","address":"otra dirección","instructions":"Retirar documentación","order_numbers":["71001","99999"]}', (select version from t_v2), 'g2-loc-1');
+select public.add_internal_stop((select id from t_r), '{"id":"5e5e5e5e-0000-0000-0000-000000000001","stop_type":"UBICACION_INTERNA","internal_location_key":"montecaseros","instructions":"Retirar documentación"}', (select version from t_v2), 'g2-loc-1');
+select tst.expect('DRVLOC-06 G2 inexistente o desactivada → rechazada', format($q$ select public.add_internal_stop(%L, '{"stop_type":"UBICACION_INTERNA","internal_location_key":"NO_EXISTE"}', %s, 'g2-loc-x') $q$,
+  (select id from t_r), (select version from public.routes where id = (select id from t_r))), 'INTERNAL_LOCATION_INACTIVE%');
+commit;
+create temp table t_d2 as select * from public.route_stops where id = '5e5e5e5e-0000-0000-0000-000000000001'; grant select on t_d2 to public;
+select tst.res('DRVLOC-01 Segunda visita a Montecaseros agregada por el chofer: UBICACION_INTERNA, DRIVER, al final, nombre/domicilio de G2, observación',
+  d.internal_location_key = 'MONTECASEROS' and d.client_name = 'Montecaseros - casa central' and d.address = 'Montecaseros 1529, Ciudad Mendoza'
+  and d.instructions = 'Retirar documentación' and d.added_by = :'G' and d.added_at is not null and d.outcome = 'PENDIENTE'
+  and d.sequence_number = (select max(sequence_number) from public.route_stops where route_id = (select id from t_r)), d.client_name || ' · ' || d.address) from t_d2 d;
+select tst.res('DRVLOC-02 Snapshot GPS tomado AL AGREGARLA (punto y radio vigentes en G2 en ese momento)', expected_lat = -32.80 and expected_lon = -68.80 and expected_radius_m = 120 and internal_location_updated_at is not null, '') from t_d2;
+select tst.res('DRVLOC-03 El chofer NO asocia pedidos ni montos (los ignora el servidor)', coalesce(array_length(order_numbers, 1), 0) = 0 and merchandise_amount = 0 and customer_email is null, coalesce(array_to_string(order_numbers, ','), '')) from t_d2;
+select tst.res('DRVLOC-04 Mismo client_op_id dos veces → UNA sola parada nueva; versión +1 y auditada una vez', (select count(*) from public.route_stops where route_id = (select id from t_r) and provenance = 'DRIVER' and stop_type = 'UBICACION_INTERNA') = 1
+  and (select version from public.routes where id = (select id from t_r)) = (select version from t_v2) + 1
+  and (select count(*) from public.route_change_events where client_op_id = 'g2-loc-1') = 1, '');
+select tst.res('DRVLOC-05 La parada Montecaseros ORIGINAL no cambió (pedidos, snapshot, resultado)', order_numbers = array['71001','71002','71003','71004'] and expected_lat = -32.89 and expected_radius_m = 200 and outcome = 'ENTREGADO', '')
+  from public.route_stops where id = (select id from t_s where stop_type = 'UBICACION_INTERNA');
+begin; select tst.u(:'A'); set local role authenticated;
+select public.upsert_internal_location('{"location_key":"MONTECASEROS","name":"Montecaseros - casa central","address":"Montecaseros 1529, Ciudad Mendoza","lat":-33.9,"lon":-69.9,"radius_m":30,"active":true}');
+commit;
+begin; select tst.u(:'G'); set local role authenticated;
+select public.arrive_stop((select id from t_d2), '{"lat":-32.8001,"lon":-68.8001,"accuracy":5}', 'g2-loc-arr');
+select tst.expect('DRVLOC-07 Recepción en una G2 SIN pedidos también exige receptor y firma', format($q$ select public.set_stop_outcome(%L, 'ENTREGADO', null, null, 'g2-loc-o0', '{"location":{"lat":-32.8001,"lon":-68.8001}}') $q$, (select id from t_d2)), 'EVIDENCE_REQUIRED%');
+select public.set_stop_outcome((select id from t_d2), 'ENTREGADO', null, null, 'g2-loc-o1', '{"evidence":{"receiver_name":"Encargada turno tarde","signature_png_b64":"iVBORw0KGgo=","email":"x@y.com"},"location":{"lat":-32.8001,"lon":-68.8001}}');
+commit;
+select tst.res('DRVLOC-08 GPS de la segunda visita contra SU snapshot (G2 movido otra vez después de agregarla)', (arrive_location->>'validation_source') = 'INTERNAL_SNAPSHOT' and (arrive_location->>'expected_lat')::float8 = -32.80
+  and (arrive_location->>'radius_m')::int = 120 and arrive_location->>'outside_m' is null, arrive_location::text) from public.route_stops where id = (select id from t_d2);
+select tst.res('DRVLOC-09 Cierre de la segunda visita: RECEPCION_INTERNA con firma; sin email, sin Recibido Conforme, sin cobranza',
+  (select evidence_kind from public.stop_evidence where stop_id = (select id from t_d2)) = 'RECEPCION_INTERNA' and (select receiver_email from public.stop_evidence where stop_id = (select id from t_d2)) is null
+  and not exists (select 1 from public.customer_email_jobs where stop_id = (select id from t_d2)) and not exists (select 1 from public.delivery_receipts where stop_id = (select id from t_d2))
+  and exists (select 1 from public.audit_log where action = 'INTERNAL_TRANSFER_RECEIVED' and target_id = (select id::text from t_d2)), '');
+select tst.res('UNIQ-02 La unicidad sigue vigente para paradas administrativas y no para las del chofer', exists (select 1 from pg_indexes where indexname = 'route_stops_one_admin_internal_location_per_route' and indexdef ilike '%provenance%DRIVER%')
+  and not exists (select 1 from pg_indexes where indexname = 'route_stops_one_internal_location_per_route'), '');
 

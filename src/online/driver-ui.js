@@ -13,6 +13,8 @@ const outLabel = (s, k) => s && s.stop_type === 'TAREA'
   : s && s.stop_type === 'UBICACION_INTERNA'
     ? ({ ENTREGADO: 'RECIBIDO EN SUCURSAL', ENTREGA_PARCIAL: 'RECEPCIÓN PARCIAL', NO_ENTREGADO: 'NO RECIBIDO', REPROGRAMAR: 'REPROGRAMAR' }[k] || OUT[k])
     : OUT[k];
+// Contadores GENERALES de una hoja: en Transporte Interno se mezclan traslados, tareas y entregas → "paradas". Externos: "entregas".
+const stopNoun = (r, n) => (r && r.carrier_id === 'INTERNO') ? (n === 1 ? 'parada' : 'paradas') : (n === 1 ? 'entrega' : 'entregas');
 // Observación / instrucciones de la parada (TAREA, UBICACIÓN INTERNA y paradas agregadas por el chofer)
 const stopInfo = s => {
   const contact = [s.contact_name, s.contact_phone].filter(Boolean).join(' · ');
@@ -156,7 +158,7 @@ export class DriverApp {
       '<div class="drv-tabs"><button type="button" data-t="HOY" class="' + (this.tab === 'HOY' ? 'on' : '') + '">HOY</button><button type="button" data-t="ANT" class="' + (this.tab === 'ANT' ? 'on' : '') + '">ANTERIORES</button></div>' +
       (list.length ? list.map(r => { const [b, c] = this.badge(r), bultos = r.stops.reduce((a, s) => a + (s.bultos || 0), 0);
         return '<div class="drv-card ' + c + '" data-r="' + r.id + '"><span class="drv-badge ' + c + '">' + b + '</span><b>HOJA ' + esc(r.number) + '</b><div class="drv-tp">' + esc(r.carrier_name || r.carrier_id) + '</div>' +
-          '<div class="drv-m">' + new Date(r.published_at).toLocaleDateString('es-AR') + ' · ' + r.stops.length + ' entregas' + (bultos ? ' · ' + bultos + ' bultos' : '') + '</div><button class="btn go" type="button" data-open="' + r.id + '">' + (r.operational_status === 'EN_CURSO' ? 'CONTINUAR RECORRIDO' : 'VER HOJA') + '</button></div>'; }).join('')
+          '<div class="drv-m">' + new Date(r.published_at).toLocaleDateString('es-AR') + ' · ' + r.stops.length + ' ' + stopNoun(r, r.stops.length) + (bultos ? ' · ' + bultos + ' bultos' : '') + '</div><button class="btn go" type="button" data-open="' + r.id + '">' + (r.operational_status === 'EN_CURSO' ? 'CONTINUAR RECORRIDO' : 'VER HOJA') + '</button></div>'; }).join('')
         : '<p class="drv-empty">' + (this.tab === 'HOY' ? 'No tenés hojas publicadas hoy.' : 'Sin hojas anteriores.') + '</p>');
     el.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { this.tab = b.dataset.t; this.render(); });
     const sq = el.querySelector('#drvSearch'); sq.oninput = () => { this.q = sq.value; const pos = sq.selectionStart; this.render(); const n = document.getElementById('drvSearch'); n.focus(); n.setSelectionRange(pos, pos); };
@@ -169,7 +171,7 @@ export class DriverApp {
     const pend = r.stops.filter(s => s.outcome === 'PENDIENTE').length;
     const internal = r.carrier_id === 'INTERNO' && running, cur = currentStop(r.stops), fut = futureStops(r.stops).map(s => s.id);
     el.innerHTML = '<button class="linkbtn" type="button" id="drvBack">← Mis hojas</button><div class="drv-title">HOJA ' + esc(r.number) + ' · ' + esc(r.carrier_name || r.carrier_id) + '</div>' +
-      '<div class="drv-m">' + r.stops.length + ' entregas · ' + this.badge(r)[0] + (r.started_at ? ' · iniciada ' + hhmm(r.started_at) : '') + (closed ? ' · finalizada ' + hhmm(r.completed_at) : '') + '</div>' +
+      '<div class="drv-m">' + r.stops.length + ' ' + stopNoun(r, r.stops.length) + ' · ' + this.badge(r)[0] + (r.started_at ? ' · iniciada ' + hhmm(r.started_at) : '') + (closed ? ' · finalizada ' + hhmm(r.completed_at) : '') + '</div>' +
       (r.approval_status === 'OBSERVADA' && r.review_note ? '<div class="drv-q">ACLARACIÓN SOLICITADA: ' + esc(r.review_note) + '</div>' : '') +
       byOrder(r.stops).map((s, i) => '<div class="drv-stop' + (internal && cur && s.id === cur.id ? ' cur' : '') + (internal && fut.includes(s.id) ? ' fut' : '') + (s.provenance === 'DRIVER' ? ' drv-new' : '') + '" data-s="' + s.id + '"' + (internal && fut.includes(s.id) ? ' draggable="true"' : '') + '><div class="drv-sh"><i>' + (i + 1) + '</i><div><b>' + esc(s.client_name) + '</b>' + (s.provenance === 'DRIVER' ? '<span class="drv-tag">AGREGADA</span>' : '') + (s.stop_type === 'UBICACION_INTERNA' ? '<span class="drv-tag">UBICACIÓN</span>' : '') + (s.stop_type === 'TAREA' ? '<span class="drv-tag">TAREA</span>' : '') + (internal && cur && s.id === cur.id ? '<span class="drv-tag">ACTUAL</span>' : '') + (s.action && s.action !== 'ENTREGA' ? ' · ' + esc(s.action) : '') + (s.bultos ? ' · ' + s.bultos + ' bultos' : '') + '<small>' + esc(s.address || '') + (s.order_numbers && s.order_numbers.length ? ' · Pedido ' + esc(s.order_numbers.join(' + ')) : '') + '</small></div>' +
         (s.outcome !== 'PENDIENTE' ? '<span class="drv-out ' + s.outcome + '">' + outLabel(s, s.outcome) + '</span>' : (internal && fut.includes(s.id) ? '<span class="drv-move"><button type="button" data-up title="Subir">↑</button><button type="button" data-down title="Bajar">↓</button></span>' : '')) + '</div>' +
@@ -179,13 +181,18 @@ export class DriverApp {
         (running ? '<div class="drv-acts">' + Object.keys(OUT).map(k => '<button type="button" class="btn ' + (s.outcome === k ? 'dark' : 'soft') + '" data-o="' + k + '">' + outLabel(s, k) + '</button>').join('') + '</div>' +
           '<div class="drv-form" hidden></div>' : '') +
         (running && s.outcome === 'PENDIENTE' && cur && s.id === cur.id ? (s.arrived_at ? '<small class="drv-note">Llegada registrada ' + hhmm(s.arrived_at) + (s.arrive_location && s.arrive_location.missing_reason ? ' · sin ubicación' : '') + '</small>' : '<button class="btn soft drv-arrive" type="button" data-arrive>LLEGUÉ A LA PARADA</button>') : '') + '</div>').join('') +
-      (internal ? '<button class="btn soft" type="button" id="drvAddOpen">+ AGREGAR PARADA</button><div class="drv-add" id="drvAdd" hidden><b class="drv-ft">NUEVA PARADA (TAREA FUTURA)</b><input class="ed" id="naName" placeholder="Destino / qué hay que hacer (obligatorio)"><input class="ed" id="naAddr" placeholder="Domicilio">' +
-        '<textarea class="ed" id="naIns" rows="2" placeholder="Instrucciones (ej. depositar efectivo)"></textarea><input class="ed" id="naCon" placeholder="Contacto (opcional)"><input class="ed" id="naTel" inputmode="tel" placeholder="Teléfono (opcional)">' +
-        '<small>Se agrega al final del recorrido. No modifica paradas existentes ni ubicaciones guardadas.</small><button class="btn dark" type="button" id="naSave">AGREGAR</button><span class="shiperr" id="naErr" hidden></span></div>' : '') +
+      (internal ? '<button class="btn soft" type="button" id="drvAddOpen">+ AGREGAR PARADA</button><div class="drv-add" id="drvAdd" hidden><b class="drv-ft">NUEVA PARADA</b>' +
+        '<div class="drv-type" role="radiogroup" aria-label="Tipo de parada"><b>TIPO DE PARADA</b><div class="drv-seg"><button type="button" class="btn dark" data-ntype="TAREA" aria-pressed="true">TAREA</button><button type="button" class="btn soft" data-ntype="UBICACION_INTERNA" aria-pressed="false">UBICACIÓN INTERNA</button></div></div>' +
+        '<div data-nt="TAREA"><input class="ed" id="naName" placeholder="Destino / qué hay que hacer (obligatorio)"><input class="ed" id="naAddr" placeholder="Domicilio"></div>' +
+        '<div data-nt="UBICACION_INTERNA" hidden><input class="ed" id="naLocQ" type="search" placeholder="Buscar ubicación (Montecaseros, San Juan…)" autocomplete="off"><div class="drv-loclist" id="naLocList"></div>' +
+        '<div class="drv-locpick" id="naLocPick" hidden></div></div>' +
+        '<textarea class="ed" id="naIns" rows="2" placeholder="Observación / instrucciones (ej. retirar documentación)"></textarea>' +
+        '<div data-nt="TAREA"><input class="ed" id="naCon" placeholder="Contacto (opcional)"><input class="ed" id="naTel" inputmode="tel" placeholder="Teléfono (opcional)"></div>' +
+        '<small>Se agrega al final del recorrido. No modifica paradas existentes, pedidos ni ubicaciones guardadas.</small><button class="btn dark" type="button" id="naSave">AGREGAR PARADA</button><span class="shiperr" id="naErr" hidden></span></div>' : '') +
       (r.operational_status === 'PUBLICADA' && !this.readOnly && r.vehicle_id ? '<label class="drv-km">KM INICIAL del vehículo ' + esc(r.vehicle_plate || '') + ' (obligatorio) <input class="ed" id="drvKmIni" inputmode="numeric"></label>' : '') +
       '<div class="drv-foot">' + (r.operational_status === 'PUBLICADA' && !this.readOnly ? '<button class="btn go" type="button" id="drvStart">INICIAR RECORRIDO</button><small>Abrir la hoja no inicia el recorrido.</small>' : '') +
       (running && r.vehicle_id ? '<label class="drv-km">KM FINAL del vehículo (inicial ' + (r.km_start ?? '—') + ') <input class="ed" id="drvKm" inputmode="numeric"></label>' : '') +
-      (running ? '<button class="btn go" type="button" id="drvFin"' + (pend ? ' disabled' : '') + '>FINALIZAR HOJA</button>' + (pend ? '<small>Faltan ' + pend + ' entregas por resolver.</small>' : '') : '') +
+      (running ? '<button class="btn go" type="button" id="drvFin"' + (pend ? ' disabled' : '') + '>FINALIZAR HOJA</button>' + (pend ? '<small>' + (pend === 1 ? 'Falta 1 ' + stopNoun(r, 1) : 'Faltan ' + pend + ' ' + stopNoun(r, pend)) + ' por resolver.</small>' : '') : '') +
       (closed ? '<b class="drv-closed">HOJA FINALIZADA · solo lectura</b><button class="btn dark" type="button" id="drvPdf">DESCARGAR PDF</button>' +
         (!this.readOnly && this.canReturn(r) ? '<button class="btn soft" type="button" id="drvRet">DEVOLVER HOJA</button><div class="drv-form" id="drvRetForm" hidden><input class="ed" id="drvRetWhy" placeholder="Motivo (obligatorio)"><button class="btn dark" type="button" id="drvRetGo">ENVIAR SOLICITUD</button><span class="shiperr" hidden></span></div>' : '') : '') + '</div>';
     el.querySelector('#drvBack').onclick = () => { this.openId = null; this.render(); };
@@ -223,12 +230,43 @@ export class DriverApp {
         const o = fut.filter(x => x !== from); o.splice(o.indexOf(id) + (fut.indexOf(from) < fut.indexOf(id) ? 1 : 0), 0, from); reorder(o); });
     });
     const open = el.querySelector('#drvAddOpen'), form = el.querySelector('#drvAdd');
+    // Tipo de parada: TAREA libre o UBICACIÓN INTERNA G2 existente (puede ser una segunda visita). La G2 es de solo lectura.
+    let ntype = 'TAREA', locs = null, pick = null;
+    const er = form.querySelector('#naErr'), fail = t => { er.textContent = t; er.hidden = false; };
+    const list = form.querySelector('#naLocList'), pickBox = form.querySelector('#naLocPick');
+    const drawList = () => {
+      const q = (form.querySelector('#naLocQ').value || '').trim().toLowerCase(), ls = (locs || []).filter(l => !q || (l.name + ' ' + (l.address || '') + ' ' + l.location_key).toLowerCase().includes(q));
+      list.innerHTML = locs == null ? '<small>Cargando ubicaciones…</small>' : ls.length ? ls.map(l => '<button type="button" class="drv-locopt" data-lk="' + esc(l.location_key) + '"><b>' + esc(l.name) + '</b><small>' + esc(l.address || '') + '</small></button>').join('') : '<small>No hay ubicaciones que coincidan.</small>';
+      list.querySelectorAll('[data-lk]').forEach(bn => bn.onclick = () => { pick = locs.find(l => l.location_key === bn.dataset.lk);
+        pickBox.innerHTML = '<span>UBICACIÓN</span><b>' + esc(pick.name) + '</b><span>Dirección</span><b>' + esc(pick.address || '—') + '</b><small>GPS: radio ' + esc(pick.radius_m) + ' m · firma de recepción obligatoria</small>';
+        pickBox.hidden = false; list.hidden = true; form.querySelector('#naLocQ').value = pick.name; });
+    };
+    const setType = t => { ntype = t; er.hidden = true;
+      form.querySelectorAll('[data-ntype]').forEach(bn => { const on = bn.dataset.ntype === t; bn.className = 'btn ' + (on ? 'dark' : 'soft'); bn.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+      form.querySelectorAll('[data-nt]').forEach(d => { d.hidden = d.dataset.nt !== t; });
+      if (t === 'UBICACION_INTERNA' && locs == null) {
+        drawList();
+        (this.api.driverInternalLocations ? this.api.driverInternalLocations() : Promise.reject(new Error('no disponible')))
+          .then(ls => { locs = ls || []; drawList(); }).catch(() => { locs = []; list.innerHTML = '<small>No se pudieron cargar las ubicaciones (¿sin conexión?). Probá de nuevo con conexión.</small>'; });
+      }
+    };
+    form.querySelectorAll('[data-ntype]').forEach(bn => bn.onclick = () => setType(bn.dataset.ntype));
+    form.querySelector('#naLocQ').oninput = () => { pick = null; pickBox.hidden = true; list.hidden = false; drawList(); };
     open.onclick = () => { form.hidden = false; form.querySelector('#naName').focus(); };
     form.querySelector('#naSave').onclick = async () => {
-      const name = form.querySelector('#naName').value.trim(), er = form.querySelector('#naErr');
-      if (!name) { er.textContent = 'Indicá el destino.'; er.hidden = false; return; }
-      await this.act('addStop', { route: r.id, version: r.version || 1, stop: { id: (crypto.randomUUID ? crypto.randomUUID() : uid()), client_name: name, address: form.querySelector('#naAddr').value.trim(), action: 'ENTREGA',
-        stop_type: 'TAREA', instructions: form.querySelector('#naIns').value.trim(), contact_name: form.querySelector('#naCon').value.trim(), contact_phone: form.querySelector('#naTel').value.trim() } });
+      const ins = form.querySelector('#naIns').value.trim(), id = (crypto.randomUUID ? crypto.randomUUID() : uid());
+      let stop;
+      if (ntype === 'UBICACION_INTERNA') {
+        if (!pick) return fail('Elegí la ubicación interna.');
+        // sin pedidos ni montos: los pedidos siguen siendo administrativos
+        stop = { id, stop_type: 'UBICACION_INTERNA', internal_location_key: pick.location_key, client_name: pick.name, address: pick.address || '', action: 'ENTREGA', instructions: ins };
+      } else {
+        const name = form.querySelector('#naName').value.trim(); if (!name) return fail('Indicá el destino.');
+        stop = { id, stop_type: 'TAREA', client_name: name, address: form.querySelector('#naAddr').value.trim(), action: 'ENTREGA', instructions: ins,
+          contact_name: form.querySelector('#naCon').value.trim(), contact_phone: form.querySelector('#naTel').value.trim() };
+      }
+      const bn = form.querySelector('#naSave'); bn.disabled = true;   // evita el doble toque (además el servidor es idempotente)
+      try { await this.act('addStop', { route: r.id, version: r.version || 1, stop }); } finally { bn.disabled = false; }
       this.render();
     };
   }

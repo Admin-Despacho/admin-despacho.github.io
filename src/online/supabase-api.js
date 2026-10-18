@@ -216,6 +216,7 @@ export class SupabaseApi {
   async revokePasskey(id) { return this._rpc('revoke_passkey', { p_id: id }); }
   async pushPublicKey() { return this._rpc('push_public_key', {}); }
   async savePushSubscription(p) { return this._rpc('save_push_subscription', { p }); }
+  async driverInternalLocations() { return (await this._rpc('driver_internal_locations', {})) || []; }
   async revokePushSubscription(endpoint) { return this._rpc('revoke_push_subscription', { p_endpoint: endpoint }); }
   async flushPushQueue() { const { data, error } = await this._invoke('push-notifications', { body: { action: 'flush' } }); if (error) throw error; return data; }
   async myNotifications() { const { data } = await this.sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(50); return data || []; }

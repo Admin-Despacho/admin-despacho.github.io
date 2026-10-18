@@ -84,10 +84,22 @@ async def main():
                 res('RESP-OVL-' + str(w), f'Celular {w}: el pie fijo no tapa la firma ni GUARDAR de la parada abierta', ov == 0, 'superpuestos=' + str(ov))
                 await pg.click('#drvAddOpen'); await pg.wait_for_timeout(300); await pg.locator('#drvAdd').scroll_into_view_if_needed()
                 await pg.screenshot(path=os.path.join(OUT, tag + '_5_agregar_parada.png'), full_page=True); m5 = await pg.evaluate(MEASURE, None)
+                # selector nuevo: TIPO → UBICACIÓN INTERNA → búsqueda G2 → elegir → observación (y que el pie no tape nada)
+                await pg.click('[data-ntype="UBICACION_INTERNA"]'); await pg.wait_for_timeout(600)
+                await pg.locator('#naLocQ').scroll_into_view_if_needed(); await pg.fill('#naLocQ', 'mon'); await pg.wait_for_timeout(300)
+                await pg.screenshot(path=os.path.join(OUT, tag + '_6_agregar_parada_tipo_y_busqueda_g2.png'), full_page=True); m6 = await pg.evaluate(MEASURE, None)
+                await pg.click('#naLocList [data-lk="MONTECASEROS"]'); await pg.fill('#naIns', 'Retirar documentación firmada por el encargado de depósito'); await pg.locator('#naSave').scroll_into_view_if_needed(); await pg.wait_for_timeout(200)
+                await pg.screenshot(path=os.path.join(OUT, tag + '_7_agregar_parada_g2_elegida.png'), full_page=True); m7 = await pg.evaluate(MEASURE, None)
+                ov2 = await pg.evaluate('''()=>{const f=document.querySelector('.drv-foot'); if(!f||getComputedStyle(f).position!=='sticky') return 0; const fr=f.getBoundingClientRect(), H=innerHeight;
+                  return ['#naSave','#naIns','#naLocPick','[data-ntype="UBICACION_INTERNA"]'].map(q=>document.querySelector(q)).filter(e=>{if(!e) return false; const r=e.getBoundingClientRect();
+                    const vis=Math.min(r.bottom,H)>Math.max(r.top,0); return vis && !(r.bottom<=fr.top||r.top>=fr.bottom);}).length;}''')
+                seg = await pg.locator('[data-ntype]').evaluate_all('e=>e.map(x=>{const r=x.getBoundingClientRect(); return [Math.round(r.width),Math.round(r.height)]})')
+                res('RESP-ADD-' + str(w), f'Celular {w}: selector TAREA / UBICACIÓN INTERNA + búsqueda G2 cómodo (botones ≥ 44 px de alto, sin desborde ni superposición con el pie)',
+                    all(m['over'] <= 0 and not m['wide'] and not m['outside'] for m in (m6, m7)) and ov2 == 0 and all(hh >= 44 for _, hh in seg), json.dumps({'m6': m6, 'm7': m7, 'ov': ov2, 'seg': seg})[:190])
                 fin = await pg.locator('#drvFin').bounding_box() if await pg.locator('#drvFin').count() else None
-                ms = [m1, m2, m3, m4, m5]
+                ms = [m1, m2, m3, m4, m5, m6, m7]
                 ok = all(m['over'] <= 0 and not m['wide'] and not m['outside'] and m['cut'] == 0 for m in ms) and sig and sig['width'] <= w and (fin is None or fin['width'] <= w)
-                res('RESP-MOV-' + str(w), f'Celular {w}x{h}: sin scroll horizontal, nada más ancho que la pantalla, sin controles afuera ni texto cortado (5 pantallas)', ok,
+                res('RESP-MOV-' + str(w), f'Celular {w}x{h}: sin scroll horizontal, nada más ancho que la pantalla, sin controles afuera ni texto cortado (7 pantallas)', ok,
                     json.dumps([{k: v for k, v in m.items() if k != 'W' and v} for m in ms])[:190])
                 smalls = sorted(set(sum([m['small'] for m in ms], [])))
                 res('RESP-TAP-' + str(w), f'Celular {w}: botones con tamaño táctil ≥ 30 px', not smalls, smalls)

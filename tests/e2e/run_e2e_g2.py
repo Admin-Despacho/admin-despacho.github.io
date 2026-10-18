@@ -168,6 +168,44 @@ async def main():
             res('DRV-UI-02', 'Parada agregada por el chofer: TAREA, DRIVER, al final, con instrucciones, versionada y auditada', len(d0) == 1 and d0[0]['stop_type'] == 'TAREA' and d0[0]['instructions'] == 'Depositar efectivo'
                 and d0[0]['sequence_number'] == max(x['sequence_number'] for x in rr['stops']) and d0[0]['added_by'] == 'u-gabriel' and any(e['type'] == 'INTERNAL_STOP_ADDED' for e in rr['events'])
                 and any(a['action'] == 'INTERNAL_STOP_ADDED' for a in st['audit']) and 'AGREGADA' in await gb.locator('.drv-stop', has_text='Banco Nación').inner_text())
+            # ===== PARCHE: el chofer vuelve EXPLÍCITAMENTE a Montecaseros (segunda visita) desde + AGREGAR PARADA =====
+            await ad.evaluate(f'()=>{API}.saveInternalLocation({{location_key:"MONTECASEROS",name:"Montecaseros - casa central",address:"Montecaseros 1529, Ciudad Mendoza",lat:-32.80,lon:-68.80,radius_m:120,active:true}})')
+            await gb.reload(); await gb.wait_for_timeout(1500); await pin(gb)
+            if await gb.locator(f'[data-open="{route["id"]}"]').count(): await gb.click(f'[data-open="{route["id"]}"]'); await gb.wait_for_timeout(600)
+            head = await gb.inner_text('.drv-m'); foot = await gb.inner_text('.drv-foot')
+            res('WORD-UI-01', 'Hoja interna: los contadores generales dicen PARADAS (no entregas)', 'paradas' in head and 'entregas' not in head and ('paradas por resolver' in foot or 'parada por resolver' in foot), head + ' / ' + foot.replace('\n', ' '))
+            await gb.click('#drvAddOpen'); await gb.click('[data-ntype="UBICACION_INTERNA"]'); await gb.wait_for_timeout(700)
+            await gb.fill('#naLocQ', 'monte'); await gb.wait_for_timeout(300)
+            opts = await gb.eval_on_selector_all('#naLocList [data-lk]', 'e=>e.map(x=>x.dataset.lk)')
+            await gb.click('#naLocList [data-lk="MONTECASEROS"]'); await gb.wait_for_timeout(200)
+            pick = await gb.inner_text('#naLocPick'); ro = await gb.locator('#drvAdd [data-nt="UBICACION_INTERNA"] input:not(#naLocQ), #drvAdd [data-nt="UBICACION_INTERNA"] textarea').count()
+            await gb.fill('#naIns', 'Retirar documentación'); await gb.click('#naSave'); await gb.wait_for_timeout(1400)
+            st = await gb.evaluate(DB); rr = [x for x in st['routes2'] if x['id'] == route['id']][0]
+            g2d = [x for x in rr['stops'] if x.get('provenance') == 'DRIVER' and x.get('stop_type') == 'UBICACION_INTERNA']
+            orig = [x for x in rr['stops'] if x.get('provenance') != 'DRIVER' and x.get('stop_type') == 'UBICACION_INTERNA'][0]
+            res('DRVLOC-UI-01', 'El chofer elige Montecaseros en + AGREGAR PARADA: nueva parada futura UBICACION_INTERNA, DRIVER, datos de G2 (solo lectura), GPS/radio de G2, sin pedidos',
+                opts == ['MONTECASEROS'] and 'Montecaseros 1529' in pick and ro == 0 and len(g2d) == 1 and g2d[0]['internal_location_key'] == 'MONTECASEROS' and g2d[0]['client_name'] == 'Montecaseros - casa central'
+                and g2d[0]['address'] == 'Montecaseros 1529, Ciudad Mendoza' and g2d[0]['expected_lat'] == -32.80 and g2d[0]['expected_radius_m'] == 120 and g2d[0]['order_numbers'] == []
+                and g2d[0]['instructions'] == 'Retirar documentación' and g2d[0]['sequence_number'] == max(x['sequence_number'] for x in rr['stops']), json.dumps(g2d)[:150])
+            res('DRVLOC-UI-02', 'La parada Montecaseros ORIGINAL no cambió (pedidos y snapshot)', orig['order_numbers'] == [orders[0], orders[2]] and orig['expected_lat'] == -32.89 and orig['outcome'] == 'ENTREGADO')
+            # reintento del celular con el MISMO client_op_id → una sola parada
+            ver = rr['version']
+            await gb.evaluate(f'''async()=>{{const s={{id:"aaaaaaaa-0000-4000-8000-000000000001",stop_type:"UBICACION_INTERNA",internal_location_key:"SAN_JUAN",instructions:"reintento"}};
+              await {API}.addInternalStop("{route['id']}", s, {ver}, "op-retry-1"); try {{ await {API}.addInternalStop("{route['id']}", s, {ver}, "op-retry-1"); }} catch(e) {{}} }}''')
+            st = await gb.evaluate(DB); rr = [x for x in st['routes2'] if x['id'] == route['id']][0]
+            res('DRVLOC-UI-03', 'Reintento con el mismo client_op_id → UNA sola parada', sum(1 for x in rr['stops'] if x.get('instructions') == 'reintento') == 1)
+            # cerrar la segunda visita: firma obligatoria aunque no tenga pedidos
+            await gb.reload(); await gb.wait_for_timeout(1500); await pin(gb)
+            if await gb.locator(f'[data-open="{route["id"]}"]').count(): await gb.click(f'[data-open="{route["id"]}"]'); await gb.wait_for_timeout(600)
+            c2 = gb.locator('.drv-stop', has_text='Retirar documentación').first
+            ctext = await c2.inner_text()
+            await c2.locator('[data-o="ENTREGADO"]').click(); await gb.wait_for_timeout(400)
+            await c2.locator('[data-save]').click(); await gb.wait_for_timeout(600); e2 = await c2.locator('.drv-form .shiperr').inner_text()
+            await c2.locator('.drv-form [data-f="recv"]').fill('Encargada turno tarde'); await sign(gb, '.drv-stop:has-text("Retirar documentación") [data-sig]')
+            await c2.locator('[data-save]').click(); await gb.wait_for_timeout(1500)
+            st = await gb.evaluate(DB); d2 = [x for x in [x for x in st['routes2'] if x['id'] == route['id']][0]['stops'] if x.get('instructions') == 'Retirar documentación'][0]
+            res('DRVLOC-UI-04', 'Segunda visita sin pedidos: exige receptor + firma; queda RECEPCION_INTERNA sin email comercial', 'AGREGADA' in ctext and 'sucursal' in e2.lower() and d2['outcome'] == 'ENTREGADO'
+                and (st.get('evidence', {}).get(d2['id']) or {}).get('evidence_kind') == 'RECEPCION_INTERNA' and not [j for j in st.get('customerJobs', []) if j['stop_id'] == d2['id']], e2)
             res('E-ERR', 'Sin errores de consola', not errs, '; '.join(errs[:2]))
             await b.close()
     finally: server.terminate()

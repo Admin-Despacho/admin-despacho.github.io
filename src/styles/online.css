@@ -687,3 +687,12 @@ td .ro{display:block;padding:6px 2px;color:inherit;cursor:default}
 #drv .linkbtn,.drv .linkbtn,.sigbox .linkbtn,#drvBack{min-height:36px;min-width:44px;padding:6px 8px;display:inline-flex;align-items:center}
 /* Mientras se completa una parada (firma, receptor, GUARDAR), el pie fijo no la tapa: pasa a su lugar normal al final de la hoja */
 body:has(.drv-stop .drv-form:not([hidden])) .drv-foot{position:static}
+/* + AGREGAR PARADA: tipo de parada y selector G2 (cómodo en celular) */
+.drv-type b{display:block;font-size:11.5px;letter-spacing:.05em;margin:4px 0}
+.drv-seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.drv-seg .btn{min-height:44px;justify-content:center;white-space:normal;line-height:1.15}
+.drv-loclist{display:grid;gap:6px;margin:6px 0;max-height:260px;overflow-y:auto}
+.drv-locopt{display:block;width:100%;text-align:left;min-height:48px;padding:8px 10px;border:1px solid var(--line,#d9e3e8);border-radius:10px;background:#fff;color:inherit;cursor:pointer;overflow-wrap:anywhere}
+.drv-locopt b{display:block}.drv-locopt small{display:block;color:var(--muted)}
+.drv-locpick{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;padding:8px 10px;margin:6px 0;border-radius:10px;background:var(--mist,#eef3f5);overflow-wrap:anywhere}
+.drv-locpick span{font-size:11.5px;color:var(--muted);letter-spacing:.04em}.drv-locpick small{grid-column:1/-1;color:var(--muted)}
