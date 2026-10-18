@@ -7,9 +7,24 @@ import { byOrder, currentStop, futureStops } from '../../supabase/functions/_sha
 import { passkeysSupported } from './webauthn.js';
 
 const OUT = { ENTREGADO: 'ENTREGADO', ENTREGA_PARCIAL: 'ENTREGA PARCIAL', NO_ENTREGADO: 'NO ENTREGADO', REPROGRAMAR: 'REPROGRAMAR' };
+// Resultados por tipo: TAREA (operativa) y UBICACIÓN INTERNA (traslado entre sucursales) no son entregas al cliente
 const outLabel = (s, k) => s && s.stop_type === 'TAREA'
   ? ({ ENTREGADO: 'REALIZADO', ENTREGA_PARCIAL: 'REALIZADO PARCIAL', NO_ENTREGADO: 'NO REALIZADO', REPROGRAMAR: 'REPROGRAMAR' }[k] || OUT[k])
-  : OUT[k];
+  : s && s.stop_type === 'UBICACION_INTERNA'
+    ? ({ ENTREGADO: 'RECIBIDO EN SUCURSAL', ENTREGA_PARCIAL: 'RECEPCIÓN PARCIAL', NO_ENTREGADO: 'NO RECIBIDO', REPROGRAMAR: 'REPROGRAMAR' }[k] || OUT[k])
+    : OUT[k];
+// Observación / instrucciones de la parada (TAREA, UBICACIÓN INTERNA y paradas agregadas por el chofer)
+const stopInfo = s => {
+  const contact = [s.contact_name, s.contact_phone].filter(Boolean).join(' · ');
+  if (s.stop_type === 'UBICACION_INTERNA') return '<div class="drv-loc"><b>TRASLADO INTERNO</b> · no es entrega al cliente' +
+    ((s.order_numbers || []).length ? '<div class="drv-locorders"><b>PEDIDOS (' + s.order_numbers.length + ')</b> ' + s.order_numbers.map(n => '<span>' + esc(n) + '</span>').join('') + '</div>' : '') +
+    (s.instructions ? '<div class="drv-obs"><b>OBSERVACIÓN</b><span>' + esc(s.instructions) + '</span></div>' : '') +
+    (s.expected_radius_m ? '<small>GPS: radio ' + esc(s.expected_radius_m) + ' m</small>' : '') + '</div>';
+  if (s.stop_type === 'TAREA' || s.instructions) return '<div class="drv-loc">' + (s.stop_type === 'TAREA' ? '<b>TAREA</b>' : '') +
+    (s.instructions ? '<div class="drv-obs"><b>' + (s.stop_type === 'TAREA' ? 'INSTRUCCIONES' : 'OBSERVACIÓN') + '</b><span>' + esc(s.instructions) + '</span></div>' : '') +
+    (contact ? '<small>Contacto: ' + esc(contact) + '</small>' : '') + '</div>';
+  return '';
+};
 const LIVE = { live: ['EN VIVO', ''], off: ['SIN CONEXIÓN', 'off'], sync: ['SINCRONIZANDO', 'sync'], rec: ['RECONECTANDO', 'rec'] };
 const uid = () => 'op-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const day = iso => iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Mendoza' }).format(new Date(iso)) : '';
@@ -158,14 +173,15 @@ export class DriverApp {
       (r.approval_status === 'OBSERVADA' && r.review_note ? '<div class="drv-q">ACLARACIÓN SOLICITADA: ' + esc(r.review_note) + '</div>' : '') +
       byOrder(r.stops).map((s, i) => '<div class="drv-stop' + (internal && cur && s.id === cur.id ? ' cur' : '') + (internal && fut.includes(s.id) ? ' fut' : '') + (s.provenance === 'DRIVER' ? ' drv-new' : '') + '" data-s="' + s.id + '"' + (internal && fut.includes(s.id) ? ' draggable="true"' : '') + '><div class="drv-sh"><i>' + (i + 1) + '</i><div><b>' + esc(s.client_name) + '</b>' + (s.provenance === 'DRIVER' ? '<span class="drv-tag">AGREGADA</span>' : '') + (s.stop_type === 'UBICACION_INTERNA' ? '<span class="drv-tag">UBICACIÓN</span>' : '') + (s.stop_type === 'TAREA' ? '<span class="drv-tag">TAREA</span>' : '') + (internal && cur && s.id === cur.id ? '<span class="drv-tag">ACTUAL</span>' : '') + (s.action && s.action !== 'ENTREGA' ? ' · ' + esc(s.action) : '') + (s.bultos ? ' · ' + s.bultos + ' bultos' : '') + '<small>' + esc(s.address || '') + (s.order_numbers && s.order_numbers.length ? ' · Pedido ' + esc(s.order_numbers.join(' + ')) : '') + '</small></div>' +
         (s.outcome !== 'PENDIENTE' ? '<span class="drv-out ' + s.outcome + '">' + outLabel(s, s.outcome) + '</span>' : (internal && fut.includes(s.id) ? '<span class="drv-move"><button type="button" data-up title="Subir">↑</button><button type="button" data-down title="Bajar">↓</button></span>' : '')) + '</div>' +
-        (s.stop_type === 'TAREA' ? '<small class="drv-note"><b>TAREA</b>' + (s.instructions ? ' · ' + esc(s.instructions) : '') + (s.contact_name || s.contact_phone ? '<br>Contacto: ' + esc([s.contact_name, s.contact_phone].filter(Boolean).join(' · ')) : '') + '</small>' : '') +
+        stopInfo(s) +
         (s.outcome_note || s.outcome_reason ? '<small class="drv-note">' + esc(s.outcome_note || s.outcome_reason) + '</small>' : '') +
         (s.location_warning ? '<small class="drv-note"><b>⚠ ' + esc(s.location_warning) + '</b></small>' : '') +
         (running ? '<div class="drv-acts">' + Object.keys(OUT).map(k => '<button type="button" class="btn ' + (s.outcome === k ? 'dark' : 'soft') + '" data-o="' + k + '">' + outLabel(s, k) + '</button>').join('') + '</div>' +
           '<div class="drv-form" hidden></div>' : '') +
         (running && s.outcome === 'PENDIENTE' && cur && s.id === cur.id ? (s.arrived_at ? '<small class="drv-note">Llegada registrada ' + hhmm(s.arrived_at) + (s.arrive_location && s.arrive_location.missing_reason ? ' · sin ubicación' : '') + '</small>' : '<button class="btn soft drv-arrive" type="button" data-arrive>LLEGUÉ A LA PARADA</button>') : '') + '</div>').join('') +
-      (internal ? '<button class="btn soft" type="button" id="drvAddOpen">+ AGREGAR PARADA</button><div class="drv-add" id="drvAdd" hidden><input class="ed" id="naName" placeholder="Destino / cliente"><input class="ed" id="naAddr" placeholder="Dirección">' +
-        '<select class="ed" id="naAct"><option>ENTREGA</option><option>RETIRO</option><option>TRÁMITE</option></select><input class="ed" id="naBul" inputmode="numeric" placeholder="Bultos"><button class="btn dark" type="button" id="naSave">AGREGAR</button><span class="shiperr" id="naErr" hidden></span></div>' : '') +
+      (internal ? '<button class="btn soft" type="button" id="drvAddOpen">+ AGREGAR PARADA</button><div class="drv-add" id="drvAdd" hidden><b class="drv-ft">NUEVA PARADA (TAREA FUTURA)</b><input class="ed" id="naName" placeholder="Destino / qué hay que hacer (obligatorio)"><input class="ed" id="naAddr" placeholder="Domicilio">' +
+        '<textarea class="ed" id="naIns" rows="2" placeholder="Instrucciones (ej. depositar efectivo)"></textarea><input class="ed" id="naCon" placeholder="Contacto (opcional)"><input class="ed" id="naTel" inputmode="tel" placeholder="Teléfono (opcional)">' +
+        '<small>Se agrega al final del recorrido. No modifica paradas existentes ni ubicaciones guardadas.</small><button class="btn dark" type="button" id="naSave">AGREGAR</button><span class="shiperr" id="naErr" hidden></span></div>' : '') +
       (r.operational_status === 'PUBLICADA' && !this.readOnly && r.vehicle_id ? '<label class="drv-km">KM INICIAL del vehículo ' + esc(r.vehicle_plate || '') + ' (obligatorio) <input class="ed" id="drvKmIni" inputmode="numeric"></label>' : '') +
       '<div class="drv-foot">' + (r.operational_status === 'PUBLICADA' && !this.readOnly ? '<button class="btn go" type="button" id="drvStart">INICIAR RECORRIDO</button><small>Abrir la hoja no inicia el recorrido.</small>' : '') +
       (running && r.vehicle_id ? '<label class="drv-km">KM FINAL del vehículo (inicial ' + (r.km_start ?? '—') + ') <input class="ed" id="drvKm" inputmode="numeric"></label>' : '') +
@@ -211,7 +227,8 @@ export class DriverApp {
     form.querySelector('#naSave').onclick = async () => {
       const name = form.querySelector('#naName').value.trim(), er = form.querySelector('#naErr');
       if (!name) { er.textContent = 'Indicá el destino.'; er.hidden = false; return; }
-      await this.act('addStop', { route: r.id, version: r.version || 1, stop: { id: (crypto.randomUUID ? crypto.randomUUID() : uid()), client_name: name, address: form.querySelector('#naAddr').value.trim(), action: form.querySelector('#naAct').value, bultos: form.querySelector('#naBul').value.trim() || null } });
+      await this.act('addStop', { route: r.id, version: r.version || 1, stop: { id: (crypto.randomUUID ? crypto.randomUUID() : uid()), client_name: name, address: form.querySelector('#naAddr').value.trim(), action: 'ENTREGA',
+        stop_type: 'TAREA', instructions: form.querySelector('#naIns').value.trim(), contact_name: form.querySelector('#naCon').value.trim(), contact_phone: form.querySelector('#naTel').value.trim() } });
       this.render();
     };
   }
@@ -247,11 +264,16 @@ export class DriverApp {
   // Resolver parada: receptor + firma (ENTREGADO/PARCIAL), CUIL/DNI (Cristian), cobranza (si corresponde), observación/motivo y ubicación final
   openForm(box, r, st, o) {
     const form = box.querySelector('.drv-form'); form.hidden = false; form.dataset.o = o;
-    const delivered = o === 'ENTREGADO' || o === 'ENTREGA_PARCIAL', cristian = ['CT-ESTE', 'CT-ALR'].includes(r.carrier_id), cob = ['COBRANZA', 'AMBAS'].includes(st.task);
-    form.innerHTML = '<b class="drv-ft">' + OUT[o] + '</b>' +
-      (delivered ? '<input class="ed" data-f="recv" placeholder="Nombre de quien recibe (obligatorio)"><div class="sigbox"><canvas width="300" height="120" data-sig></canvas><button type="button" class="linkbtn" data-sigclr>Borrar firma</button></div>' +
-        (cristian ? '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') +
-        // RC4.1: email del cliente en esta MISMA pantalla (identidad + evidencia + contacto); opcional. Con email válido y entrega total se envía el Recibido Conforme.
+    const type = st.stop_type || 'PEDIDO', task = type === 'TAREA', transfer = type === 'UBICACION_INTERNA', commercial = type === 'PEDIDO';
+    const delivered = o === 'ENTREGADO' || o === 'ENTREGA_PARCIAL', cristian = commercial && ['CT-ESTE', 'CT-ALR'].includes(r.carrier_id), cob = commercial && ['COBRANZA', 'AMBAS'].includes(st.task);
+    // TAREA: sin firma ni receptor obligatorios (GPS + observación). Traslado interno: RECEPCIÓN INTERNA firmada por la sucursal (no es Recibido Conforme).
+    const sign = delivered && !task;
+    form.innerHTML = '<b class="drv-ft">' + outLabel(st, o) + '</b>' +
+      (transfer && delivered ? '<div class="drv-rec"><b>RECEPCIÓN INTERNA DE TRASLADO</b><small>' + esc(st.client_name) + ((st.order_numbers || []).length ? ' · pedidos ' + esc(st.order_numbers.join(', ')) : '') + '</small></div>' : '') +
+      (task && o === 'ENTREGADO' ? '<input class="ed" data-f="txt" placeholder="Observación (opcional)">' : '') +
+      (sign ? '<input class="ed" data-f="recv" placeholder="' + (transfer ? 'Nombre de quien recibe en la sucursal (obligatorio)' : 'Nombre de quien recibe (obligatorio)') + '"><div class="sigbox"><canvas width="300" height="120" data-sig></canvas><button type="button" class="linkbtn" data-sigclr>Borrar firma</button></div>' : '') +
+      // pedido comercial: CUIL/DNI (Cristian) y email del cliente (Recibido Conforme). Nunca en traslado interno ni en TAREA.
+      (sign && commercial ? (cristian ? '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') +
         '<input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Email del cliente (opcional · Recibido Conforme)"><span class="drv-mailhint" data-mailhint></span>' : '') +
       (cob ? '<div class="drv-cob"><b>COBRANZA</b>' + (st.expected_amount != null ? ' · esperado $ ' + Number(st.expected_amount).toLocaleString('es-AR') : '') +
         '<select class="ed" data-f="cst"><option value="">Resultado de la cobranza…</option><option value="COBRADO">COBRADO</option><option value="COBRO_PARCIAL">COBRO PARCIAL</option><option value="NO_COBRADO">NO COBRADO</option></select>' +
@@ -296,10 +318,10 @@ export class DriverApp {
       const txt = (form.querySelector('[data-f="txt"]') || {}).value; const extra = {};
       if (o === 'ENTREGA_PARCIAL' && !String(txt || '').trim()) return fail('Entrega parcial exige observación.');
       if (['NO_ENTREGADO', 'REPROGRAMAR'].includes(o) && !String(txt || '').trim()) return fail('Indicá el motivo.');
-      if (delivered) {
+      if (sign) {
         const recv = form.querySelector('[data-f="recv"]').value.trim();
-        if (!recv) return fail('Indicá el nombre de quien recibe.');
-        if (!drawn) return fail('Falta la firma de quien recibe.');
+        if (!recv) return fail(transfer ? 'Indicá quién recibe en la sucursal.' : 'Indicá el nombre de quien recibe.');
+        if (!drawn) return fail(transfer ? 'Falta la firma de quien recibe en la sucursal.' : 'Falta la firma de quien recibe.');
         extra.evidence = { receiver_name: recv, signature_png_b64: cv.toDataURL('image/png').split(',')[1] };
         if (cristian) { const n = cu.value.replace(/\D/g, ''); if (n.length !== 11) return fail('El CUIL debe tener 11 dígitos.'); extra.evidence.cuil = n; if (dni) extra.evidence.dni_upload = dni; }
         const mail = em ? em.value.trim().toLowerCase() : '';
@@ -316,7 +338,7 @@ export class DriverApp {
       ev.target.disabled = true;
       const loc = await this.locate(box); if (!loc) { ev.target.disabled = false; return; }
       extra.location = loc;
-      const ok = await this.act('outcome', { route: r.id, stop: st.id, outcome: o, note: o === 'ENTREGA_PARCIAL' ? txt : null, reason: ['NO_ENTREGADO', 'REPROGRAMAR'].includes(o) ? txt : null, extra });
+      const ok = await this.act('outcome', { route: r.id, stop: st.id, outcome: o, note: (o === 'ENTREGA_PARCIAL' || (task && o === 'ENTREGADO')) ? (String(txt || '').trim() || null) : null, reason: ['NO_ENTREGADO', 'REPROGRAMAR'].includes(o) ? txt : null, extra });
       if (!ok) ev.target.disabled = false; this.render();
     };
   }
