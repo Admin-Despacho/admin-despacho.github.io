@@ -41,3 +41,4 @@
 20261018165305_g2_tareas_traslados_revision.sql
 20261018165341_g2_driver_location_stops.sql
 20261018174637_20261018180000_g2_revoke_anon_admin_rpc.sql
+20261018192000_carrier_auto_sequence.sql
