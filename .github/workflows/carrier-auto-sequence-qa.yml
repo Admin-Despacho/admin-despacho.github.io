@@ -11,7 +11,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - run: bash tests/sql/run.sh
+      - name: SQL G2 regression (isolated)
+        env:
+          SQL_TESTS: g2_revision_test
+        run: bash tests/sql/run.sh
   frontend:
     runs-on: ubuntu-24.04
     steps:
