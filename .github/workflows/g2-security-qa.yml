@@ -9,6 +9,8 @@ on:
       - 'tests/sql/g2_revision_test.sql'
       - 'tests/sql/migration_order.txt'
       - '.github/workflows/g2-security-qa.yml'
+      - 'tests/e2e/generate_synthetic_excel.py'
+      - 'tests/e2e/verify_synthetic_excel.mjs'
   workflow_dispatch:
 
 permissions:
@@ -25,3 +27,13 @@ jobs:
           SQL_TESTS: g2_revision_test
           SKIP_CONCURRENCY: "1"
         run: bash tests/sql/run.sh
+
+  synthetic-excel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate synthetic import fixtures
+        run: python3 tests/e2e/generate_synthetic_excel.py
+      - name: Validate fixtures with the production import parser
+        run: node tests/e2e/verify_synthetic_excel.mjs
