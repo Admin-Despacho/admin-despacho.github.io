@@ -1,0 +1,27 @@
+name: G2 Security QA (no deploy)
+
+on:
+  push:
+    branches:
+      - fix/g2-chatgpt-final-review
+    paths:
+      - 'supabase/migrations/20261018180000_g2_revoke_anon_admin_rpc.sql'
+      - 'tests/sql/g2_revision_test.sql'
+      - 'tests/sql/migration_order.txt'
+      - '.github/workflows/g2-security-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-sql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify only authorized database roles can execute G2 administration
+        env:
+          SQL_TESTS: g2_revision_test
+          SKIP_CONCURRENCY: "1"
+        run: bash tests/sql/run.sh
