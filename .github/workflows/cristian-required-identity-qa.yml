@@ -1,0 +1,45 @@
+name: Cristian Required Identity QA (no deploy)
+on:
+  push:
+    branches: [fix/cristian-required-email-dni]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sql-g2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Isolated SQL G2 regression
+        env:
+          SQL_TESTS: g2_revision_test
+        run: bash tests/sql/run.sh
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run tests/unit/driver-offline.test.js tests/unit/supabase-api.test.js
+      - name: Confirm UI and server mandatory rules
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const ui=fs.readFileSync('src/online/driver-ui.js','utf8');
+          const sql=fs.readFileSync('supabase/migrations/20261018191924_20261018201000_cristian_email_dni_required.sql','utf8');
+          assert(ui.includes("if (cristian && !mail) return fail("));
+          assert(ui.includes("if (!dniRegistered && !dni) return fail("));
+          assert(ui.includes("dniRegistered = has"));
+          assert(sql.includes('EMAIL_REQUIRED'));
+          assert(sql.includes('DNI_REQUIRED'));
+          assert(sql.includes("cristian and v_commercial"));
+          assert(sql.includes("d.storage_path is not null or d.dni_photo is not null"));
+          console.log('PASS: Cristian email and DNI required on client and server; prior DNI supported');
+          JS
