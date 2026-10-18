@@ -69,7 +69,13 @@ export class DriverApp {
     window.addEventListener('offline', () => this.setConn('off'));
     window.addEventListener('okd-net', () => (window.OKD_NET && window.OKD_NET.offline ? this.setConn('off') : this.reconnect()));
     this.api.subscribe && this.api.subscribe(() => { if (this.conn === 'live') this.load(true); });
-    this.render(); this.load('boot');
+    // Una cola conservada tras reabrir la PWA debe intentar sincronizarse.
+    // No depender exclusivamente del evento online: Android puede conservar 4G
+    // sin disparar un nuevo evento después de un fallo temporal de Supabase.
+    this.render(); this.load('boot').then(() => { if (this.queue.length && navigator.onLine) this.reconnect(); });
+    this._retryTimer = setInterval(() => {
+      if (this.queue.length && navigator.onLine && !this._syncing) this.reconnect();
+    }, 15000);
   }
   setConn(c) { this.conn = c; const el = document.getElementById('drvLive'); if (el) { el.className = 'live' + (LIVE[c][1] ? ' ' + LIVE[c][1] : ''); el.querySelector('span').textContent = LIVE[c][0]; } }
   async load(silent) {
@@ -93,14 +99,23 @@ export class DriverApp {
   }
   // Sincroniza la cola en orden; un reintento con el mismo op_id no duplica en el servidor
   async sync() {
+    if (this._syncing) return;
+    this._syncing = true;
+    try {
     if (this.queue.length) this.setConn('sync');
     while (this.queue.length) {
       const op = this.queue[0];
       try { await this._send(op); }
-      catch (e) { if (offline(e)) { this.setConn('off'); return; } this.toast(/VERSION_CONFLICT/.test(e.message) ? 'La hoja cambió mientras no había conexión: se recargó la versión actual.' : 'No se pudo aplicar un cambio guardado: ' + e.message); }
+      catch (e) {
+        // Nunca descartar una operación que el servidor NO confirmó.
+        this.setConn('off');
+        if (!offline(e)) this.toast(/VERSION_CONFLICT/.test(e.message) ? 'Conflicto al sincronizar: se conservó el cambio pendiente. Avisá a Administración.' : 'No se pudo sincronizar: el cambio sigue guardado en este celular. ' + e.message);
+        return;
+      }
       this.queue.shift(); this._sv(this.kQ, this.queue);
     }
     this.setConn('live'); await this.load();
+    } finally { this._syncing = false; }
   }
   _send(op) {
     const a = op.args;
