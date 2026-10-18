@@ -19,10 +19,6 @@ jobs:
       - run: npm run build
       - name: Transportista offline regression
         run: npx vitest run tests/unit/driver-offline.test.js tests/unit/supabase-api.test.js
-      - name: Baseline check for unrelated unit failures
-        run: |
-          git show origin/main:src/online/driver-ui.js > /tmp/driver-ui-main.js
-          echo 'General-suite failures in rules/report/demo are outside the two UI files changed by this PR.'
       - name: Confirm signature and result controls
         run: |
           node --input-type=module <<'JS'
