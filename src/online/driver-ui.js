@@ -341,7 +341,7 @@ export class DriverApp {
       (sign ? '<input class="ed" data-f="recv" placeholder="' + (transfer ? 'Nombre de quien recibe en la sucursal (obligatorio)' : 'Nombre de quien recibe (obligatorio)') + '"><div class="sigbox"><canvas width="600" height="240" data-sig></canvas><div class="sig-actions"><button type="button" class="btn soft" data-sigexpand>FIRMAR EN PANTALLA GRANDE</button><button type="button" class="linkbtn" data-sigclr>Borrar firma</button></div></div>' : '') +
       // pedido comercial: CUIL/DNI (Cristian) y email del cliente (Recibido Conforme). Nunca en traslado interno ni en TAREA.
       (sign && commercial ? (cristian ? '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') +
-        '<input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Email del cliente (opcional · Recibido Conforme)"><span class="drv-mailhint" data-mailhint></span>' : '') +
+        '<input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Email del receptor (obligatorio para Cristian)"><span class="drv-mailhint" data-mailhint></span>' : '') +
       (cob ? '<div class="drv-cob"><b>COBRANZA</b>' + (st.expected_amount != null ? ' · esperado $ ' + Number(st.expected_amount).toLocaleString('es-AR') : '') +
         '<select class="ed" data-f="cst"><option value="">Resultado de la cobranza…</option><option value="COBRADO">COBRADO</option><option value="COBRO_PARCIAL">COBRO PARCIAL</option><option value="NO_COBRADO">NO COBRADO</option></select>' +
         '<input class="ed" data-f="camt" inputmode="decimal" placeholder="Importe cobrado"><select class="ed" data-f="cmode"><option value="">Modo de pago…</option><option>EFECTIVO</option><option>TRANSFERENCIA</option><option>CHEQUE</option></select><input class="ed" data-f="cnote" placeholder="Observación / motivo de la cobranza"></div>' : '') +
@@ -389,13 +389,15 @@ export class DriverApp {
     };
     if (em) { em.oninput = () => { em.dataset.auto = ''; hint.textContent = ''; }; fill(null); }
     // DNI: si el CUIL ya tiene DNI no se pide foto
-    let dni = null; const cu = form.querySelector('[data-f="cuil"]');
+    let dni = null; let dniRegistered = false; const cu = form.querySelector('[data-f="cuil"]');
     if (cu) cu.onchange = async () => {
       const n = cu.value.replace(/\D/g, ''), box2 = form.querySelector('[data-dni]');
       if (n.length !== 11) { box2.textContent = 'El CUIL debe tener 11 dígitos.'; return; }
       fill(n);
+      dniRegistered = false;
       const has = await this.api.cuilHasDni(n).catch(() => false);
-      box2.innerHTML = has ? '✓ DNI YA REGISTRADO' : 'CUIL nuevo · foto del DNI (opcional, JPEG/PNG hasta 5 MB) <input type="file" accept="image/jpeg,image/png" capture="environment" data-dnifile>';
+      dniRegistered = has;
+      box2.innerHTML = has ? '✓ DNI YA REGISTRADO' : 'CUIL nuevo · foto del DNI (obligatoria, JPEG/PNG hasta 5 MB) <input type="file" accept="image/jpeg,image/png" capture="environment" data-dnifile>';
       const fi = box2.querySelector('[data-dnifile]');
       if (fi) fi.onchange = async () => { dni = null; const f = fi.files[0]; if (!f) return;
         if (!['image/jpeg', 'image/png'].includes(f.type)) { fail('La foto del DNI debe ser JPEG o PNG.'); fi.value = ''; return; }
@@ -412,9 +414,10 @@ export class DriverApp {
         if (!recv) return fail(transfer ? 'Indicá quién recibe en la sucursal.' : 'Indicá el nombre de quien recibe.');
         if (!drawn) return fail(transfer ? 'Falta la firma de quien recibe en la sucursal.' : 'Falta la firma de quien recibe.');
         extra.evidence = { receiver_name: recv, signature_png_b64: cv.toDataURL('image/png').split(',')[1] };
-        if (cristian) { const n = cu.value.replace(/\D/g, ''); if (n.length !== 11) return fail('El CUIL debe tener 11 dígitos.'); extra.evidence.cuil = n; if (dni) extra.evidence.dni_upload = dni; }
+        if (cristian) { const n = cu.value.replace(/\D/g, ''); if (n.length !== 11) return fail('El CUIL debe tener 11 dígitos.'); if (!dniRegistered && !dni) return fail('La foto del DNI es obligatoria para un CUIL nuevo.'); extra.evidence.cuil = n; if (dni) extra.evidence.dni_upload = dni; }
         const mail = em ? em.value.trim().toLowerCase() : '';
-        if (mail && !/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(mail)) return fail('El email del cliente no es válido (podés dejarlo vacío).');
+        if (cristian && !mail) return fail('El email del receptor es obligatorio para Cristian Torres.');
+        if (mail && !/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(mail)) return fail('El email del receptor no es válido.');
         if (mail) extra.evidence.email = mail;
       }
       if (cob) {
