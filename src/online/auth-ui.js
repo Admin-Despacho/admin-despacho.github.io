@@ -12,9 +12,9 @@ const hint = () => { try { return localStorage.getItem('okd_pk_hint'); } catch (
 export function renderLogin(api, onDone) {
   const card = document.getElementById('authCard');
   card.innerHTML =
-    '<h3>INGRESAR</h3>' +
+    '<div class="login-brand"><img src="/icons/icon-192.png" alt="OK Accesorios" width="76" height="76"><div><strong>APP DESPACHO</strong><span>OK ACCESORIOS</span></div></div>' +
     '<div class="auth-err" id="authErr" hidden></div>' +
-    (passkeysSupported() && hint() ? '<button class="btn dark pkbtn" type="button" id="loginPasskey">INGRESAR CON HUELLA / FACE ID</button><p class="pkor">o USAR CONTRASEÑA</p>' : '<p>Usá el email y la contraseña de tu usuario de OK Despacho.</p>') +
+    (passkeysSupported() && hint() ? '<button class="btn dark pkbtn" type="button" id="loginPasskey">INGRESAR CON HUELLA / FACE ID</button><p class="pkor">o USAR CONTRASEÑA</p>' : '') +
     '<form id="loginForm" novalidate>' +
     '<label>Email<input id="loginEmail" type="email" autocomplete="username" required></label>' +
     '<label>Contraseña<input id="loginPass" type="password" autocomplete="current-password" required></label>' +
