@@ -2,6 +2,7 @@ name: Improve Approved Images
 on:
   push:
     branches: [fix/checkpoint36-image-sharpness]
+    paths: ['scripts/improve-login-images.py']
   workflow_dispatch:
 permissions:
   contents: write
