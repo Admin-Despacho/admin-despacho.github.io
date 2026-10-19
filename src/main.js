@@ -1,5 +1,6 @@
 import './styles/offline.css';
 import './styles/online.css';
+import './styles/login-brand.css';
 import { createApi } from './online/api.js';
 import { renderLogin, renderSetPassword, renderNewPassword } from './online/auth-ui.js';
 import { UsersPanel } from './online/users-ui.js';
