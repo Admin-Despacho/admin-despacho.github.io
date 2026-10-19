@@ -10,15 +10,21 @@ DIST = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'dist'); OUT = o
 PROBE = """()=>{const W=document.documentElement.clientWidth,H=innerHeight,card=document.querySelector('#authCard'),vis=document.querySelector('.login-visual'),
   img=[...document.querySelectorAll('.login-visual img')].find(i=>getComputedStyle(i).display!=='none'), r=e=>e?e.getBoundingClientRect():null;
   const cr=r(card), vr=vis&&getComputedStyle(vis).display!=='none'?r(vis):null;
-  const ctrls=[...card.querySelectorAll('.login-brand strong,.login-brand span,.login-brand img,input,button,label,.auth-err,.forgot')].filter(e=>e.offsetParent);
-  const underImg=vr?ctrls.filter(e=>{const a=r(e);return a.right>vr.left+1&&a.left<vr.right-1&&a.bottom>vr.top+1&&a.top<vr.bottom-1;}).map(e=>e.id||e.tagName+':'+(e.textContent||'').trim().slice(0,14)):[];
+  const ctrls=[...card.querySelectorAll('.login-head img,.login-sub,.login-title,input,button,label,.auth-err,.forgot')].filter(e=>e.offsetParent);
+  // "tapado": en el centro del control, el elemento que queda ENCIMA debe ser el propio control o un DESCENDIENTE suyo
+  // (p. ej. el campo dentro de su etiqueta). Un ancestro o cualquier otro elemento = tapado. Fuera de la pantalla se mide aparte.
+  const underImg=ctrls.filter(e=>{const a=r(e);const x=(a.left+a.right)/2,y=(a.top+a.bottom)/2;if(y<0||y>H||x<0||x>W)return false;
+    const t=document.elementFromPoint(x,y);return !t||!(t===e||e.contains(t));}).map(e=>e.id||e.tagName+':'+(e.textContent||'').trim().slice(0,14));
   const textOverflow=ctrls.filter(e=>e.scrollWidth>e.clientWidth+1&&getComputedStyle(e).overflow!=='visible').map(e=>e.id||e.tagName);
   const brandW=(()=>{const s=card.querySelector('.login-brand strong');return s?Math.round(r(s).right):null;})();
   let imgInfo=null; if(img){const b=r(img), ar=img.naturalWidth/img.naturalHeight, boxAr=b.width/b.height; const shownW=boxAr>ar?b.height*ar:b.width, shownH=boxAr>ar?b.height:b.width/ar;
-    imgInfo={box:[Math.round(b.width),Math.round(b.height)],shown:[Math.round(shownW),Math.round(shownH)],fit:getComputedStyle(img).objectFit,clippedByParent:!!(vr&&(b.right>vr.right+1||b.bottom>vr.bottom+1||b.left<vr.left-1||b.top<vr.top-1))};}
+    // la ilustración debe entrar COMPLETA en su contenedor por los cuatro lados (sin tolerancia) y verse dentro de la ventana
+    imgInfo={box:[Math.round(b.width),Math.round(b.height)],shown:[Math.round(shownW),Math.round(shownH)],fit:getComputedStyle(img).objectFit,
+      clippedByParent:!!(!vr||b.right>vr.right+0.5||b.bottom>vr.bottom+0.5||b.top<vr.top-0.5||b.left<vr.left-0.5||vr.right>W+0.5||vr.left<-0.5)};}
   const offscreenX=ctrls.filter(e=>{const a=r(e);return a.right>W+1||a.left<-1;}).map(e=>e.id||e.tagName);
   const btn=r(document.getElementById('loginBtn'));
-  return {W,H,hOverflow:document.documentElement.scrollWidth-W,card:cr&&[Math.round(cr.left),Math.round(cr.right),Math.round(cr.top),Math.round(cr.bottom)],cardOffscreen:cr&&(cr.left<0||cr.right>W),
+  const pr=r(document.querySelector('.login-panel'));
+  return {W,H,hOverflow:document.documentElement.scrollWidth-W,card:pr&&[Math.round(pr.left),Math.round(pr.right),Math.round(pr.top),Math.round(pr.bottom)],cardOffscreen:cr&&(cr.left<0||cr.right>W),
     visual:vr&&[Math.round(vr.left),Math.round(vr.right)],underImg,textOverflow,offscreenX,img:imgInfo,brandRight:brandW,btnBottom:btn&&Math.round(btn.bottom),pageH:document.documentElement.scrollHeight,
     bodyOverflowY:getComputedStyle(document.body).overflowY,htmlOverflowY:getComputedStyle(document.documentElement).overflowY};}"""
 CASES = [('nb_1366x768',1366,768,1,False),('nb_1366x768_z125',1093,614,1.25,False),('nb_1366x768_z150',911,512,1.5,False),('nb_1280x720',1280,720,1,False),
@@ -54,8 +60,8 @@ async def main():
     for k,v in out.items():
         bad=[]
         if v['hOverflow']>0: bad.append('scroll horizontal %dpx' % v['hOverflow'])
-        if v['card'][0] < 8 or v['card'][1] > v['W'] - 8: bad.append('tarjeta pegada/cortada en el borde ' + str(v['card'][:2]))
-        if v['underImg']: bad.append('debajo de la imagen: ' + ','.join(v['underImg']))
+        if v['card'][0] < 8 or v['card'][1] > v['W'] - 8: bad.append('formulario pegado/cortado en el borde ' + str(v['card'][:2]))
+        if v['underImg']: bad.append('control tapado: ' + ','.join(v['underImg']))
         if v['textOverflow']: bad.append('texto cortado: ' + ','.join(v['textOverflow']))
         if v['offscreenX']: bad.append('fuera de pantalla: ' + ','.join(v['offscreenX']))
         if not v['img'] or v['img']['clippedByParent'] or v['img']['fit'] != 'contain': bad.append('imagen recortada por el contenedor')

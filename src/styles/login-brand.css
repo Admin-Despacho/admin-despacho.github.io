@@ -1,20 +1,54 @@
 #auth.auth{min-height:100dvh;background:#fff;color:#111}#auth .top{background:#fff;color:#111;border-bottom:1px solid #edf0f3;min-height:64px}#auth .top .ttl>span{display:none}#auth .top .ttl>b{color:#111}#auth .auth-card{margin:clamp(18px,6vh,64px) auto 24px;max-width:440px;background:#fff;border:1px solid #e8ebef;box-shadow:0 12px 45px #0000000f;border-radius:18px}#auth .login-brand{display:flex;align-items:center;gap:14px;margin-bottom:22px}#auth .login-brand img{height:72px;width:72px;object-fit:contain;flex-shrink:0}#auth .login-brand strong{display:block;color:#111;font:800 clamp(22px,4vw,30px) Arial,sans-serif}#auth .login-brand span{display:block;color:#4b5563;font:600 12px Arial,sans-serif;letter-spacing:.14em;margin-top:5px}#auth .auth-card input{min-height:44px;background:#fafbfc}#auth .auth-card .btn.go{background:#101820;color:#fff;min-height:48px}@media(max-width:600px){#auth .top{min-height:55px;padding:8px 14px}#auth .auth-card{margin:20px 12px 24px;padding:19px 17px}#auth .login-brand img{height:60px;width:60px}}#auth>.top{display:none}
 
-/* CHECKPOINT 36: dos presentaciones exactas, imagen decorativa sin modificar autenticación */
-#auth .auth-card{position:relative;isolation:isolate}
-#auth .login-visual{display:none}
+/* ===== Inicio de sesión · referencias definitivas (19/10/2026) =====
+   Notebook: logo + OK ACCESORIOS + APP DESPACHO + formulario a la izquierda; computadora y cajas a la derecha (contra el borde).
+   Android: logo y títulos arriba, camión completo a todo el ancho, formulario blanco superpuesto a la base del camión.
+   Solo aplica a la pantalla de login (#authCard que contiene #loginForm); crear/nueva contraseña conservan su tarjeta. */
+#auth:has(#loginForm){background:#fff;overflow-x:clip}
+#authCard:has(#loginForm){background:transparent;border:0;box-shadow:none;border-radius:0;padding:0;margin:0 auto;max-width:none;min-height:0;position:relative}
+#authCard:has(#loginForm) .login-head{text-align:center}
+#authCard:has(#loginForm) .login-logo{display:block;margin:0 auto;height:auto;max-width:100%}
+#authCard:has(#loginForm) .login-sub{display:block;color:#111;font:500 15px/1.2 Arial,Helvetica,sans-serif;letter-spacing:.2em;margin-top:12px}
+#authCard:has(#loginForm) .login-title{margin:6px 0 0;color:#07090c;font:800 34px/1.05 Arial,Helvetica,sans-serif;letter-spacing:.005em}
+#authCard:has(#loginForm) .login-visual{pointer-events:none}
+#authCard:has(#loginForm) .login-visual img{object-fit:contain}
+#authCard:has(#loginForm) .login-panel{background:#fff;border:1px solid #edf0f3;border-radius:16px;box-shadow:0 14px 40px rgba(16,24,32,.10);padding:22px 24px 18px;box-sizing:border-box}
+#authCard:has(#loginForm) .login-panel label{color:#1f2937}
+#authCard:has(#loginForm) #loginEmail,#authCard:has(#loginForm) #loginPass{min-height:48px;padding-left:44px;background:#f6f8fa no-repeat 14px center/20px 20px;border-radius:10px}
+#authCard:has(#loginForm) #loginEmail{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23374151' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Cpath d='m3 7 9 6 9-6'/%3E%3C/svg%3E")}
+#authCard:has(#loginForm) #loginPass{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23374151' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='11' width='14' height='10' rx='2'/%3E%3Cpath d='M8 11V8a4 4 0 0 1 8 0v3'/%3E%3Ccircle cx='12' cy='16' r='1'/%3E%3C/svg%3E");padding-right:48px}
+#authCard:has(#loginForm) .pwlabel{position:relative}
+#authCard:has(#loginForm) .pwtoggle{position:absolute;right:6px;bottom:4px;width:40px;height:40px;border:0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23374151' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='m3 3 18 18'/%3E%3C/svg%3E") no-repeat center/22px 22px;cursor:pointer;border-radius:8px}
+#authCard:has(#loginForm) .pwtoggle[aria-pressed="true"]{opacity:.55}
+#authCard:has(#loginForm) .btn.go{background:#0e141b;color:#fff;min-height:50px;border-radius:10px;letter-spacing:.06em}
+#authCard:has(#loginForm) .forgot{display:block;margin:12px auto 0}
+#authCard:has(#loginForm) #authNote{grid-area:note}
+
+/* ---- Notebook / escritorio ---- */
 @media (min-width:800px){
- #auth .auth-card{max-width:900px;min-height:510px;margin:clamp(25px,7vh,80px) auto;padding:45px 430px 40px 45px;box-sizing:border-box;
-  /* entre 800 y ~924 px (notebook con zoom 125-150 %, ventana angosta, celular apaisado) la tarjeta ocupaba el 100 % del ancho
-     y quedaba pegada a los bordes: borde y esquinas cortados. Siempre deja 12 px a cada lado. */
-  width:calc(100% - 24px)}
- #auth .login-visual{display:block;position:absolute;right:10px;top:10px;bottom:10px;width:405px;pointer-events:none;overflow:hidden}
- #auth .login-visual-desktop{display:block;width:100%;height:100%;object-fit:contain;border-radius:13px}
- #auth .login-visual-mobile{display:none}
+ #authCard:has(#loginForm){display:grid;grid-template-columns:minmax(320px,440px) minmax(0,1fr);grid-template-areas:"sp1 visual" "head visual" "note visual" "panel visual" "sp2 visual";
+   /* filas 1fr arriba/abajo: el bloque de la izquierda queda centrado y la ilustración ocupa TODO el alto */
+   grid-template-rows:minmax(clamp(16px,4vh,44px),1fr) auto auto auto minmax(clamp(16px,4vh,44px),1fr);column-gap:clamp(16px,4vw,64px);row-gap:18px;min-height:100dvh;
+   width:calc(100% - 24px);max-width:1240px;padding:0;box-sizing:border-box}
+ #authCard:has(#loginForm) .login-head{grid-area:head}
+ #authCard:has(#loginForm) .login-logo{width:clamp(150px,15vw,220px)}
+ #authCard:has(#loginForm) .login-title{font-size:clamp(32px,3.4vw,50px)}
+ #authCard:has(#loginForm) .login-panel{grid-area:panel}
+ /* la ilustración ocupa toda la altura y se apoya contra el borde derecho de la ventana (como en el mockup) */
+ #authCard:has(#loginForm) .login-visual{grid-area:visual;position:relative;align-self:stretch;margin:0 calc((min(100vw - 24px, 1240px) - 100vw) / 2) 0 0;overflow:hidden}
+ #authCard:has(#loginForm) .login-visual-desktop{position:absolute;inset:0;width:100%;height:100%;max-width:none;display:block;object-fit:contain;object-position:right bottom}   /* nunca se recorta: en ventanas angostas se achica */
+ #authCard:has(#loginForm) .login-visual-mobile{display:none}
 }
+/* ---- Android / celular ---- */
 @media (max-width:799px){
- #auth .auth-card{max-width:440px}
- #auth .login-visual{display:block;margin:3px 0 19px;border-radius:12px;overflow:hidden;pointer-events:none}
- #auth .login-visual-desktop{display:none}
- #auth .login-visual-mobile{display:block;max-height:250px;width:100%;height:auto;object-fit:contain;object-position:center}
+ #authCard:has(#loginForm){display:flex;flex-direction:column;width:100%;max-width:520px}
+ #authCard:has(#loginForm) .login-head{order:1;padding:calc(26px + env(safe-area-inset-top,0px)) 20px 10px}
+ #authCard:has(#loginForm) .login-logo{width:min(40vw,200px)}
+ #authCard:has(#loginForm) .login-sub{font-size:clamp(13px,3.9vw,17px);margin-top:10px}
+ #authCard:has(#loginForm) .login-title{font-size:clamp(30px,9.4vw,44px)}
+ #authCard:has(#loginForm) .login-visual{order:2;display:block;margin:4px 0 0}
+ #authCard:has(#loginForm) .login-visual-desktop{display:none}
+ #authCard:has(#loginForm) .login-visual-mobile{display:block;width:100%;height:auto;max-width:none}
+ #authCard:has(#loginForm) #authNote{order:3;margin:10px 14px 0}
+ #authCard:has(#loginForm) .login-panel{order:4;position:relative;margin:-28px 12px calc(18px + env(safe-area-inset-bottom,0px));border-radius:18px}
 }

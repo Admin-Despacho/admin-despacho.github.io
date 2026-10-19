@@ -18,7 +18,7 @@ try{
   assert(await visible.isVisible());
   assert(!(await page.locator(mobile?'.login-visual-desktop':'.login-visual-mobile').isVisible()));
   await visible.evaluate(i=>i.decode());
-  assert((await visible.getAttribute('src')).endsWith(mobile?'truck_detail_92.webp':'desktop_detail_92.webp'));
+  assert((await visible.getAttribute('src')).endsWith(mobile?'login-android.webp':'login-notebook.webp'));   // referencias definitivas 19/10
   assert.equal(await visible.evaluate(i=>getComputedStyle(i).objectFit),'contain');
   assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)),'horizontal overflow');
   await page.locator('#loginEmail').fill('qa@example.invalid');

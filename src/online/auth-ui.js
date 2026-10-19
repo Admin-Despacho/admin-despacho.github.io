@@ -12,18 +12,25 @@ const hint = () => { try { return localStorage.getItem('okd_pk_hint'); } catch (
 export function renderLogin(api, onDone) {
   const card = document.getElementById('authCard');
   card.innerHTML =
-    '<div class="login-brand"><img src="/icons/icon-192.png" alt="OK Accesorios" width="76" height="76"><div><strong>APP DESPACHO</strong><span>OK ACCESORIOS</span></div></div>' +
-    '<div class="login-visual" aria-hidden="true"><img class="login-visual-desktop" src="/branding/desktop_detail_92.webp" alt="" width="377" height="538"><img class="login-visual-mobile" src="/branding/truck_detail_92.webp" alt="" width="403" height="302"></div>' +
+    // Presentación según las referencias definitivas (19/10): logo + títulos, ilustración y formulario HTML real (no una captura)
+    '<div class="login-head"><img class="login-logo" src="/branding/ok-logo.png" alt="OK" width="728" height="453"><span class="login-sub">OK ACCESORIOS</span><h1 class="login-title">APP DESPACHO</h1></div>' +
+    '<div class="login-visual" aria-hidden="true"><img class="login-visual-desktop" src="/branding/login-notebook.webp" alt="" width="535" height="709"><img class="login-visual-mobile" src="/branding/login-android.webp" alt="" width="669" height="478"></div>' +
+    '<div class="login-panel">' +
     '<div class="auth-err" id="authErr" hidden></div>' +
     (passkeysSupported() && hint() ? '<button class="btn dark pkbtn" type="button" id="loginPasskey">INGRESAR CON HUELLA / FACE ID</button><p class="pkor">o USAR CONTRASEÑA</p>' : '') +
     '<form id="loginForm" novalidate>' +
     '<label>Email<input id="loginEmail" type="email" autocomplete="username" required></label>' +
-    '<label>Contraseña<input id="loginPass" type="password" autocomplete="current-password" required></label>' +
+    '<label class="pwlabel">Contraseña<input id="loginPass" type="password" autocomplete="current-password" required><button class="pwtoggle" type="button" id="loginPassToggle" aria-label="Mostrar contraseña" aria-pressed="false"></button></label>' +
     '<button class="btn go" id="loginBtn" type="submit">INGRESAR</button></form>' +
     '<button class="linkbtn forgot" type="button" id="forgotOpen">¿OLVIDASTE TU CONTRASEÑA?</button>' +
     '<form id="forgotForm" hidden novalidate><label>Tu email<input id="forgotEmail" type="email" autocomplete="username"></label><button class="btn dark" type="submit" id="forgotGo">ENVIAR ENLACE</button><div class="up-msg ok" id="forgotMsg" hidden></div></form>' +
     (api.mode === 'demo' ? '<div class="demo-users">Modo demo · contraseña <b>demo</b> para todos:<br>' +
-      DEMO_USERS.map(([n, e]) => '<button type="button" data-e="' + esc(e) + '">' + esc(n) + '</button>').join('') + '</div>' : '');
+      DEMO_USERS.map(([n, e]) => '<button type="button" data-e="' + esc(e) + '">' + esc(n) + '</button>').join('') + '</div>' : '') +
+    '</div>';
+  // mostrar/ocultar contraseña (solo cambia el tipo del campo; no toca la autenticación)
+  const pt = document.getElementById('loginPassToggle');
+  pt.addEventListener('click', () => { const i = document.getElementById('loginPass'), show = i.type === 'password'; i.type = show ? 'text' : 'password';
+    pt.setAttribute('aria-pressed', show ? 'true' : 'false'); pt.setAttribute('aria-label', show ? 'Ocultar contraseña' : 'Mostrar contraseña'); i.focus(); });
   const err = document.getElementById('authErr');
   card.querySelectorAll('[data-e]').forEach(b => b.addEventListener('click', () => {
     document.getElementById('loginEmail').value = b.dataset.e; document.getElementById('loginPass').value = 'demo';
