@@ -13,6 +13,7 @@ export function renderLogin(api, onDone) {
   const card = document.getElementById('authCard');
   card.innerHTML =
     '<div class="login-brand"><img src="/icons/icon-192.png" alt="OK Accesorios" width="76" height="76"><div><strong>APP DESPACHO</strong><span>OK ACCESORIOS</span></div></div>' +
+    '<div class="login-visual" aria-hidden="true"><img class="login-visual-desktop" src="/branding/desktop-approved.webp" alt="" width="393" height="485"><img class="login-visual-mobile" src="/branding/truck-approved.webp" alt="" width="386" height="274"></div>' +
     '<div class="auth-err" id="authErr" hidden></div>' +
     (passkeysSupported() && hint() ? '<button class="btn dark pkbtn" type="button" id="loginPasskey">INGRESAR CON HUELLA / FACE ID</button><p class="pkor">o USAR CONTRASEÑA</p>' : '') +
     '<form id="loginForm" novalidate>' +
