@@ -4,7 +4,10 @@
 #auth .auth-card{position:relative;isolation:isolate}
 #auth .login-visual{display:none}
 @media (min-width:800px){
- #auth .auth-card{max-width:900px;min-height:510px;margin:clamp(25px,7vh,80px) auto;padding:45px 430px 40px 45px;box-sizing:border-box}
+ #auth .auth-card{max-width:900px;min-height:510px;margin:clamp(25px,7vh,80px) auto;padding:45px 430px 40px 45px;box-sizing:border-box;
+  /* entre 800 y ~924 px (notebook con zoom 125-150 %, ventana angosta, celular apaisado) la tarjeta ocupaba el 100 % del ancho
+     y quedaba pegada a los bordes: borde y esquinas cortados. Siempre deja 12 px a cada lado. */
+  width:calc(100% - 24px)}
  #auth .login-visual{display:block;position:absolute;right:10px;top:10px;bottom:10px;width:405px;pointer-events:none;overflow:hidden}
  #auth .login-visual-desktop{display:block;width:100%;height:100%;object-fit:contain;border-radius:13px}
  #auth .login-visual-mobile{display:none}

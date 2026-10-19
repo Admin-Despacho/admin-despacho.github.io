@@ -69,7 +69,8 @@ export class DemoApi {
   // Sesión: si Administración cerró las sesiones del usuario, la sesión vieja deja de valer.
   async getSession() {
     const s = this.session, u = s && this._user(s.userId);
-    if (!u || u.status !== 'ACTIVO') return null;
+    // como Supabase: la sesión de un invitado pendiente es válida (sin permisos: hasPerm exige ACTIVO); el ruteo activa la invitación
+    if (!u || !['ACTIVO', 'INVITACION_PENDIENTE'].includes(u.status)) return null;
     if ((u.session_epoch || 0) !== (s.epoch || 0)) { this.revokedNotice = true; this._set('revoked_notice', true); await this.signOut(); return null; } // sesiones cerradas por Administración
     return { userId: u.id };
   }
@@ -77,12 +78,27 @@ export class DemoApi {
     const u = this.db.users.find(x => x.email.toLowerCase() === String(email).trim().toLowerCase());
     if (!u || password !== (this.db.passwords[u.id] || 'demo')) throw new Error('Email o contraseña incorrectos.');
     if (u.status === 'DESHABILITADO' || u.status === 'ARCHIVADO') throw new Error('Usuario sin acceso. Consultá con Administración.');
-    if (u.status === 'INVITACION_PENDIENTE') u.status = 'ACTIVO';
+    // Como el servidor real: iniciar sesión NO activa la invitación; la activa el ruteo (acceptInvite) al detectar el ingreso
     u.last_sign_in_at = new Date().toISOString(); this._save(); // último acceso real
     this.session = { userId: u.id, epoch: u.session_epoch || 0 }; this._set('session', this.session);
     return { userId: u.id };
   }
   async signOut() { this.session = null; this._set('session', null); }
+  // Invitación (mismo comportamiento que Supabase + Edge Function accept_invite): idempotente, nunca activa a un deshabilitado
+  async acceptInvite() {
+    this._refresh(); const me = await this.me(); if (!me || me.status !== 'INVITACION_PENDIENTE') return me;
+    // SOLO PRUEBAS (modo demo): simula que la Edge Function accept_invite falla, para verificar el mensaje y "Reintentar activación"
+    if (this.db.demoFailAcceptInvite) throw err('Tu contraseña se guardó, pero no se pudo activar tu usuario (simulación de falla). Tocá "Reintentar activación" o avisá a Administración.', 'ACCEPT_FAILED', 500);
+    const u = this._user(me.id); u.status = 'ACTIVO'; this._audit(u, 'INVITE_ACCEPTED', u.id, { status: 'INVITACION_PENDIENTE' }, { status: 'ACTIVO' }); this._save();
+    return { ...u, carriers: [...u.carriers] };
+  }
+  async setPassword(password) {
+    this._refresh(); const me = await this.me(); if (!me) throw err('Sesión inválida.', 'NO_SESSION', 401);
+    if (String(password || '').length < 8) throw err('No se pudo guardar la contraseña: Password should be at least 8 characters.', 'PASSWORD_FAILED', 400);
+    // Supabase devuelve same_password si es la misma: ya está guardada → se continúa con la activación (no se deja al invitado atrapado)
+    this.db.passwords[me.id] = password; this._save();
+    await this.acceptInvite();
+  }
   takeRevokedNotice() { const v = this.revokedNotice || !!this._get('revoked_notice'); this.revokedNotice = false; this._set('revoked_notice', null); return v; }
   async me() { const s = await this.getSession(); if (!s) return null; const u = this._user(s.userId); return u ? { ...u, carriers: [...u.carriers] } : null; }
   // Autogestión: el usuario cambia SU contraseña (no rol, ni permisos, ni carriers)
@@ -105,9 +121,13 @@ export class DemoApi {
     if (String(password || '').length < 8) throw err('La contraseña debe tener al menos 8 caracteres.', 'WEAK', 400);
     const u = this._user(t.user_id); if (!u || ['DESHABILITADO', 'ARCHIVADO'].includes(u.status)) throw err('Usuario sin acceso. Consultá con Administración.', 'NO_ACCESS', 403);
     this.db.passwords[u.id] = password; t.used = true;
-    if (u.status === 'INVITACION_PENDIENTE') u.status = 'ACTIVO';
+    // como el servidor: se intenta aceptar la invitación y se devuelve el estado REAL (no se presenta como activada si falló)
+    const pendingInvite = u.status === 'INVITACION_PENDIENTE'; let activated = false, activationError = null;
+    if (pendingInvite) { if (this.db.demoFailAcceptInvite) activationError = 'Tu contraseña se guardó, pero no se pudo activar tu usuario (simulación de falla). Tocá "Reintentar activación" o avisá a Administración.';
+      else { u.status = 'ACTIVO'; activated = true; this._audit(u, 'INVITE_ACCEPTED', u.id); } }
     u.session_epoch = (u.session_epoch || 0) + 1; u.sessions_revoked_at = new Date().toISOString(); // cierra sesiones anteriores
-    this._audit(u, t.type === 'INVITACION' ? 'INVITE_ACCEPTED' : 'OWN_PASSWORD_CHANGED', u.id); this._save(); await this.signOut(); return { ok: true };
+    this._audit(u, 'OWN_PASSWORD_CHANGED', u.id); this._save(); await this.signOut();
+    return { ok: true, passwordSaved: true, pendingInvite, activated, activationError };
   }
   // ===== PDF de la hoja publicada (RC1.2) =====
   _dispatch() { return this.db.dispatch = this.db.dispatch || { pdf_auto_generate: true, pdf_auto_download: true }; }

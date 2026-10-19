@@ -2,6 +2,8 @@
 // Solo usa la clave pública (anon). Todo lo administrativo pasa por la Edge Function admin-users.
 import { createClient } from '@supabase/supabase-js';
 
+// Supabase Auth: la contraseña nueva es igual a la actual (código same_password, o el texto en versiones anteriores)
+const isSamePassword = e => !!e && (e.code === 'same_password' || /should be different from the old password/i.test(String(e.message || '')));
 const jwtIat = token => { try { return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).iat || 0; } catch (e) { return 0; } };
 
 export class SupabaseApi {
@@ -13,7 +15,14 @@ export class SupabaseApi {
   async getSession() { const { data } = await this.sb.auth.getSession(); return data.session ? { userId: data.session.user.id, iat: jwtIat(data.session.access_token) } : null; }
   async signIn(email, password) {
     const { data, error } = await this.sb.auth.signInWithPassword({ email: String(email).trim(), password });
-    if (error) throw new Error(/banned/i.test(error.message) ? 'Usuario sin acceso. Consultá con Administración.' : 'Email o contraseña incorrectos.');
+    if (error) {
+      // Solo las credenciales inválidas se informan como tales; otras causas reales no se disfrazan de "contraseña incorrecta".
+      const code = String(error.code || ''), m = String(error.message || '');
+      if (/banned/i.test(m) || code === 'user_banned') throw new Error('Usuario sin acceso. Consultá con Administración.');
+      if (code === 'email_not_confirmed' || /email not confirmed/i.test(m)) throw Object.assign(new Error('Tu email todavía no está confirmado. Abrí el enlace de invitación que te llegó por correo o pedí a Administración que te la reenvíe.'), { code: 'EMAIL_NOT_CONFIRMED' });
+      if (code === 'over_request_rate_limit' || /rate limit|too many/i.test(m)) throw Object.assign(new Error('Demasiados intentos seguidos. Esperá unos minutos y volvé a probar.'), { code: 'RATE_LIMIT' });
+      throw Object.assign(new Error('Email o contraseña incorrectos.'), { code: 'INVALID_CREDENTIALS' });
+    }
     return { userId: data.user.id };
   }
   async signOut() { await this.sb.auth.signOut(); }
@@ -34,9 +43,22 @@ export class SupabaseApi {
   async completePasswordReset(password) {
     if (String(password || '').length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres.');
     const { error } = await this.sb.auth.updateUser({ password });
-    if (error) throw new Error('No se pudo cambiar la contraseña: ' + error.message);
+    if (error && !isSamePassword(error)) throw new Error('No se pudo cambiar la contraseña: ' + error.message);
+    // Si el enlace era de un invitado (o "reenviar invitación" mandó un enlace de recuperación), se intenta aceptar la invitación:
+    // ya demostró ser dueño del email y definió su contraseña. NO se presenta la cuenta como activada si la activación falló:
+    // se devuelve el estado real para que la pantalla lo diga y el próximo ingreso lo reintente (con "Reintentar activación").
+    let activation = { pendingInvite: false, activated: false, error: null };
+    try {
+      const before = await this.me();
+      if (before && before.status === 'INVITACION_PENDIENTE') {
+        activation.pendingInvite = true;
+        try { const after = await this.acceptInvite(); activation.activated = !!after && after.status === 'ACTIVO'; }
+        catch (e) { activation.error = e.message; }
+      }
+    } catch (e) { /* sin perfil legible: el ingreso posterior decide */ }
     await this.sb.auth.signOut({ scope: 'others' }).catch(() => null);
-    await this.sb.auth.signOut(); return { ok: true };
+    await this.sb.auth.signOut();
+    return { ok: true, passwordSaved: true, pendingInvite: activation.pendingInvite, activated: activation.activated, activationError: activation.error };
   }
   // PDF de la hoja publicada (RC1.2): Storage privado route-pdfs, un PDF por hoja+versión, URL firmada de 60 s
   async dispatchSettings() { const { data } = await this.sb.from('dispatch_settings').select('*').eq('id', 'DEFAULT').maybeSingle(); return data || { pdf_auto_generate: true, pdf_auto_download: true }; }
@@ -63,7 +85,9 @@ export class SupabaseApi {
   }
   async setPassword(password) {
     const { error } = await this.sb.auth.updateUser({ password });
-    if (error) throw Object.assign(new Error('No se pudo guardar la contraseña: ' + error.message), { code: 'PASSWORD_FAILED' });
+    // "New password should be different from the old password" = esa contraseña YA es la guardada (un intento anterior la guardó).
+    // No es un error para el invitado: se continúa con la activación en vez de dejarlo atrapado en un paso ya completado.
+    if (error && !isSamePassword(error)) throw Object.assign(new Error('No se pudo guardar la contraseña: ' + error.message), { code: 'PASSWORD_FAILED' });
     await this.acceptInvite();
   }
   async acceptInvite() {

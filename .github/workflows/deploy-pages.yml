@@ -34,6 +34,41 @@ jobs:
       - name: Verify production carrier flow source
         run: node scripts/verify_production_carrier_flow.mjs
 
+      # ---- Pruebas bloqueantes: cualquier fallo (código de salida ≠ 0) corta el job y NO se publica ----
+      - name: Unit tests related to access/invitation (blocking)
+        run: npx vitest run tests/unit/invite-access.test.js tests/unit/supabase-api.test.js tests/unit/driver-offline.test.js
+
+      - name: Setup Python (E2E)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright (Node + Python, Chromium)
+        run: |
+          npm install --no-save --package-lock=false playwright@1.51.1
+          npx playwright install --with-deps chromium
+          python -m pip install --quiet playwright==1.51.0
+          python -m playwright install chromium
+
+      # Build DEMO en un directorio SEPARADO, solo para probar el flujo de invitación. Nunca se publica.
+      - name: Build demo (tests only, never deployed)
+        env:
+          VITE_SUPABASE_URL: ""
+          VITE_SUPABASE_ANON_KEY: ""
+        run: npx vite build --outDir dist-demo
+
+      - name: E2E invitation / first access (demo build, blocking)
+        run: python tests/e2e/run_invite_access.py dist-demo
+
+      # URL o clave pública vacías → la app arrancaría en MODO DEMO: se rechaza ANTES de compilar producción
+      - name: Validate public Supabase configuration (non-empty)
+        env:
+          VITE_SUPABASE_URL: https://uqwilzzeyfuatlmwzxna.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_cwLs4qzUgtMuEDEEhsQSfg_n-Q9McXG
+        run: |
+          [ -n "${VITE_SUPABASE_URL// /}" ] || { echo "::error::VITE_SUPABASE_URL vacía: no se compila producción"; exit 1; }
+          [ -n "${VITE_SUPABASE_ANON_KEY// /}" ] || { echo "::error::VITE_SUPABASE_ANON_KEY vacía: no se compila producción"; exit 1; }
+
       - name: Build
         env:
           VITE_SUPABASE_URL: https://uqwilzzeyfuatlmwzxna.supabase.co
@@ -46,11 +81,13 @@ jobs:
       - name: Verify production carrier flow artifact
         run: node scripts/verify_production_carrier_flow.mjs --dist
 
-      - name: Verify notebook and Android login
+      - name: Verify the artifact is the PRODUCTION build (never demo)
+        run: node scripts/verify_production_build.mjs dist https://uqwilzzeyfuatlmwzxna.supabase.co
+
+      - name: Verify notebook and Android login (blocking)
         run: |
-          npm install --no-save --package-lock=false playwright@1.51.1
-          npx playwright install --with-deps chromium
           node tests/e2e/checkpoint36-login.mjs
+          python tests/e2e/run_login_visual.py dist
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

@@ -55,7 +55,7 @@ export function renderLogin(api, onDone) {
 
 // Usuario invitado: crea su contraseña al entrar desde el email de invitación.
 // Si la contraseña se guarda pero la activación falla, se muestra el error y NO se continúa en silencio.
-export function renderSetPassword(api, onDone, onLogout) {
+export function renderSetPassword(api, onDone, onLogout, opts) {
   const card = document.getElementById('authCard');
   card.innerHTML =
     '<h3>CREAR CONTRASEÑA</h3><p>Elegí la contraseña para entrar a OK Despacho.</p>' +
@@ -81,6 +81,8 @@ export function renderSetPassword(api, onDone, onLogout) {
     try { await api.acceptInvite(); onDone(); } catch (ex) { fail(ex); }
   });
   document.getElementById('retryLogout').addEventListener('click', () => onLogout && onLogout());
+  // Ya tiene contraseña pero la activación falló: se muestra directamente el error con "Reintentar activación"
+  if (opts && opts.activationError) fail(Object.assign(opts.activationError, { code: 'ACCEPT_FAILED' }));
 }
 
 // Nueva contraseña desde el enlace (recuperación o invitación). Al terminar se cierran las sesiones anteriores y vuelve al acceso.
@@ -94,6 +96,6 @@ export function renderNewPassword(api, token, onDone) {
     const a = document.getElementById('np1').value, b = document.getElementById('np2').value;
     if (a.length < 8) { er.textContent = 'La contraseña debe tener al menos 8 caracteres.'; er.hidden = false; return; }
     if (a !== b) { er.textContent = 'Las contraseñas no coinciden.'; er.hidden = false; return; }
-    try { await api.completePasswordReset(a, token); onDone(); } catch (ex) { er.textContent = ex.message; er.hidden = false; }
+    try { const r = await api.completePasswordReset(a, token); onDone(r); } catch (ex) { er.textContent = ex.message; er.hidden = false; }
   });
 }

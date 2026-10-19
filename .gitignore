@@ -4,3 +4,5 @@ dist/
 .env.*
 !.env.example
 tests/e2e/out/
+dist-demo/
+tests/e2e/out/

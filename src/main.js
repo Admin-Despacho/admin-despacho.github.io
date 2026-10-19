@@ -182,12 +182,26 @@ async function route() {
   // Enlace de nueva contraseña (recuperación o invitación): antes de cualquier otra cosa
   const q = new URLSearchParams(location.search), hq = new URLSearchParams(location.hash.split('?')[1] || '');
   if (location.hash.startsWith('#/nueva-contrasena') || q.has('nueva-contrasena')) {
-    show('#auth'); renderNewPassword(api, hq.get('token'), () => { history.replaceState(null, '', location.pathname); showLogin('Contraseña actualizada. Ingresá con la nueva.'); }); return;
+    show('#auth'); renderNewPassword(api, hq.get('token'), r => {
+      history.replaceState(null, '', location.pathname);
+      // Estado REAL: si había invitación pendiente y no se pudo activar, se dice; al ingresar se reintenta y, si vuelve a fallar,
+      // se muestra el error con "Reintentar activación". Nunca se presenta como activada una cuenta que no lo está.
+      showLogin(r && r.pendingInvite && !r.activated
+        ? 'Tu contraseña se guardó, pero tu usuario todavía no se activó' + (r.activationError ? ' (' + r.activationError.replace(/^Tu contraseña se guardó, pero /, '') + ')' : '') + '. Ingresá con tu nueva contraseña: la activación se va a reintentar.'
+        : 'Contraseña actualizada. Ingresá con la nueva.');
+    }); return;
   }
   const session = await api.getSession();
   if (!session) { showLogin(); return; }
   const me = await api.me();
   if (!me) { showLogin(); return; }
+  // Invitado que YA tiene contraseña (acaba de entrar con ella o con passkey): no se le pide crearla de nuevo
+  // (Supabase rechazaría la misma con "should be different"): se activa la invitación. Si falla, ve el error y puede reintentar.
+  let fresh = false; try { fresh = sessionStorage.getItem('okd_fresh_login') === '1'; } catch (e) { }
+  if (me.status === 'INVITACION_PENDIENTE' && fresh && !location.hash.startsWith('#/crear-contrasena')) {
+    try { await api.acceptInvite(); return route(); }
+    catch (ex) { show('#auth'); renderSetPassword(api, () => { location.hash = ''; route(); }, logout, { activationError: ex }); return; }
+  }
   // Invitado que entró por el link: crea su contraseña. Nunca queda atrapado: ve el error y puede reintentar.
   if (me.status === 'INVITACION_PENDIENTE' || location.hash.startsWith('#/crear-contrasena')) {
     show('#auth'); renderSetPassword(api, () => { location.hash = ''; route(); }, logout); return;
