@@ -46,6 +46,12 @@ jobs:
       - name: Verify production carrier flow artifact
         run: node scripts/verify_production_carrier_flow.mjs --dist
 
+      - name: Verify notebook and Android login
+        run: |
+          npm install --no-save --package-lock=false playwright@1.51.1
+          npx playwright install --with-deps chromium
+          node tests/e2e/checkpoint36-login.mjs
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
