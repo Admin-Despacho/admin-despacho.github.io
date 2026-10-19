@@ -1,0 +1,32 @@
+name: Checkpoint 36 Login QA
+on:
+  push:
+    branches: [feat/checkpoint36-truck-desktop]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run tests/unit/driver-offline.test.js tests/unit/supabase-api.test.js
+      - name: Confirm assets and responsive login
+        run: |
+          test -s dist/branding/desktop-approved.webp
+          test -s dist/branding/truck-approved.webp
+          node --input-type=module <<'JS'
+          import fs from 'node:fs'; import assert from 'node:assert/strict';
+          const a=fs.readFileSync('src/online/auth-ui.js','utf8');
+          const c=fs.readFileSync('src/styles/login-brand.css','utf8');
+          for(const name of ['desktop-approved.webp','truck-approved.webp']) assert(a.includes(name));
+          assert(c.includes('min-width:800px'));assert(c.includes('max-width:799px'));
+          for(const name of ['desktop-approved.webp','truck-approved.webp']) assert(fs.readFileSync('dist/branding/'+name).subarray(0,4).toString()==='RIFF');
+          console.log('PASS: approved WebP assets, responsive login and existing authentication');
+          JS
