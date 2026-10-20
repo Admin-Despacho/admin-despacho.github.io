@@ -38,7 +38,7 @@ async function loadLegacy() {
     noc: { reconcile: (imp, items, complete) => api.reconcileCreditNotes(imp, items, complete), reassociate: (app, k) => api.nocReassociate(app, k), detect: (k, items) => api.detectCreditNotes(k, items), apply: p => api.applyCreditNote(p), applyFinancing: p => api.consumeCreditNoteFinancing(p), release: (k, fp) => api.releaseCreditNote(k, fp) },
     financing: { keys: () => api.financingPlanKeys(), sync: (imp, plans) => api.syncFinancingPlans(imp, plans), forClients: keys => api.financingPlansFor(keys) },
     locations: { internal: () => api.listInternalLocations() },
-    drafts: { touch: (k, n, c, cnt, o, content) => api.touchDraft(k, n, c, cnt, o, content), content: k => api.draftContent(k), remove: k => api.deleteDraft(k) },
+    drafts: { touch: (k, n, c, cnt, o, content) => api.touchDraft(k, n, c, cnt, o, content), content: k => api.draftContent(k), remove: k => api.deleteDraft(k), list: () => api.listDrafts() },
     routes: { routing: () => api.routingRules(), rules: () => api.financialRules(), template: id => api.currentTemplate(id), pdf: { settings: () => api.dispatchSettings(), save: (id, v, n, b) => api.saveRoutePdf(id, v, n, b), error: (id, v, m) => api.routePdfError(id, v, m), snapshot: id => api.routePdfSnapshot(id), download: (id, v) => api.downloadRoutePdf(id, v) },
       vehicles: () => api.listVehicles(), carriers: () => api.listCarriers(), responsables: id => api.responsables(id), dispatchExternal: p => api.dispatchExternalRoute(p), publish: async p => { try { return await (p && p.revision_route_id ? api.publishRouteRevision(p) : api.publishRoute(p)); } catch (e) {
         // Reglas financieras cambiadas: se recalcula con la versión vigente y se pide revisar antes de publicar

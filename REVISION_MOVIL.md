@@ -126,3 +126,68 @@ El parche anterior "menú sin repetidos" (que quitaba las opciones) queda reempl
 | `run_admin_mobile_menu.py` (celular 390×844 + escritorio 1366×768) | 63/63 | 0 |
 
 No se encontró ninguna falla en la app, así que no se modificó su código. Solo cambió la prueba, y este informe corrige la descripción del resaltado.
+
+## V4.9: pedidos bloqueados "en otra hoja" y fecha automática (caso del Operario, 20/10)
+**Causa (reproducida):** el constructor guarda las hojas locales en el navegador (IndexedDB) y las **comparte entre todos los usuarios de esa computadora**.
+- Al entrar, el Operario quedaba trabajando en la hoja de otro usuario (la "Hoja 1").
+- Una hoja **cerrada con la "×"** seguía bloqueando sus pedidos en silencio ("PEDIDO YA AGREGADO A OTRA HOJA (Hoja 1)").
+- Se agregaba un **ERROR falso** ("el pedido tiene mercadería y no quedó en la hoja").
+- Desde Admin funcionaba porque era su propia hoja.
+
+**Corrección** (`public/legacy/despacho-v15.js`, sin cambiar diseño ni permisos):
+1. **Hojas por usuario:** cada usuario ve y usa solo sus hojas en esa computadora. *(V4.10: las hojas viejas sin dueño ya NO se asignan al primero que entra.)*
+2. **El bloqueo local cuenta solo hojas abiertas y propias** *(criterio de "propia" corregido en V4.10)*. La protección real sigue siendo la reserva del servidor, que avisa en qué borrador y de qué operador está el pedido, con "IR AL BORRADOR" y "ELIMINAR BORRADOR Y LIBERAR PEDIDOS".
+3. **Sin ERROR falso:** los pedidos ya avisados (en esta hoja, en otra hoja abierta o reservados) no se repiten como ERROR. El ERROR sigue apareciendo si un pedido se pierde sin explicación.
+4. **Fecha automática:** una hoja **no publicada** con fecha anterior a hoy pasa a **hoy** al abrir el constructor, al cambiar de hoja y si la app quedó abierta de un día para el otro. También se actualizan las fechas de sus pedidos y se recalcula la antigüedad de créditos, con un aviso. Una fecha **futura** puesta a propósito se respeta.
+
+**Prueba nueva** `tests/e2e/run_builder_orders_date.py` (10 casos; Operario de prueba y informes sintéticos; misma computadora compartida):
+
+| Prueba | Resultado | Exit |
+|---|---|---|
+| `run_builder_orders_date.py` | 10/10 | 0 |
+| La misma prueba sobre la V4.8, sin corrección: reproduce los síntomas (hoja del Admin, bloqueo silencioso, ERROR falso) | — | 2 |
+| `run_e2e_g2.py` (constructor + chofer) | 23/23 | 0 |
+| Build de producción + guardián | OK | 0 |
+
+**Nota sobre los archivos recibidos:** *(corregida en V4.10)* el diagnóstico de esta sección era incorrecto; ver V4.10.
+
+**En la computadora del Operario:** la "Hoja 1" que bloqueaba sigue guardada en ese navegador. Con esta versión deja de bloquear y de verse para el Operario. Si los pedidos siguieran reservados en un borrador, el aviso nuevo muestra cuál y permite liberarlo.
+
+## V4.10: diagnóstico corregido, transición de hojas sin dueño y fecha
+### 1. Diagnóstico corregido
+- **Error del informe V4.9:** decía que `informe_pedidos (1) (3).xlsx` no era un informe de pedidos. **Es incorrecto.** El archivo tiene dos pestañas y la primera, **"pedidos"** (7.296 líneas), contiene los cinco pedidos de la incidencia. El error vino de leer solo la pestaña activa ("resumen_productos").
+- **Importación contrastada con los archivos reales** (cargados en una carpeta temporal, **fuera del proyecto**; ningún dato de esos archivos quedó en el repositorio): el constructor reconoce la pestaña "pedidos" (1.000 pedidos) y toma los otros dos archivos como saldo de comprobantes y saldo de cuenta corriente. Los cinco pedidos aparecen ("Facturado ZONA ESTE") y **en una hoja limpia entran los cinco sin errores**.
+
+**Causas CONFIRMADAS** (reproducidas con la V4.8 y corregidas):
+- Las hojas locales del constructor eran compartidas entre los usuarios de una misma computadora.
+- Una hoja cerrada con la "×" seguía bloqueando sus pedidos con "PEDIDO YA AGREGADO A OTRA HOJA (Hoja N)".
+- La protección agregaba el "ERROR … no quedó en la hoja" para pedidos que ya tenían su aviso.
+- Los mismos archivos importan bien: el bloqueo no vino de la importación.
+
+**HIPÓTESIS (no verificable desde acá):**
+- Quién creó la "Hoja 1" que estaba en el navegador del Operario el 20/10 (otro usuario de esa computadora o una hoja propia vieja) y por qué tenía esos pedidos. Haría falta el almacenamiento de ese navegador.
+- Que el Admin haya podido porque la hoja era suya o porque trabajó en otro navegador. Es compatible con lo reproducido, pero no se puede confirmar.
+
+### 2. Transición de hojas creadas antes de V4.9 (sin dueño)
+- **Ya no se asignan automáticamente** al usuario que entra: se eliminó la asignación en `touch()` y "propia" ahora exige un dueño igual al usuario actual.
+- **Dueño recuperado desde el servidor** (`list_drafts`) cuando el usuario puede ver ese borrador.
+- **Borrador de otro usuario no visible** para el usuario actual (`draft_content` → `FORBIDDEN_DRAFT`): no se le asigna ni se le ofrece; queda para su dueño, que la recupera al entrar.
+- **Dueño indeterminable** (sin borrador en el servidor): la hoja queda **guardada y separada**, sin cambios. No se ve como pestaña ni bloquea, y el usuario trabaja en una hoja **nueva propia**. Se puede **recuperar a mano** desde "Reabrir borrador… → Hojas anteriores sin dueño", con confirmación.
+- Se agregó `drafts.list` al puente del constructor (`src/main.js`), usando la API existente `listDrafts`. **Permisos sin cambios.**
+
+### 3. Fecha automática (verificada)
+- Hoja **publicada:** no se modifica.
+- **Al abrir el constructor:** se actualiza.
+- **Al cambiar de pestaña:** se actualiza.
+- **Al pasar la medianoche con la app abierta:** se actualiza.
+- Fecha **futura:** se respeta.
+
+### Pruebas (código de salida)
+| Prueba | Resultado | Exit |
+|---|---|---|
+| `run_builder_legacy_owner.py` (almacenamiento real generado por **V4.8** → Operario en V4.10, mismo navegador) | 8/8 | 0 |
+| `run_builder_orders_date.py` (bloqueos + fecha: publicada, pestaña, medianoche simulada, futura) | 13/13 | 0 |
+| `run_e2e_g2.py` (constructor + chofer) | 23/23 | 0 |
+| Build de producción + guardián | OK | 0 |
+
+`run_builder_legacy_owner.py` necesita el build demo de la versión anterior en `OKD_PREV_DIST`.

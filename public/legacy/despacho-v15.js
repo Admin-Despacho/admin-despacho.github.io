@@ -17,6 +17,15 @@ const ars = v => (v == null || v === '' || isNaN(v)) ? '' : fmtARS.format(v).rep
 const num = v => (v == null || v === '' || isNaN(v)) ? '' : fmtNum.format(v);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pad = n => (n < 10 ? '0' : '') + n;
+// Fecha de la hoja AUTOMÁTICA: una hoja NO publicada con fecha anterior a hoy pasa a hoy (también sus pedidos con fecha vieja).
+// Una fecha FUTURA puesta a propósito se respeta. Devuelve la fecha anterior si cambió, o null.
+function autoSheetDate() {
+  const t = todayISO(), tab = (typeof SheetTabs !== 'undefined' && SheetTabs.tab) ? SheetTabs.tab() : null;
+  if (!RouteStore.sheetDate || RouteStore.sheetDate >= t || RouteStore.published || (tab && tab.published)) return null;
+  const old = RouteStore.sheetDate; RouteStore.sheetDate = t;
+  RouteStore.rows.forEach(r => { if (!r.fecha || r.fecha < t) r.fecha = t; });
+  return old;
+}
 function todayISO() { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
 function isoToDMY(iso) { if (!iso) return ''; const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '/' + m[2] + '/' + m[1] : iso; }
 function dmyToISO(s) {
@@ -875,12 +884,47 @@ function sheetSummary(rows) {
 }
 const SheetTabs = {
   idx: null,
+  // Las hojas locales se guardan en el navegador y las comparten todos los que usan esa computadora: cada usuario ve y usa SOLO
+  // las suyas. Una hoja SIN dueño (creada antes de V4.9) no es de nadie: se intenta recuperar su dueño desde el borrador del
+  // servidor; si no se puede, queda guardada y separada (no se ve, no bloquea, no se modifica) y se ofrece recuperarla a mano.
+  mine(t) { const me = (window.OKD_ME || {}).id; return !!t && !!me && t.owner === me; },
+  _foreign: new Set(),   // hojas sin dueño cuyo borrador del servidor es de OTRO usuario que no puedo ver: no se ofrecen ni se asignan
+  unowned() { return (this.idx ? this.idx.tabs : []).filter(t => !t.owner && !t.published && !this._foreign.has(t.id)); },
+  async resolveOwners() {
+    const pend = this.unowned(); if (!pend.length) return;
+    const b = window.OKD_BRIDGE && window.OKD_BRIDGE.drafts; let list = null;
+    try { list = b && b.list ? await b.list() : null; } catch (e) { list = null; }   // sin conexión: no se decide nada, no se asigna
+    if (!list) return;
+    let changed = false;
+    pend.forEach(t => { const d = list.find(x => x.client_sheet_key === t.id); if (d && d.owner_id) { t.owner = d.owner_id; t.ownerFrom = 'servidor'; changed = true; } });
+    if (changed) await DB.set('sheets_index', this.idx);
+    // las que siguen sin dueño: si el servidor tiene un borrador de OTRO usuario (no visible para mí), no son recuperables por mí
+    for (const t of this.unowned()) {
+      try { await b.content(t.id); } catch (e) { if (/FORBIDDEN_DRAFT/.test(e.code || e.message || '')) this._foreign.add(t.id); }
+    }
+  },
+  // recuperación EXPLÍCITA de una hoja sin dueño (desde "Reabrir borrador…", con confirmación)
+  async adopt(id) {
+    const t = this.tab(id); if (!t || t.owner) return;
+    if (!confirm('"' + t.name + '" quedó guardada en esta computadora sin dueño identificado (versión anterior).\n¿Recuperarla como hoja tuya?')) return;
+    t.owner = (window.OKD_ME || {}).id; t.ownerFrom = 'recuperada'; t.closed = false;
+    RouteStore.log({ tipo: 'hoja sin dueño recuperada', hoja: t.name, id: t.id });
+    await DB.set('sheets_index', this.idx); await this.switchTo(id);
+  },
   async boot() {
     this.idx = await DB.get('sheets_index');
     if (!this.idx) { // migra la hoja única anterior a la primera pestaña
       const old = await DB.get('sheet'); const id = (old && old.sheetId) || sheetUid();
       this.idx = { active: id, tabs: [{ id, name: 'Hoja 1', closed: false, orders: [] }] };
       if (old) await DB.set('sheet:' + id, Object.assign({}, old, { sheetId: id }));
+      await DB.set('sheets_index', this.idx);
+    }
+    await this.resolveOwners();
+    // si la hoja activa de este navegador no es del usuario (de otro, o sin dueño), se abre una propia o una nueva: nunca se adopta
+    if (!this.mine(this.tab(this.idx.active))) {
+      const own = this.idx.tabs.find(t => !t.closed && !t.published && this.mine(t));
+      if (own) this.idx.active = own.id;
+      else { const id = sheetUid(); this.idx.tabs.push({ id, name: 'Hoja ' + (this.idx.tabs.length + 1), closed: false, orders: [], owner: (window.OKD_ME || {}).id || null }); this.idx.active = id; }
       await DB.set('sheets_index', this.idx);
     }
     return (await DB.get('sheet:' + this.idx.active)) || { sheetId: this.idx.active };
@@ -917,21 +961,27 @@ const SheetTabs = {
   async openDraft(key, name, content) {
     if (this.tab(key)) { await this.switchTo(key); return; }
     await RouteStore.flush();
-    this.idx.tabs.push({ id: key, name: name || 'Borrador', closed: false, orders: [] });
+    this.idx.tabs.push({ id: key, name: name || 'Borrador', closed: false, orders: [], owner: (window.OKD_ME || {}).id || null });
     await this.show(key, Object.assign({}, content || {}, { sheetId: key })); await RouteStore.flush();
   },
   // Borrador eliminado en el servidor: se quita del equipo (no toca hojas publicadas)
   async dropLocal(key) {
     const t = this.tab(key); if (!t || t.published) return;
     this.idx.tabs = this.idx.tabs.filter(x => x.id !== key); await DB.set('sheet:' + key, null);
-    if (RouteStore.sheetId === key) { const o = this.idx.tabs.find(x => !x.closed); if (o) await this.show(o.id); else await this.create(); }
+    if (RouteStore.sheetId === key) { const o = this.idx.tabs.find(x => !x.closed && this.mine(x)); if (o) await this.show(o.id); else await this.create(); }
     else { await DB.set('sheets_index', this.idx); this.render(); }
   },
   // Pedido ya cargado en OTRA hoja borrador (no publicada)
-  orderInOther(id) { const t = (this.idx ? this.idx.tabs : []).find(x => x.id !== RouteStore.sheetId && !x.published && (x.orders || []).includes(String(id))); return t ? t.name : null; },
+  // Solo cuentan las hojas ABIERTAS de quien usa la app: una hoja cerrada con la "×" o de otro usuario de esta misma computadora
+  // ya no bloquea en silencio. La protección real es la reserva del servidor (avisa en qué borrador/operador y permite liberarlo).
+  orderInOther(id) { const me = (window.OKD_ME || {}).id || null;
+    const t = (this.idx ? this.idx.tabs : []).find(x => x.id !== RouteStore.sheetId && !x.published && !x.closed && this.mine(x) && (x.orders || []).includes(String(id)));
+    return t ? t.name : null; },
   async show(id, sheet) {
     this.apply(sheet || (await DB.get('sheet:' + id)) || { sheetId: id });
     if (!RouteStore.sheetDate) RouteStore.sheetDate = RouteStore.rows.length ? (RouteStore.rows[0].fecha || todayISO()) : todayISO();
+    const movedFrom = autoSheetDate();
+    if (movedFrom) { RouteStore.save(); setTimeout(() => toast('Fecha de la hoja actualizada automáticamente a hoy (' + isoToDMY(RouteStore.sheetDate) + '). Tenía ' + isoToDMY(movedFrom) + '.'), 400); }
     this.idx.active = id; const t = this.tab(id); if (t) t.closed = false;
     await DB.set('sheets_index', this.idx);
     CalculationEngine.computeAll(RouteStore.rows);
@@ -942,7 +992,7 @@ const SheetTabs = {
   async create() {
     await RouteStore.flush();
     const id = sheetUid(), n = this.idx.tabs.length + 1;
-    this.idx.tabs.push({ id, name: 'Hoja ' + n, closed: false, orders: [] });
+    this.idx.tabs.push({ id, name: 'Hoja ' + n, closed: false, orders: [], owner: (window.OKD_ME || {}).id || null });
     await this.show(id, { sheetId: id }); await RouteStore.flush();
   },
   // Cerrar la pestaña NO borra el borrador: se puede reabrir
@@ -951,21 +1001,22 @@ const SheetTabs = {
     t.closed = true;
     if (id === RouteStore.sheetId) {
       await RouteStore.flush();
-      const other = this.idx.tabs.find(x => !x.closed);
+      const other = this.idx.tabs.find(x => !x.closed && this.mine(x));
       if (other) await this.show(other.id); else await this.create();
     } else { await DB.set('sheets_index', this.idx); this.render(); }
   },
   render() {
     const el = document.getElementById('sheetTabs'); if (!el || !this.idx) return;
-    const open = this.idx.tabs.filter(t => !t.closed), closed = this.idx.tabs.filter(t => t.closed);
+    const open = this.idx.tabs.filter(t => !t.closed && this.mine(t)), closed = this.idx.tabs.filter(t => t.closed && this.mine(t));
     el.innerHTML = open.map(t => '<span class="stab' + (t.id === RouteStore.sheetId ? ' on' : '') + '" data-tab="' + t.id + '"><b>' + esc(t.name) + '</b>' + (t.published ? '<i>' + esc(t.published) + '</i>' : '') + '<button type="button" class="stx" data-close="' + t.id + '" title="Cerrar pestaña (no borra)">×</button></span>').join('') +
       '<button class="btn soft" type="button" id="tabNew">+ NUEVA HOJA</button>' +
-      (closed.length ? '<select id="tabReopen"><option value="">Reabrir borrador…</option>' + closed.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('') + '</select>' : '') +
+      ((closed.length || this.unowned().length) ? '<select id="tabReopen"><option value="">Reabrir borrador…</option>' + closed.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('') +
+        (this.unowned().length ? '<optgroup label="Hojas anteriores sin dueño (recuperar)">' + this.unowned().map(t => '<option value="adopt:' + t.id + '">' + esc(t.name) + ' · ' + ((t.orders || []).length) + ' pedido(s)</option>').join('') + '</optgroup>' : '') + '</select>' : '') +
       '<span class="sheetsum" id="sheetSummary">' + sheetSummary() + '</span>';
     el.querySelectorAll('.stab').forEach(b => { b.addEventListener('click', e => { if (!e.target.closest('[data-close]')) this.switchTo(b.dataset.tab); }); b.addEventListener('dblclick', () => this.rename(b.dataset.tab)); b.title = 'Doble clic para renombrar'; });
     el.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => this.close(b.dataset.close)));
     el.querySelector('#tabNew').addEventListener('click', () => this.create());
-    const ro = el.querySelector('#tabReopen'); if (ro) ro.addEventListener('change', () => ro.value && this.switchTo(ro.value));
+    const ro = el.querySelector('#tabReopen'); if (ro) ro.addEventListener('change', () => { const v = ro.value; ro.value = ''; if (!v) return; if (v.startsWith('adopt:')) this.adopt(v.slice(6)); else this.switchTo(v); });
   }
 };
 
@@ -1779,6 +1830,11 @@ const UI = {
       await DB.clear(); location.reload();
     });
     $('#btnConfig').addEventListener('click', () => CfgUI.open());
+    // si la app queda abierta de un día para el otro, la hoja no publicada pasa sola a la fecha nueva
+    const dayCheck = () => { const old = autoSheetDate(); if (!old) return;
+      $('#sheetDate').value = isoToDMY(RouteStore.sheetDate); CalculationEngine.computeAll(RouteStore.rows); RouteStore.save(); this.renderTable();
+      toast('Fecha de la hoja actualizada automáticamente a hoy (' + isoToDMY(RouteStore.sheetDate) + ').'); };
+    setInterval(dayCheck, 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) dayCheck(); });
     $('#sheetDate').addEventListener('change', e => {
       const iso = dmyToISO(e.target.value);
       if (!iso) { e.target.value = isoToDMY(RouteStore.sheetDate); toast('Fecha inválida: usá dd/mm/aaaa.'); return; }
@@ -2041,11 +2097,12 @@ const UI = {
     if (!OrderIndex.size()) { log.innerHTML = '<div class="msg err">Primero cargá el <b>informe de pedidos</b>.</div>'; return; }
     const msgs = []; let added = 0;
     if (!RouteStore.selected.size) msgs.push('<div class="msg warn">No hay transportista seleccionado: los pedidos se agregan igual, con el transportista del informe.</div>');
+    const handled = new Set();   // pedidos que ya tienen su aviso (duplicado, otra hoja, reservado en otro borrador): no se repiten como ERROR
     for (const id of ids) {
       const used = RouteStore.usedOrders();
-      if (used.has(id)) { msgs.push('<div class="msg">Pedido <b>' + id + '</b>: ya está en la hoja (no se duplica).</div>'); continue; }
+      if (used.has(id)) { handled.add(id); msgs.push('<div class="msg">Pedido <b>' + id + '</b>: ya está en la hoja (no se duplica).</div>'); continue; }
       const otherTab = SheetTabs.orderInOther(id);
-      if (otherTab) { msgs.push('<div class="msg warn"><b>' + id + ' · PEDIDO YA AGREGADO A OTRA HOJA</b> (' + esc(otherTab) + '). No se duplica.</div>'); continue; }
+      if (otherTab) { handled.add(id); msgs.push('<div class="msg warn"><b>' + id + ' · PEDIDO YA AGREGADO A OTRA HOJA</b> (' + esc(otherTab) + ', abierta en las pestañas de abajo). No se duplica.</div>'); continue; }
       const res = ShippingMatcher.resolve(id);
       if (!res) {
         msgs.push('<div class="msg err"><b>' + id + ' · PEDIDO NO ENCONTRADO</b> en el informe de pedidos.<button class="linkbtn" type="button" data-manual="' + id + '">agregar como manual</button></div>');
@@ -2113,7 +2170,7 @@ const UI = {
     // Protección: todo pedido con mercadería ingresado debe estar en la hoja
     ids.forEach(id => {
       const o = OrderIndex.get(id);
-      if (o && o.kind !== 'ENVIO' && !RouteStore.rows.some(r => String(r.mainOrder) === id))
+      if (o && o.kind !== 'ENVIO' && !handled.has(id) && !RouteStore.rows.some(r => String(r.mainOrder) === id))
         msgs.push('<div class="msg err"><b>' + id + ' · ERROR:</b> el pedido tiene mercadería y no quedó en la hoja. Avisá para revisarlo.</div>');
     });
     let addedRows = (this._added || []).filter(r => RouteStore.rows.includes(r)); this._added = [];
@@ -3191,6 +3248,9 @@ const PdfExporter = {
   const sheet = await SheetTabs.boot();
   SheetTabs.apply(sheet);
   if (!RouteStore.sheetDate) RouteStore.sheetDate = RouteStore.rows.length ? (RouteStore.rows[0].fecha || todayISO()) : todayISO();
+  // fecha automática también para la hoja con la que arranca el constructor (no solo al cambiar de hoja)
+  const bootMovedFrom = autoSheetDate();
+  if (bootMovedFrom) { RouteStore.save(); setTimeout(() => toast('Fecha de la hoja actualizada automáticamente a hoy (' + isoToDMY(RouteStore.sheetDate) + '). Tenía ' + isoToDMY(bootMovedFrom) + '.'), 600); }
   let legacyReviews = 0;
   RouteStore.rows.forEach(r => {
     // Marcas "revisado" de versiones anteriores (sin firma): se quitan, no se confirman solas
