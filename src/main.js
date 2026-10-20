@@ -82,7 +82,10 @@ const MODULE_ROUTES = {
   '#/historial': { ok: me => hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team') || hasPerm(me, 'routes.view_own'), open: async me => (await adminUi()).openHistory(api, me) },
   '#/aprobaciones': { ok: canApprovals, open: async me => { const { ApprovalsPanel } = await import('./online/approvals-ui.js'); await new ApprovalsPanel(api, me).open(); } },
   '#/usuarios': { ok: me => hasPerm(me, 'users.view'), open: async me => { await new UsersPanel(api, me, null, logout).open(); await withNav(me, '#/usuarios'); } },
-  '#/configuracion': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'vehicles.manage'), open: async me => (await adminUi()).openConfig(api, me, new URLSearchParams(location.hash.split('?')[1] || '').get('sec')) },
+  // carriers.manage (p. ej. Operario Depósito) entra SOLO a la sección Transportistas: cualquier otra sección por URL directa → 403,
+  // y Configuración le muestra únicamente esa pestaña. No habilita Configuración global, Emails ni otras secciones.
+  '#/configuracion': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'vehicles.manage') || (hasPerm(me, 'carriers.manage') && ['', 'transportistas'].includes(cfgSec())),
+    open: async me => (await adminUi()).openConfig(api, me, cfgSec(), { only: hasPerm(me, 'settings.manage') || hasPerm(me, 'vehicles.manage') ? null : ['transportistas'] }) },
   '#/informes': { ok: me => hasPerm(me, 'can_view_commercial_transport_reports') || hasPerm(me, 'can_manage_commercial_transport_reports'), open: async me => { const { ReportsPanel } = await import('./online/reports-ui.js'); await new ReportsPanel(api, me, logout).open(); await withNav(me, '#/informes'); } },
   '#/conciliacion-noc': { ok: me => hasPerm(me, 'credit_notes.manage'), open: async me => (await adminUi()).openNocRecon(api, me) },
   '#/auditoria': { ok: me => hasPerm(me, 'audit.view'), open: async me => (await adminUi()).openAudit(api, me) },
@@ -102,8 +105,8 @@ async function mountLegacyRc4(me, active = '#/despacho') {
 
     shell = document.createElement('div'); shell.className = 'rc4app rc4legacy-shell';
     shell.innerHTML =
-      '<aside class="rc4side"><div class="brand"><img class="logo" src="/icons/icon-192.png" alt="OK"><div><b>DESPACHO</b><small>' + esc(ROLE_LABEL[me.role] || me.role) + '</small></div></div>' +
-      '<nav class="nav" id="rc4LegacyNav"></nav><div class="footer"></div></aside>' +
+      '<aside class="rc4side"><div class="brand"><img class="logo" src="/icons/icon-192.png" alt="OK"><div><b>DESPACHO</b><small>' + esc(ROLE_LABEL[me.role] || me.role) + '</small></div><button class="rc4menu" type="button" aria-expanded="false" aria-label="Abrir menú"><span></span>MENÚ</button></div>' +
+      '<nav class="nav" id="rc4LegacyNav"></nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b><span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<div class="footer"></div></aside>' +
       '<main class="rc4main"><div class="topbar"><div class="title"><h1>Despacho</h1><p>Preparación de hojas de ruta</p></div>' +
       '<div class="topact"><div class="userchip"><b>' + esc(me.full_name) + ' · ' + esc(ROLE_LABEL[me.role] || me.role) + '</b><br><span>' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span></div>' +
       '<button class="tbtn" type="button" id="legacyRc4Logout">Cerrar sesión</button></div></div><div class="rc4legacy-body"></div></main>';
@@ -143,9 +146,10 @@ async function withNav(me, active) {
 let ME = null;
 let stopPinWatcher = null;
 function closeOverlay() { const p = $('#usersPanel'); p.hidden = true; p.innerHTML = ''; }
+const cfgSec = () => new URLSearchParams(location.hash.split('?')[1] || '').get('sec') || '';
 function show403() {
   const p = $('#usersPanel'); p.hidden = false;
-  p.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Acceso</span></div></header><div class="up-wrap"><div class="auth-card" id="e403"><h3>403 · ACCESO NO AUTORIZADO</h3><p>Tu usuario no tiene permiso para este módulo.</p><button class="btn dark" type="button" id="b403">VOLVER</button></div></div>';
+  p.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Acceso</span></div></header><div class="up-wrap"><div class="auth-card" id="e403"><h3>403 · ACCESO NO AUTORIZADO</h3><p>Tu usuario no tiene permiso para este módulo.</p><button class="btn dark" type="button" id="b403">VOLVER</button></div></div>';
   p.querySelector('#b403').onclick = () => { history.replaceState(null, '', location.pathname); closeOverlay(); };
 }
 async function openRoute() {
@@ -213,6 +217,20 @@ async function route() {
   initPushNotifications(api, me).catch(() => null);
   api.flushPushQueue && api.flushPushQueue().catch(() => null);
   window.OKD_LOGOUT = logout;
+  // Celular/tablet (< 1000 px): el menú lateral es una barra con "MENÚ"; al elegir un ítem se cierra y se muestra el contenido arriba
+  if (!window.__okdMenuWired) {
+    window.__okdMenuWired = true;
+    document.addEventListener('click', ev => {
+      const btn = ev.target.closest && ev.target.closest('.rc4menu');
+      if (btn) { const side = btn.closest('.rc4side'), open = !side.classList.contains('open'); side.classList.toggle('open', open);
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false'); btn.setAttribute('aria-label', open ? 'Cerrar menú' : 'Abrir menú'); return; }
+      if (ev.target.closest && ev.target.closest('.rc4logout')) { window.OKD_LOGOUT && window.OKD_LOGOUT(); return; }
+      const link = ev.target.closest && ev.target.closest('.rc4side .nav a');
+      if (link) { const side = link.closest('.rc4side'); side.classList.remove('open'); const b = side.querySelector('.rc4menu'); if (b) b.setAttribute('aria-expanded', 'false');
+        // el panel de administración es una capa fija con su PROPIO scroll (.up): hay que volver arriba ese contenedor, no solo la ventana
+        if (window.matchMedia('(max-width:1000px)').matches) setTimeout(() => { const sc = document.querySelector('.up:not([hidden])'); if (sc) sc.scrollTop = 0; window.scrollTo(0, 0); }, 0); }
+    });
+  }
   ME = me; window.OKD_ME = { id: me.id, allDrafts: hasPerm(me, 'routes.manage_all_drafts') };
   if (hasPerm(me, 'routes.create')) {
     show('#operario');

@@ -11,7 +11,7 @@ export class ApprovalsPanel {
       const w = appFrame(this.me, 'Aprobaciones de ruta interna', '#/aprobaciones', 'Revisión controlada de cambios e incidencias');
       w.innerHTML = '<div class="up-wrap rc4-approvals-wrap" id="apWrap"></div>';
     } else {
-      this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Aprobaciones</span></div><div class="sp"></div>' +
+      this.el.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Aprobaciones</span></div><div class="sp"></div>' +
         '<span class="who-chip">' + esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b></span><button class="tbtn" type="button" id="apClose">Volver al panel</button></header><div class="up-wrap" id="apWrap"></div>';
       this.el.querySelector('#apClose').onclick = () => { if (location.hash) history.replaceState(null, '', location.pathname); this.el.hidden = true; this.el.innerHTML = ''; };
     }

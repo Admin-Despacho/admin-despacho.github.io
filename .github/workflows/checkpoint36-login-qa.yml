@@ -19,14 +19,14 @@ jobs:
       - run: npx vitest run tests/unit/driver-offline.test.js tests/unit/supabase-api.test.js
       - name: Confirm assets and responsive login
         run: |
-          test -s dist/branding/desktop_detail_92.webp
-          test -s dist/branding/truck_detail_92.webp
+          test -s dist/branding/login-notebook.webp
+          test -s dist/branding/login-android.webp
           node --input-type=module <<'JS'
           import fs from 'node:fs'; import assert from 'node:assert/strict';
           const a=fs.readFileSync('src/online/auth-ui.js','utf8');
           const c=fs.readFileSync('src/styles/login-brand.css','utf8');
-          for(const name of ['desktop_detail_92.webp','truck_detail_92.webp']) assert(a.includes(name));
+          for(const name of ['login-notebook.webp','login-android.webp']) assert(a.includes(name), 'auth-ui.js no referencia '+name);
           assert(c.includes('min-width:800px'));assert(c.includes('max-width:799px'));
-          for(const name of ['desktop_detail_92.webp','truck_detail_92.webp']) assert(fs.readFileSync('dist/branding/'+name).subarray(0,4).toString()==='RIFF');
-          console.log('PASS: approved WebP assets, responsive login and existing authentication');
+          for(const name of ['login-notebook.webp','login-android.webp']) assert(fs.readFileSync('dist/branding/'+name).subarray(0,4).toString()==='RIFF', name+' no es WebP');
+          console.log('PASS: approved WebP assets (login-notebook / login-android), responsive login and existing authentication');
           JS

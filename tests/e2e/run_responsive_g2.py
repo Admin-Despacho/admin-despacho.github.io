@@ -1,7 +1,7 @@
 """Revisión responsive en Chromium (viewports emulados, NO celular real): app del Transportista Interno (traslado con varios pedidos,
 observación, recepción interna, TAREA, + AGREGAR PARADA) y constructor (ubicación interna, tabla, composer). Mide desborde horizontal,
 elementos más anchos que la pantalla, botones fuera de pantalla y botones demasiado chicos. Guarda capturas en tests/e2e/out/responsive/."""
-import asyncio, os, subprocess, time, socket, json
+import asyncio, os, subprocess, time, socket, json, sys
 from playwright.async_api import async_playwright
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 OUT = os.path.join(ROOT, 'tests', 'e2e', 'out', 'responsive'); os.makedirs(OUT, exist_ok=True)
@@ -130,5 +130,13 @@ async def main():
     finally: server.terminate()
     for r_ in R: print(' | '.join(r_))
     print('TOTAL', sum(1 for x in R if x[2] == 'PASS'), 'PASS /', sum(1 for x in R if x[2] == 'FAIL'), 'FAIL')
-asyncio.run(main())
+    return R
+EXPECTED = 30   # 1 escenario + 4 celulares × 4 comprobaciones + 4 escritorios × 3 zooms + ... (si se agregan casos, actualizar)
+if __name__ == '__main__':
+    # 0 = todo PASS · 1 = alguna comprobación FAIL · 2 = excepción, preparación fallida o menos casos de los esperados
+    import traceback
+    try: RR = asyncio.run(main())
+    except Exception as e: traceback.print_exc(); print('ERROR: la prueba no pudo completarse:', repr(e)); sys.exit(2)
+    if len(RR) < EXPECTED: print('ERROR: se ejecutaron %d de %d comprobaciones esperadas' % (len(RR), EXPECTED)); sys.exit(2)
+    sys.exit(1 if any(r[2] != 'PASS' for r in RR) else 0)
 

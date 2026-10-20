@@ -211,5 +211,16 @@ async def main():
     finally: server.terminate()
     for r_ in R: print(' | '.join(r_))
     print('TOTAL', sum(1 for x in R if x[2] == 'PASS'), 'PASS /', sum(1 for x in R if x[2] == 'FAIL'), 'FAIL')
-asyncio.run(main())
+    return R
+EXPECTED = 23
+OK = lambda r: r[2] == 'PASS'
+if __name__ == '__main__':
+    # 0 = todo PASS · 1 = alguna comprobación FAIL · 2 = excepción, preparación fallida o menos casos de los esperados
+    import sys, traceback
+    try: RR = asyncio.run(main())
+    except SystemExit: raise
+    except Exception as e: traceback.print_exc(); print('ERROR: la prueba no pudo completarse:', repr(e)); sys.exit(2)
+    if not RR or len(RR) < EXPECTED: print('ERROR: se ejecutaron %d de %d comprobaciones esperadas' % (len(RR or []), EXPECTED)); sys.exit(2)
+    sys.exit(1 if any(OK(r) is not True for r in RR) else 0)
+
 

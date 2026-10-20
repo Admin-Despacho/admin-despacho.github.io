@@ -98,7 +98,7 @@ export class ReportsPanel {
       const w = appFrame(this.me, 'Informes', '#/informes', 'Cristian Torres y despachos por transportistas tercerizados');
       w.innerHTML = '<div class="up-wrap rc4-reports-wrap" id="rpWrap"></div>';
     } else {
-      this.el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Informes · Cristian Torres</span></div><div class="sp"></div>' +
+      this.el.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Informes · Cristian Torres</span></div><div class="sp"></div>' +
         '<button class="who-chip linkchip" type="button" id="rpMe">' + esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b></button>' +
         '<button class="tbtn" type="button" id="rpClose">Volver al panel</button></header><div class="up-wrap" id="rpWrap"></div>';
       this.el.querySelector('#rpClose').addEventListener('click', () => { if (location.hash) history.replaceState(null, '', location.pathname); this.el.hidden = true; this.el.innerHTML = ''; });

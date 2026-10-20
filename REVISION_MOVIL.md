@@ -1,0 +1,98 @@
+# Revisión en celular (19/10/2026)
+
+Recorrido emulado en Chromium a 390×844, en modo demo, de **todos los ítems del menú del Administrador** y de las pantallas de inicio de Transportista Interno y Externo. No es un celular físico.
+
+## Corregido
+1. **Menú del panel en celular** (`src/online/rc4-ui.js`, `src/main.js`, `src/styles/online.css`). Por debajo de 1000 px el menú completo quedaba arriba y había que bajar en cada ítem. Ahora es una **barra compacta con "MENÚ"**: se abre al tocarla y, al elegir un ítem, se cierra y el contenido queda arriba.
+   - El panel es una capa fija con su propio scroll, así que lo que se vuelve arriba es esa capa, no solo la ventana.
+   - Aplica al menú del panel y al del constructor. En escritorio no cambia nada.
+2. **La barra no se estira** en pantallas con poco contenido (Borradores, Backup): filas de la grilla `auto 1fr`.
+3. **Aviso "Entrá más rápido con huella o Face ID"** (Transportista): en celular el texto quedaba una palabra por renglón. Ahora se apila arriba del botón hasta 520 px.
+
+## Pruebas (código de salida)
+| Prueba | Resultado | Exit |
+|---|---|---|
+| **`tests/e2e/run_admin_mobile_menu.py` (nueva)** sobre el build demo nuevo | 17/17 | 0 |
+| La misma prueba sobre la base original (sin botón MENÚ) | — | 2 |
+| Build de producción | OK | 0 |
+| Guardián del build | OK | 0 |
+| `run_login_visual.py` | 21/21 | 0 |
+| `checkpoint36-login.mjs` | 4/4 | 0 |
+| `run_invite_access.py` | 8/8 | 0 |
+| Unitarias relacionadas | 20/20 | 0 |
+| Cola offline del chofer | 2/2 | 0 |
+
+## Mejoras aprobadas (V4.3)
+4. **Usuario y "Cerrar sesión" dentro del MENÚ** en celular. Arriba de cada pantalla queda solo el título (y "+ NUEVA HOJA" cuando corresponde). En escritorio no cambia.
+5. **Filtros de Hojas publicadas** en grilla pareja de 2 columnas: textos a todo el ancho, Estado/Aprobación y fechas de a dos, BUSCAR a lo ancho, todos de 44 px. El estilo base fijaba `min-width: 260px`, y eso los sacaba de la pantalla.
+6. **Casillas:** en pantallas táctiles toda la fila es tocable (44 px) y la casilla es de 22 px. Se corrige también que dos casillas de Configuración quedaban en un mismo renglón.
+7. **Logo unificado:** el cuadrito blanco con el OK negro (el ícono nuevo) en los encabezados oscuros de Transportista, Informes, Aprobaciones, Usuarios y la pantalla sin acceso. Reemplaza al logo cian.
+
+**Pruebas (código de salida):**
+- `run_admin_mobile_menu.py`: **20/20**, exit 0. Suma usuario en el menú, filtros dentro de la pantalla y casillas de 44 px.
+- `run_login_visual.py`: 21/21, exit 0.
+- `checkpoint36-login.mjs`: 4/4, exit 0.
+- `run_invite_access.py`: 8/8, exit 0.
+- Unitarias relacionadas: 20/20, exit 0.
+- Cola offline del chofer: 2/2, exit 0.
+- Build de producción y guardián: exit 0.
+
+## Pendiente
+- Los usuarios de la demo usan el rol DESPACHO, eliminado en producción. Por eso las vistas de Superior Despacho y Operario Depósito no se pudieron recorrer en la demo.
+
+## Sin revisar
+- Celular físico.
+- Vistas de Superior y Operario.
+- Flujos internos completos de cada pantalla: formularios, modales, constructor paso a paso.
+
+## V4.4: pruebas de G2 / TAREA / traslados / push sobre esta versión
+**Corregido:**
+- **Botones de resultado del chofer en 360 px** ("RECEPCIÓN PARCIAL", "REPROGRAMAR"): en una corrida empujaron 2 px fuera de la pantalla. Ahora las columnas pueden achicarse y el texto pasa a dos renglones (`src/styles/online.css`).
+  - Al repetir la prueba sin la corrección no volvió a aparecer: es **intermitente**, probablemente por el momento en que carga la fuente. La corrección elimina la causa igual.
+- **Salida estricta (0 / 1 / 2)** en `run_responsive_g2.py`, `run_e2e_g2.py` y `run_push_sw.py`: antes terminaban en 0 aunque hubiera FAIL.
+  - Verificado en push con una falla controlada (exit 1, archivo restaurado).
+
+| Prueba | Resultado | Exit |
+|---|---|---|
+| SQL `g2_revision_test` (base desde cero, todas las migraciones; incluye concurrencia de push y doble toque del chofer) | 64/64 | 0 |
+| `run_e2e_g2.py` (informes sintéticos) | 23/23 | 0 |
+| `run_responsive_g2.py` (4 celulares + 4 escritorios × 3 zooms) | 30/30 | 0 |
+| `run_push_sw.py` | 3/3 | 0 (falla controlada → 1) |
+| `test_driver_offline_queue.mjs` | 2/2 | 0 |
+| Build de producción + guardián | OK | 0 |
+
+## V4.5: QA del login en GitHub y menú móvil por rol
+1. **`.github/workflows/checkpoint36-login-qa.yml`:** exigía `desktop_detail_92.webp` y `truck_detail_92.webp`, eliminados desde la V4. Ahora comprueba `login-notebook.webp` y `login-android.webp` con los mismos controles: archivo presente y no vacío, referenciado en `auth-ui.js`, cortes 800/799 px y cabecera WebP (`RIFF`).
+   - Ejecutado localmente: el paso viejo da **exit 1** (como en GitHub) y el nuevo **exit 0**. Build `npm run build` exit 0; unitarias del workflow 6/6, exit 0.
+2. **`tests/e2e/run_admin_mobile_menu.py`:** antes aprobaba con 5 resultados. Ahora exige la **lista exacta** de ítems de cada rol (texto, orden y destino) y **exactamente 50** comprobaciones; si se ejecutan más o menos, exit 2.
+   - Detecta opciones faltantes: con un menú sin Transportistas/Vehículos/Emails/Backup, ADMIN-02 falla y las lista.
+3. **Superior Despacho y Operario Depósito** con usuarios **sintéticos** (`@example.invalid`, creados solo en la demo, sin cambiar permisos). Por rol: barra compacta, abrir/cerrar menú, cada ítem va a su destino con el contenido arriba, acceso al constructor y "Cerrar sesión" desde el menú.
+   - **Resultado:** 49 PASS / 1 FAIL de 50, **exit 1**. Admin y Superior completos.
+
+**Defecto encontrado (preexistente, NO corregido, requiere decisión):** el Operario ve "Transportistas" en el menú (tiene `carriers.manage`) y al tocarlo recibe **403 · ACCESO NO AUTORIZADO**.
+- `admin-ui.js` ya habilita la sección Transportistas con `carriers.manage`, pero la regla de rutas de `src/main.js` (`'#/configuracion'`) solo admite `settings.manage` o `vehicles.manage`.
+- **Opciones:** (a) sumar `carriers.manage` a esa regla (una línea), o (b) quitar "Transportistas" del menú del Operario. No se aplicó porque cambia quién accede a una pantalla.
+- Esa pantalla 403 conserva el logo cian anterior: se omitió al unificar encabezados en la V4.3. Tampoco se tocó.
+
+**Cambios NO aprobados que se encontraron en la copia de trabajo y se REVIRTIERON a la V4.4:**
+- La quita de los ítems repetidos del menú del Admin (pausada por pedido del usuario).
+- Los 7 íconos de `public/icons/`, que quedaron otra vez idénticos al lock de marca.
+- El cambio pausado se guarda aparte en `NO_APLICADO/` dentro del ZIP de entrega, sin aplicar.
+
+## V4.6: Operario sin 403 en Transportistas
+- **`src/main.js`:** la ruta `#/configuracion` admite `carriers.manage` **solo** para `sec=transportistas` (o sin sección). Cualquier otra sección por URL directa sigue en 403. No se agregaron permisos al rol.
+- **`src/online/admin-ui.js`:** `openConfig(..., { only })`. Quien entra solo por `carriers.manage` ve únicamente la pestaña Transportistas. Sin esto le habría aparecido también Vehículos, por su permiso `vehicles.view`.
+- **`show403()`:** usa el ícono aprobado (`/icons/icon-192.png`) en lugar del logo cian.
+- **Prueba nueva `tests/e2e/run_config_access.py`** (12 casos, salida estricta):
+  - Admin conserva todas las secciones.
+  - Operario abre Transportistas y ve solo esa pestaña; Emails, Vehículos y Reglas financieras por URL → 403; Usuarios → 403.
+  - La pantalla 403 muestra el ícono aprobado.
+  - Superior (sin `carriers.manage`) → 403 en Configuración, Transportistas y Emails por URL directa.
+
+| Prueba | Resultado | Exit |
+|---|---|---|
+| `run_config_access.py` | 12/12 | 0 |
+| `run_admin_mobile_menu.py` | 50/50 | 0 |
+| Build de producción + guardián | OK | 0 |
+
+No se aplicó el parche del menú sin repetidos ni se cambiaron íconos (coinciden con el lock de marca).

@@ -32,7 +32,7 @@ export function navHtml(me, active) {
 function frame(me, title, active) {
   if (isRc4(me)) return appFrame(me, title, active);   // RC4: menú lateral (diseño V4 / V2 aprobado)
   const el = document.getElementById('usersPanel'); el.hidden = false;
-  el.innerHTML = '<header class="top"><img src="/logo.png" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>' + esc(title) + '</span></div><div class="sp"></div>' +
+  el.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>' + esc(title) + '</span></div><div class="sp"></div>' +
     '<span class="who-chip">' + esc(me.full_name) + ' · <b>' + esc(ROLE_LABEL[me.role] || me.role) + '</b></span><button class="tbtn" type="button" id="adLogout">Cerrar sesión</button></header>' + navHtml(me, active) + '<div class="up-wrap ad-wrap" id="adBody"></div>';
   el.querySelector('#adLogout').onclick = () => window.OKD_LOGOUT && window.OKD_LOGOUT();
   return el.querySelector('#adBody');
@@ -126,7 +126,7 @@ export async function openHistory(api, me) {
   const w = frame(me, 'Hojas publicadas', '#/historial');
   const carriers = await api.listCarriers().catch(() => []);
   let f = { limit: 25, offset: 0 };
-  w.innerHTML = '<div class="up-head"><h2>HOJAS PUBLICADAS / HISTORIAL</h2></div><div class="ufilters" id="hFilters">' +
+  w.innerHTML = '<div class="up-head"><h2>HOJAS PUBLICADAS / HISTORIAL</h2></div><div class="ufilters hfilters" id="hFilters">' +
     '<input id="hfNumber" placeholder="N° hoja"><input id="hfOrder" placeholder="Pedido"><input id="hfClient" placeholder="Cliente"><input id="hfResp" placeholder="Responsable">' +
     '<select id="hfCarrier"><option value="">Transportista</option>' + carriers.map(c => '<option value="' + c.id + '">' + esc(c.name) + '</option>').join('') + '</select>' +
     '<select id="hfStatus"><option value="">Estado</option>' + Object.keys(ST).map(k => '<option value="' + k + '">' + ST[k] + '</option>').join('') + '</select>' +
@@ -311,8 +311,9 @@ export async function openHistory(api, me) {
 // ================= CONFIGURACIÓN =================
 const SECTIONS = [['transportistas', 'A. TRANSPORTISTAS'], ['plantillas', 'B. PLANTILLAS / COLUMNAS'], ['vehiculos', 'C. VEHÍCULOS Y MANTENIMIENTO'], ['financieras', 'D. REGLAS FINANCIERAS'], ['asignacion', 'D2. REGLAS DE ASIGNACIÓN'], ['financiacion', 'D3. FINANCIACIÓN PROPIA'],
   ['emails', 'E. EMAILS Y NOTIFICACIONES'], ['pdf', 'F. PDF Y ENVÍOS'], ['ubicaciones', 'G. UBICACIONES CLIENTES'], ['ubicaciones_interno', 'G2. UBICACIONES TRANSPORTISTA INTERNO'], ['backup', 'H. BACKUP'], ['general', 'I. PARÁMETROS GENERALES']];
-export async function openConfig(api, me, section) {
-  const allowed = SECTIONS.filter(([k]) => {
+export async function openConfig(api, me, section, opts) {
+  const only = opts && opts.only;   // acceso por un permiso puntual (carriers.manage): solo esas secciones
+  const allowed = SECTIONS.filter(([k]) => !only || only.includes(k)).filter(([k]) => {
     if (hasPerm(me, 'settings.manage')) return true;
     if (k === 'transportistas') return hasPerm(me, 'carriers.manage');
     if (k === 'plantillas') return hasPerm(me, 'columns.manage_defaults') || hasPerm(me, 'columns.manage_templates');

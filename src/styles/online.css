@@ -719,3 +719,47 @@ body:has(.drv-stop .drv-form:not([hidden])) .drv-foot{position:static}
 .drv-sign-controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .drv-sign-controls button{min-height:50px}
 @media(max-width:420px){.drv-sign-panel{padding:12px}.drv-sign-stage{min-height:235px}}
+
+/* Menú del panel en celular/tablet: barra compacta con "MENÚ" (antes el menú completo quedaba arriba y había que bajar en cada ítem) */
+.rc4side .rc4menu{display:none}
+@media(max-width:1000px){
+ .rc4app{grid-template-rows:auto 1fr}   /* la barra no se estira en pantallas con poco contenido */
+ .rc4side{position:sticky;top:0;z-index:30;padding:10px 14px;max-height:100dvh;overflow:auto;align-self:start}
+ .rc4side .brand{margin-bottom:0}.rc4side .logo{width:40px;height:40px;border-radius:11px}
+ .rc4side .rc4menu{display:inline-flex;align-items:center;gap:8px;margin-left:auto;min-height:44px;padding:0 14px;border-radius:12px;border:1px solid #23404c;background:#0d2630;color:#fff;font-weight:700;letter-spacing:.06em;cursor:pointer}
+ .rc4side .rc4menu span,.rc4side .rc4menu span::before,.rc4side .rc4menu span::after{display:block;width:16px;height:2px;background:#fff;border-radius:2px;position:relative}
+ .rc4side .rc4menu span::before,.rc4side .rc4menu span::after{content:"";position:absolute;left:0}.rc4side .rc4menu span::before{top:-5px}.rc4side .rc4menu span::after{top:5px}
+ .rc4side:not(.open) .nav,.rc4side:not(.open) .footer{display:none}
+ .rc4side.open .nav{margin-top:12px}.rc4side .nav a{min-height:40px}
+}
+/* Aviso "Entrá más rápido con huella o Face ID": en celular el texto quedaba en una columna de una palabra por renglón */
+@media(max-width:520px){.drv-pk{display:flex;flex-direction:column;align-items:stretch;gap:8px}.drv-pk span{width:auto}.drv-pk .btn{width:100%;justify-content:center}}
+
+/* ===== Mejoras de uso en celular (19/10) ===== */
+/* Logo: el mismo cuadrito blanco con el OK negro del panel, también en los encabezados oscuros (transportista, informes, etc.) */
+.top img.brandtile{width:46px;height:46px;border-radius:12px;background:#fff;object-fit:contain;flex:none}
+/* Usuario y "Cerrar sesión" dentro del MENÚ en celular; en escritorio siguen arriba a la derecha */
+.rc4side .rc4who{display:none}
+@media(max-width:1000px){
+ .rc4main .topact .userchip,.rc4main .topact .tbtn{display:none}
+ .rc4main .topbar{margin-bottom:14px}
+ .rc4side.open .rc4who{display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 12px;margin-top:12px;padding:12px 14px;border-radius:12px;background:#0d2630}
+ .rc4side .rc4who b{color:#fff;font-size:14px}.rc4side .rc4who span{grid-column:1;color:#9db0b8;font-size:12px}
+ .rc4side .rc4who .rc4logout{grid-row:1/span 2;grid-column:2;min-height:44px;padding:0 14px;border-radius:10px;border:1px solid #2c4b57;background:transparent;color:#fff;font-weight:700;cursor:pointer}
+}
+/* Casillas: en pantallas táctiles toda la fila se puede tocar (44 px) y la casilla es más grande */
+@media(max-width:1000px),(pointer:coarse){
+ .rc4main label:has(> input[type=checkbox]),.rc4main label:has(> input[type=radio]){display:flex;align-items:center;gap:10px;min-height:44px;padding:4px 0;cursor:pointer}
+ .rc4main input[type=checkbox],.rc4main input[type=radio]{width:22px;height:22px;min-width:22px;margin:0;accent-color:#00b6c7}
+}
+/* Filtros de Hojas publicadas: grilla pareja de 2 columnas en celular */
+@media(max-width:700px){
+ .hfilters{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;max-width:100%;box-sizing:border-box}
+ /* el estilo base fija min-width:260px en los campos: acá se anula para que la grilla no se salga de la pantalla */
+ .hfilters input,.hfilters select,.hfilters button{width:100%!important;min-width:0!important;max-width:100%;box-sizing:border-box;min-height:44px;margin:0!important}
+ .hfilters>#hfNumber,.hfilters>#hfOrder,.hfilters>#hfClient,.hfilters>#hfResp,.hfilters>#hfCarrier,.hfilters>#hfZone,.hfilters>button{grid-column:1/-1}
+}
+/* Botones de resultado del chofer: en 360 px "RECEPCIÓN PARCIAL" empujaba 2 px fuera de la pantalla.
+   Columnas que pueden achicarse y texto que puede pasar a dos renglones. */
+#drv .drv-acts{grid-template-columns:repeat(2,minmax(0,1fr))}
+#drv .drv-acts .btn{min-width:0;white-space:normal;line-height:1.15;text-align:center;overflow-wrap:anywhere}
