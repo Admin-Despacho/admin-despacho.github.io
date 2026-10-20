@@ -106,7 +106,7 @@ async function mountLegacyRc4(me, active = '#/despacho') {
     shell = document.createElement('div'); shell.className = 'rc4app rc4legacy-shell';
     shell.innerHTML =
       '<aside class="rc4side"><div class="brand"><img class="logo" src="/icons/icon-192.png" alt="OK"><div><b>DESPACHO</b><small>' + esc(ROLE_LABEL[me.role] || me.role) + '</small></div><button class="rc4menu" type="button" aria-expanded="false" aria-label="Abrir menú"><span></span>MENÚ</button></div>' +
-      '<nav class="nav" id="rc4LegacyNav"></nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b><span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<div class="footer"></div></aside>' +
+      '<nav class="nav" id="rc4LegacyNav"></nav><nav class="mnav" id="rc4LegacyMNav" aria-label="Menú"></nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b><span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<div class="footer"></div></aside>' +
       '<main class="rc4main"><div class="topbar"><div class="title"><h1>Despacho</h1><p>Preparación de hojas de ruta</p></div>' +
       '<div class="topact"><div class="userchip"><b>' + esc(me.full_name) + ' · ' + esc(ROLE_LABEL[me.role] || me.role) + '</b><br><span>' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span></div>' +
       '<button class="tbtn" type="button" id="legacyRc4Logout">Cerrar sesión</button></div></div><div class="rc4legacy-body"></div></main>';
@@ -122,6 +122,7 @@ async function mountLegacyRc4(me, active = '#/despacho') {
     (sub ? '<div class="sub">' + sub.map(([sh, sl]) => '<a href="' + sh + '" data-nav="' + sh + '" class="' + (routeOf(sh) === a ? 'active' : '') + '">' + esc(sl) + '</a>').join('') + '</div>' : '')
   ).join('');
   shell.querySelector('#rc4LegacyNav').innerHTML = nav;
+  shell.querySelector('#rc4LegacyMNav').innerHTML = r.mobileNav(me, active);   // menú agrupado del celular
   shell.querySelector('.footer').innerHTML = foot;
 
   // Hoja de ruta: separar título/fecha de las acciones para que nunca se corten
@@ -225,7 +226,7 @@ async function route() {
       if (btn) { const side = btn.closest('.rc4side'), open = !side.classList.contains('open'); side.classList.toggle('open', open);
         btn.setAttribute('aria-expanded', open ? 'true' : 'false'); btn.setAttribute('aria-label', open ? 'Cerrar menú' : 'Abrir menú'); return; }
       if (ev.target.closest && ev.target.closest('.rc4logout')) { window.OKD_LOGOUT && window.OKD_LOGOUT(); return; }
-      const link = ev.target.closest && ev.target.closest('.rc4side .nav a');
+      const link = ev.target.closest && ev.target.closest('.rc4side .nav a, .rc4side .mnav a');
       if (link) { const side = link.closest('.rc4side'); side.classList.remove('open'); const b = side.querySelector('.rc4menu'); if (b) b.setAttribute('aria-expanded', 'false');
         // el panel de administración es una capa fija con su PROPIO scroll (.up): hay que volver arriba ese contenedor, no solo la ventana
         if (window.matchMedia('(max-width:1000px)').matches) setTimeout(() => { const sc = document.querySelector('.up:not([hidden])'); if (sc) sc.scrollTop = 0; window.scrollTo(0, 0); }, 0); }

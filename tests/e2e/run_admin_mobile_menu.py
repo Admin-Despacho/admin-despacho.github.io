@@ -9,12 +9,13 @@ from playwright.async_api import async_playwright
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 DIST = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'dist-demo'); PORT = 4365
 # Menús esperados (de roleNav() en src/online/rc4-ui.js y ROLE_PERMISSIONS en rules.js). Si cambian, actualizar acá a propósito.
-EXPECTED_MENU = {
+# Menú lateral de COMPUTADORA (.nav): de roleNav() en src/online/rc4-ui.js. En Admin, Transportistas/Vehículos/Emails/Backup son subopciones de Configuración.
+EXPECTED_DESK = {
   'ADMIN': [('Dashboard', '#/dashboard'), ('Hojas de ruta', '#/historial'), ('Despacho', '#/despacho'), ('Borradores', '#/borradores'),
             ('Hojas publicadas', '#/historial'), ('Solicitudes', '#/solicitudes'), ('Aprobaciones de ruta interna', '#/aprobaciones'),
-            ('Transportistas', '#/configuracion?sec=transportistas'), ('Vehículos / Service', '#/configuracion?sec=vehiculos'),
-            ('NOC', '#/conciliacion-noc'), ('Informes', '#/informes'), ('Emails', '#/configuracion?sec=emails'), ('Auditoría', '#/auditoria'),
-            ('Usuarios y permisos', '#/usuarios'), ('Backup / Archivo', '#/backup'), ('Configuración', '#/configuracion')],
+            ('NOC', '#/conciliacion-noc'), ('Informes', '#/informes'), ('Auditoría', '#/auditoria'), ('Usuarios y permisos', '#/usuarios'),
+            ('Configuración', '#/configuracion'), ('Transportistas', '#/configuracion?sec=transportistas'), ('Vehículos / Service', '#/configuracion?sec=vehiculos'),
+            ('Emails', '#/configuracion?sec=emails'), ('Backup / Archivo', '#/backup')],
   'SUPERVISOR_DESPACHO': [('Dashboard', '#/dashboard'), ('Nueva hoja de ruta', '#/nueva-hoja'), ('Despacho', '#/despacho'), ('Borradores del equipo', '#/borradores'),
             ('Hojas publicadas', '#/historial'), ('Solicitudes / Aprobaciones', '#/solicitudes'), ('Notificaciones', '#/notificaciones'),
             ('Vehículos', '#/vehiculos'), ('Configuración operativa', '#/config-operativa')],
@@ -22,9 +23,27 @@ EXPECTED_MENU = {
             ('Hojas publicadas', '#/historial'), ('Notificaciones', '#/notificaciones'), ('Solicitudes', '#/solicitudes'),
             ('Transportistas', '#/configuracion?sec=transportistas'), ('Vehículos / Kilometraje / Service', '#/vehiculos'), ('Columnas predeterminadas', '#/config-operativa')],
 }
+# Menú del CELULAR agrupado (.mnav, alternativa 1 aprobada): grupos Inicio · Hojas de ruta · Solicitudes · Control · Administración/Operación
+EXPECTED_MENU = {
+  'ADMIN': [('Dashboard', '#/dashboard'), ('Despacho', '#/despacho'), ('Borradores', '#/borradores'), ('Hojas publicadas', '#/historial'),
+            ('Solicitudes', '#/solicitudes'), ('Aprobaciones de ruta interna', '#/aprobaciones'), ('NOC', '#/conciliacion-noc'), ('Informes', '#/informes'),
+            ('Auditoría', '#/auditoria'), ('Usuarios y permisos', '#/usuarios'), ('Configuración', '#/configuracion'), ('Transportistas', '#/configuracion?sec=transportistas'),
+            ('Vehículos / Service', '#/configuracion?sec=vehiculos'), ('Emails', '#/configuracion?sec=emails'), ('Backup / Archivo', '#/backup')],
+  'SUPERVISOR_DESPACHO': [('Dashboard', '#/dashboard'), ('Notificaciones', '#/notificaciones'), ('Nueva hoja de ruta', '#/nueva-hoja'), ('Despacho', '#/despacho'),
+            ('Borradores del equipo', '#/borradores'), ('Hojas publicadas', '#/historial'), ('Solicitudes / Aprobaciones', '#/solicitudes'),
+            ('Vehículos', '#/vehiculos'), ('Configuración operativa', '#/config-operativa')],
+  'OPERARIO_DEPOSITO': [('Dashboard', '#/dashboard'), ('Notificaciones', '#/notificaciones'), ('Nueva hoja / Preparar hoja', '#/nueva-hoja'), ('Despacho', '#/despacho'),
+            ('Borradores de despacho', '#/borradores'), ('Hojas publicadas', '#/historial'), ('Solicitudes', '#/solicitudes'),
+            ('Transportistas', '#/configuracion?sec=transportistas'), ('Vehículos / Kilometraje / Service', '#/vehiculos'), ('Columnas predeterminadas', '#/config-operativa')],
+}
+EXPECTED_GROUPS = {'ADMIN': ['Hojas de ruta', 'Solicitudes', 'Control', 'Administración'],
+                   'SUPERVISOR_DESPACHO': ['Inicio', 'Hojas de ruta', 'Operación'], 'OPERARIO_DEPOSITO': ['Inicio', 'Hojas de ruta', 'Operación']}
 USERS = {'ADMIN': 'admin@okdespacho.demo', 'SUPERVISOR_DESPACHO': 'sup.qa@example.invalid', 'OPERARIO_DEPOSITO': 'op.qa@example.invalid'}
-# Casos esperados: por rol 1 (barra/menú) + 1 (lista exacta) + N ítems + 1 (constructor) + 1 (cerrar sesión); Admin +3 extra
-EXPECTED = sum(4 + len(v) for v in EXPECTED_MENU.values()) + 3
+# Casos esperados (celular 390×844): por rol 1 (barra/menú) + 1 (celular exacto) + 1 (lista lateral) + N ítems + 1 (constructor) + 1 (cerrar sesión); Admin +3 extra
+# + ESCRITORIO REAL 1366×768: Admin 9 (visibilidad, 4 subopciones, resaltado en otra sección, padre, constructor ×2) + Superior 1 + Operario 1
+CFG_SUBS = [('Transportistas', '#/configuracion?sec=transportistas'), ('Vehículos / Service', '#/configuracion?sec=vehiculos'),
+            ('Emails', '#/configuracion?sec=emails'), ('Backup / Archivo', '#/backup')]
+EXPECTED = sum(5 + len(v) for v in EXPECTED_MENU.values()) + 3 + 9 + 2
 R = []
 def res(n, ok, d=''): R.append((n, 'PASS' if ok else 'FAIL', str(d)[:160])); print('..', ' | '.join(R[-1]), flush=True)
 SCOPE = '()=>{const u=document.getElementById("usersPanel"); return (u&&!u.hidden)?"#usersPanel":"#operario"}'
@@ -49,17 +68,24 @@ async def role_checks(b, role, state):
     await login(pg, USERS[role])
     sc = await pg.evaluate(SCOPE); side = f'{sc} .rc4side'
     bar = await pg.evaluate(f'()=>{{const s=document.querySelector("{side}"); return s?Math.round(s.getBoundingClientRect().height):999}}')
-    closed = not await pg.is_visible(f'{side} .nav')
+    closed = not await pg.is_visible(f'{side} .mnav') and not await pg.is_visible(f'{side} .nav')
     res(f'{tag}-01 barra compacta y menú cerrado por defecto', bar <= 80 and closed, f'alto={bar} cerrado={closed}')
-    got = await pg.evaluate(f'()=>[...document.querySelectorAll("{side} .nav a")].map(a=>[a.textContent.trim(), a.getAttribute("href")])')
+    got = await pg.evaluate(f'()=>[...document.querySelectorAll("{side} .mnav a")].map(a=>[a.textContent.trim(), a.getAttribute("href")])')
+    grp = await pg.evaluate(f'()=>[...document.querySelectorAll("{side} .mnav summary")].map(s=>s.textContent.trim())')
     exp = EXPECTED_MENU[role]
-    res(f'{tag}-02 menú con EXACTAMENTE los {len(exp)} ítems esperados (texto, orden y destino)', [tuple(x) for x in got] == exp,
-        'faltan=' + str([e for e in exp if list(e) not in got]) + ' sobran=' + str([g for g in got if tuple(g) not in exp]))
+    res(f'{tag}-02 celular: menú agrupado con EXACTAMENTE los {len(exp)} ítems esperados y sus grupos', [tuple(x) for x in got] == exp and grp == EXPECTED_GROUPS[role],
+        'grupos=' + str(grp) + ' faltan=' + str([e for e in exp if list(e) not in got]) + ' sobran=' + str([g for g in got if tuple(g) not in exp]))
+    gd = await pg.evaluate(f'()=>[...document.querySelectorAll("{side} .nav a")].map(a=>[a.textContent.trim(), a.getAttribute("href")])')
+    ed = EXPECTED_DESK[role]
+    res(f'{tag}-03 computadora: menú lateral con EXACTAMENTE los {len(ed)} ítems esperados', [tuple(x) for x in gd] == ed,
+        'faltan=' + str([e for e in ed if list(e) not in gd]) + ' sobran=' + str([g for g in gd if tuple(g) not in ed]))
     for i, (label, href) in enumerate(exp):
         sc = await pg.evaluate(SCOPE)
-        await pg.click(f'{sc} .rc4menu'); await pg.wait_for_timeout(200); opened = await pg.is_visible(f'{sc} .rc4side .nav')
-        link = pg.locator(f'{sc} .rc4side .nav a[href="{href}"]', has_text=label).first
-        if not await link.count(): res(f'{tag}-{i+3:02d} {label}', False, 'el ítem no está en el menú visible'); continue
+        await pg.click(f'{sc} .rc4menu'); await pg.wait_for_timeout(200); opened = await pg.is_visible(f'{sc} .rc4side .mnav')
+        link = pg.locator(f'{sc} .rc4side .mnav a[href="{href}"]', has_text=label).first
+        if await link.count() and not await link.is_visible():   # está dentro de un grupo plegado: se abre el grupo, como haría una persona
+            await link.evaluate('a=>{const d=a.closest("details"); if(d) d.querySelector("summary").click();}'); await pg.wait_for_timeout(200)
+        if not await link.count(): res(f'{tag}-{i+4:02d} {label}', False, 'el ítem no está en el menú del celular'); continue
         await link.click(); await pg.wait_for_timeout(1300)
         m = await pg.evaluate(STATE)
         dest_ok = m['hash'] == href or (href in ('#/nueva-hoja', '#/despacho') and m['builder'])   # Nueva hoja / Despacho abren el constructor
@@ -68,10 +94,12 @@ async def role_checks(b, role, state):
             forb = await pg.evaluate('()=>/ACCESO NO AUTORIZADO/i.test(document.body.innerText)')
             m = {**m, 'motivo': '403 · ACCESO NO AUTORIZADO' if forb else 'pantalla sin menú'}
             await pg.evaluate('()=>{location.hash="#/dashboard"}'); await pg.wait_for_timeout(1500)
-        res(f'{tag}-{i+3:02d} {label} → {href}', ok, m)
+        res(f'{tag}-{i+4:02d} {label} → {href}', ok, m)
     # acceso al constructor desde el menú
     sc = await pg.evaluate(SCOPE); await pg.click(f'{sc} .rc4menu'); await pg.wait_for_timeout(200)
-    await pg.locator(f'{sc} .rc4side .nav a[href="#/despacho"]').first.click(); await pg.wait_for_timeout(1500)
+    dl = pg.locator(f'{sc} .rc4side .mnav a[href="#/despacho"]').first
+    if not await dl.is_visible(): await dl.evaluate('a=>{const d=a.closest("details"); if(d) d.querySelector("summary").click();}'); await pg.wait_for_timeout(200)
+    await dl.click(); await pg.wait_for_timeout(1500)
     m = await pg.evaluate(STATE)
     res(f'{tag}-B acceso al constructor (Despacho)', m['builder'] and m['over'] <= 0, m)
     extra = []
@@ -95,6 +123,38 @@ async def role_checks(b, role, state):
     out = await pg.locator('#loginForm').count() and await pg.is_visible('#loginForm')
     res(f'{tag}-L "Cerrar sesión" desde el menú vuelve a la pantalla de acceso', out, '')
     await ctx.close()
+DESK_STATE = '''()=>{const u=document.getElementById("usersPanel"); const inPanel=u&&!u.hidden; const c=inPanel?u:document.getElementById("operario"); const s=c&&c.querySelector(".rc4side");
+  const vis=e=>!!e&&e.offsetParent!==null&&getComputedStyle(e).display!=="none"; const h=c&&[...c.querySelectorAll(".rc4main h1")].find(e=>e.offsetParent);
+  return {hash:location.hash, scope:inPanel?"panel":"constructor", nav:vis(s&&s.querySelector(".nav")), mnav:vis(s&&s.querySelector(".mnav")), menuBtn:vis(s&&s.querySelector(".rc4menu")),
+    width:s?Math.round(s.getBoundingClientRect().width):0, active:s?[...s.querySelectorAll(".nav a.active")].map(a=>a.textContent.trim()):[],
+    forbidden:!!document.getElementById("e403"), h1:h?h.textContent.trim():null,
+    items:s?[...s.querySelectorAll(".nav a")].map(a=>[a.textContent.trim(),a.getAttribute("href")]):[]}}'''
+async def desktop_checks(b, state):
+    # ESCRITORIO REAL (1366×768): menú lateral visible, menú del celular oculto, subopciones de Configuración y menú del constructor
+    for role in ('ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'):
+        tag = 'DESK-' + role.split('_')[0]
+        ctx = await b.new_context(viewport={'width': 1366, 'height': 768}, storage_state=state); pg = await ctx.new_page()
+        await login(pg, USERS[role]); await pg.evaluate('()=>{location.hash="#/dashboard"}'); await pg.wait_for_timeout(1500)
+        d = await pg.evaluate(DESK_STATE)
+        res(f'{tag}-01 1366×768: menú lateral visible con su lista exacta, menú del celular y MENÚ ocultos', d['nav'] and not d['mnav'] and not d['menuBtn'] and d['width'] >= 180
+            and [tuple(x) for x in d['items']] == EXPECTED_DESK[role], {k: d[k] for k in ('nav', 'mnav', 'menuBtn', 'width')})
+        if role == 'ADMIN':
+            for i, (label, href) in enumerate(CFG_SUBS):
+                await pg.locator('#usersPanel .rc4side .nav a', has_text=label).first.click(); await pg.wait_for_timeout(1500)
+                d = await pg.evaluate(DESK_STATE)
+                # criterio del menú (igual que Hojas de ruta): estando en una subopción se marca la SUBOPCIÓN, no el padre
+                res(f'{tag}-{i+2:02d} subopción {label} → {href}: navega y queda marcada la subopción', d['hash'] == href and not d['forbidden'] and d['h1'] in ('Configuración', 'Backup')
+                    and d['active'] == [label] and d['nav'], d)
+            await pg.evaluate('()=>{location.hash="#/configuracion?sec=plantillas"}'); await pg.wait_for_timeout(1500); d = await pg.evaluate(DESK_STATE)
+            res(f'{tag}-06 sección sin subopción propia (Plantillas): queda marcada "Configuración"', d['active'] == ['Configuración'] and not d['forbidden'], d['active'])
+            await pg.locator('#usersPanel .rc4side .nav a', has_text='Configuración').first.click(); await pg.wait_for_timeout(1500); d = await pg.evaluate(DESK_STATE)
+            res(f'{tag}-07 el padre "Configuración" abre Configuración', d['hash'].startswith('#/configuracion') and d['h1'] == 'Configuración' and len(d['active']) == 1, d)
+            await pg.locator('#usersPanel .rc4side .nav a', has_text='Despacho').first.click(); await pg.wait_for_timeout(1800); d = await pg.evaluate(DESK_STATE)
+            res(f'{tag}-08 constructor: menú lateral visible, menú del celular oculto, con Configuración agrupada', d['scope'] == 'constructor' and d['nav'] and not d['mnav'] and not d['menuBtn']
+                and [tuple(x) for x in d['items']] == EXPECTED_DESK['ADMIN'], {k: d[k] for k in ('scope', 'nav', 'mnav', 'menuBtn')})
+            await pg.locator('#operario .rc4side .nav a', has_text='Emails').first.click(); await pg.wait_for_timeout(1800); d = await pg.evaluate(DESK_STATE)
+            res(f'{tag}-09 constructor → subopción Emails navega a Configuración', d['hash'] == '#/configuracion?sec=emails' and d['scope'] == 'panel' and d['h1'] == 'Configuración' and d['active'] == ['Emails'], d)
+        await ctx.close()
 async def main():
     if not os.path.isfile(os.path.join(DIST, 'index.html')): raise RuntimeError('falta el build demo en ' + DIST)
     srv = subprocess.Popen([sys.executable, '-m', 'http.server', str(PORT), '--bind', '127.0.0.1'], cwd=DIST, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -115,6 +175,7 @@ async def main():
             await pg.evaluate('()=>window.OKD_LOGOUT && window.OKD_LOGOUT()'); await pg.wait_for_timeout(1500)
             state = await ctx.storage_state(); await ctx.close()
             for role in ('ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'): await role_checks(b, role, state)
+            await desktop_checks(b, state)
           finally: await b.close()
     finally:
         if srv.poll() is None: srv.terminate(); srv.wait(5)

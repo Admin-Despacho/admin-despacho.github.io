@@ -96,3 +96,33 @@ Recorrido emulado en Chromium a 390×844, en modo demo, de **todos los ítems de
 | Build de producción + guardián | OK | 0 |
 
 No se aplicó el parche del menú sin repetidos ni se cambiaron íconos (coinciden con el lock de marca).
+
+## V4.7: menú aprobado (celular agrupado + Configuración agrupada)
+- **Celular** (alternativa 1 aprobada): el botón MENÚ abre los grupos plegables **Inicio · Hojas de ruta · Solicitudes · Control · Administración** (Superior y Operario: **Operación**). Abre el grupo de la pantalla actual y al final van el usuario y "Cerrar sesión". Vale para el panel y para el constructor.
+- **Computadora:** el menú lateral de siempre, **sin rediseño**. En el Admin, Transportistas, Vehículos / Service, Emails y Backup / Archivo pasan a ser **subopciones de Configuración**, como Despacho y Borradores dentro de Hojas de ruta. Así no se repiten sueltos y no se pierde el acceso. Resaltado (mismo criterio que "Hojas de ruta"): en Transportistas, Vehículos, Emails y Backup se marca **la subopción**, no el padre; en las secciones sin subopción propia (Plantillas, Reglas, etc.) se marca **"Configuración"**. *(Corregido en V4.8: el texto anterior decía que "Configuración" quedaba marcada en todas sus secciones, y no era exacto.)*
+- Menús de Superior y Operario: mismas opciones que antes, solo agrupadas en el celular. **Permisos sin cambios.**
+- Archivos: `src/online/rc4-ui.js` (`roleNav`, `mobileNav`, marcado de Configuración), `src/main.js` (menú agrupado también en el constructor), `src/styles/online.css`, `tests/e2e/run_admin_mobile_menu.py`.
+
+| Prueba | Resultado | Exit |
+|---|---|---|
+| `run_admin_mobile_menu.py`: listas exactas de celular y computadora por rol, navegación, constructor, cerrar sesión | 52/52 | 0 |
+| `run_config_access.py` | 12/12 | 0 |
+| Build de producción + guardián | OK | 0 |
+
+El parche anterior "menú sin repetidos" (que quitaba las opciones) queda reemplazado por esta agrupación aprobada; ya no se incluye.
+
+## V4.8: prueba de escritorio real (sin cambios en la app)
+`tests/e2e/run_admin_mobile_menu.py` agrega una ejecución **real a 1366×768**, porque la comprobación de "computadora" anterior leía `.nav` dentro del viewport de celular.
+- **Admin:**
+  - menú lateral visible con su lista exacta; menú del celular y botón MENÚ ocultos;
+  - las 4 subopciones de Configuración navegan a su destino y marcan **la subopción**;
+  - Plantillas marca **"Configuración"**;
+  - el padre "Configuración" abre Configuración (con la primera sección, Transportistas, marcada);
+  - **constructor:** menú lateral visible, menú del celular oculto, misma lista con Configuración agrupada, y desde ahí "Emails" navega a Configuración.
+- **Superior y Operario:** menú lateral visible con su lista exacta y el menú del celular oculto.
+
+| Prueba | Resultado | Exit |
+|---|---|---|
+| `run_admin_mobile_menu.py` (celular 390×844 + escritorio 1366×768) | 63/63 | 0 |
+
+No se encontró ninguna falla en la app, así que no se modificó su código. Solo cambió la prueba, y este informe corrige la descripción del resaltado.

@@ -20,15 +20,13 @@ export function roleNav(me) {
     ['#/dashboard', 'Dashboard'],
     ['#/historial', 'Hojas de ruta', [['#/despacho', 'Despacho'], ['#/borradores', 'Borradores'], ['#/historial', 'Hojas publicadas']]],
     ['#/solicitudes', 'Solicitudes', [['#/aprobaciones', 'Aprobaciones de ruta interna']]],
-    ['#/configuracion?sec=transportistas', 'Transportistas'],
-    ['#/configuracion?sec=vehiculos', 'Vehículos / Service'],
     ['#/conciliacion-noc', 'NOC'],
     ['#/informes', 'Informes'],
-    ['#/configuracion?sec=emails', 'Emails'],
     ['#/auditoria', 'Auditoría'],
     ['#/usuarios', 'Usuarios y permisos'],
-    ['#/backup', 'Backup / Archivo'],
-    ['#/configuracion', 'Configuración']];
+    // Transportistas, Vehículos, Emails y Backup son secciones de Configuración: van agrupados dentro de ella
+    ['#/configuracion', 'Configuración', [['#/configuracion?sec=transportistas', 'Transportistas'], ['#/configuracion?sec=vehiculos', 'Vehículos / Service'],
+      ['#/configuracion?sec=emails', 'Emails'], ['#/backup', 'Backup / Archivo']]]];
   if (me.role === 'SUPERVISOR_DESPACHO') return [
     ['#/dashboard', 'Dashboard'], ['#/nueva-hoja', 'Nueva hoja de ruta'], ['#/despacho', 'Despacho'], ['#/borradores', 'Borradores del equipo'],
     (hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team')) && ['#/historial', 'Hojas publicadas'], canRequests(me) && ['#/solicitudes', 'Solicitudes / Aprobaciones'], ['#/notificaciones', 'Notificaciones'],
@@ -44,9 +42,35 @@ export function roleNav(me) {
 export const ROUTE_OF = h => h.split('?')[0];
 const NAV_MATCH = (target, active) => {
   const t = String(target || ''), a = String(active || '');
+  if (t === '#/configuracion') return ROUTE_OF(a) === '#/configuracion';
   if (t.includes('?') || a.includes('?')) return t === a;
   return ROUTE_OF(t) === ROUTE_OF(a);
 };
+const MGROUP = h => { const r = ROUTE_OF(h);
+  if (['#/dashboard', '#/notificaciones'].includes(r)) return 'Inicio';
+  if (['#/nueva-hoja', '#/despacho', '#/borradores', '#/historial'].includes(r)) return 'Hojas de ruta';
+  if (['#/solicitudes', '#/aprobaciones'].includes(r)) return 'Solicitudes';
+  if (['#/conciliacion-noc', '#/informes', '#/auditoria'].includes(r)) return 'Control';
+  return 'ADMIN_OR_OP'; };
+export function mobileNav(me, active) {
+  const a = String(active || ''), items = [];
+  roleNav(me).forEach(([h, l, sub]) => {
+    // "Hojas de ruta" (padre) repite el destino de "Hojas publicadas": en el celular el grupo hace de título
+    if (!(sub && sub.some(s => s[0] === h))) items.push([h, l, false]);
+    (sub || []).forEach(([sh, sl]) => items.push([sh, sl, ROUTE_OF(h) === '#/configuracion']));
+  });
+  const last = me.role === 'ADMIN' ? 'Administración' : 'Operación', order = ['Inicio', 'Hojas de ruta', 'Solicitudes', 'Control', last], groups = {};
+  items.forEach(it => { const g = MGROUP(it[0]) === 'ADMIN_OR_OP' ? last : MGROUP(it[0]); (groups[g] = groups[g] || []).push(it); });
+  const isOn = h => NAV_MATCH(h, a) && !(h === '#/configuracion' && items.some(x => x[0] !== h && x[0].startsWith('#/configuracion') && NAV_MATCH(x[0], a)));
+  const link = ([h, l, sub]) => '<a href="' + h + '" data-nav="' + h + '" class="' + (sub ? 'msub ' : '') + (isOn(h) ? 'active' : '') + '">' + esc(l) + '</a>';
+  const any = order.some(g => (groups[g] || []).some(x => isOn(x[0])));
+  return order.filter(g => groups[g]).map(g => {
+    const its = groups[g];
+    if (its.length === 1) return '<div class="mone">' + link(its[0]) + '</div>';
+    const open = its.some(x => isOn(x[0])) || (!any && g === 'Hojas de ruta');
+    return '<details class="mgrp"' + (open ? ' open' : '') + '><summary>' + esc(g) + '</summary>' + its.map(link).join('') + '</details>';
+  }).join('');
+}
 function navLinks(me, active) {
   const a = String(active || '');
   return roleNav(me).map(([h, l, sub]) => '<a href="' + h + '" data-nav="' + h + '" class="' + (NAV_MATCH(h, a) && !(sub || []).some(s => NAV_MATCH(s[0], a) && s[0] !== h) ? 'active' : '') + '"><span class="dot"></span>' + esc(l) + '</a>' +
@@ -64,7 +88,7 @@ export function appFrame(me, title, active, sub) {
   const foot = { ADMIN: 'OK Despacho · Administración<br>Configuración global exclusiva Admin', SUPERVISOR_DESPACHO: 'Rol operativo de supervisión<br>Sin acceso a configuración global', OPERARIO_DEPOSITO: 'Operario Depósito<br>Preparación de hojas' }[me.role];
   const newBtn = me.role !== 'ADMIN' && hasPerm(me, 'routes.create') ? '<a class="btn primary" href="#/nueva-hoja" id="newRouteTop">+ NUEVA HOJA DE RUTA</a>' : '';
   el.innerHTML = '<div class="rc4app"><aside class="rc4side"><div class="brand"><img class="logo" src="/icons/icon-192.png" alt="OK"><div><b>DESPACHO</b><small>' + esc(ROLE_LABEL[me.role] || me.role) + '</small></div><button class="rc4menu" type="button" aria-expanded="false" aria-label="Abrir menú"><span></span>MENÚ</button></div>' +
-    '<nav class="nav" id="adNav">' + navLinks(me, active) + '</nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b><span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<div class="footer">' + foot + '</div></aside>' +
+    '<nav class="nav" id="adNav">' + navLinks(me, active) + '</nav><nav class="mnav" aria-label="Menú">' + mobileNav(me, active) + '</nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b><span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<div class="footer">' + foot + '</div></aside>' +
     '<main class="rc4main"><div class="topbar"><div class="title"><h1>' + esc(title) + '</h1>' + (sub ? '<p>' + esc(sub) + '</p>' : '') + '</div>' +
     '<div class="topact">' + newBtn + '<div class="userchip"><b>' + esc(me.full_name) + ' · ' + esc(ROLE_LABEL[me.role] || me.role) + '</b><br><span>' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span></div>' +
     '<button class="tbtn" type="button" id="adLogout">Cerrar sesión</button></div></div><div id="adBody" class="rc4body"></div></main></div>';

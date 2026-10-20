@@ -763,3 +763,19 @@ body:has(.drv-stop .drv-form:not([hidden])) .drv-foot{position:static}
    Columnas que pueden achicarse y texto que puede pasar a dos renglones. */
 #drv .drv-acts{grid-template-columns:repeat(2,minmax(0,1fr))}
 #drv .drv-acts .btn{min-width:0;white-space:normal;line-height:1.15;text-align:center;overflow-wrap:anywhere}
+
+/* Menú del celular agrupado (alternativa 1 aprobada): grupos plegables; en computadora se usa el menú lateral de siempre */
+.rc4side .mnav{display:none}
+@media(max-width:1000px){
+ .rc4side .nav{display:none!important}
+ .rc4side.open .mnav{display:block;margin-top:10px}
+ .rc4side .mnav .mone a,.rc4side .mnav summary{display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:0 6px;color:#fff;font-weight:700;font-size:15px;text-decoration:none;cursor:pointer;list-style:none}
+ .rc4side .mnav summary::-webkit-details-marker{display:none}
+ .rc4side .mnav summary::after{content:"";width:9px;height:9px;border-right:2px solid #9db0b8;border-bottom:2px solid #9db0b8;transform:rotate(45deg);margin:0 6px 4px 0;transition:transform .15s}
+ .rc4side .mnav details[open]>summary::after{transform:rotate(-135deg);margin-bottom:-4px}
+ .rc4side .mnav .mone,.rc4side .mnav details{border-bottom:1px solid #15303b}
+ .rc4side .mnav details a{display:flex;align-items:center;min-height:44px;padding:0 12px 0 18px;margin:0 0 2px;border-radius:9px;color:#c9d6dc;font-size:14px;text-decoration:none}
+ .rc4side .mnav details a.msub{padding-left:32px;font-size:13.5px}
+ .rc4side .mnav a.active{background:#0d2630;color:#16d6e5}
+ .rc4side .mnav details{padding-bottom:6px}.rc4side .mnav details:not([open]){padding-bottom:0}
+}
