@@ -779,3 +779,18 @@ body:has(.drv-stop .drv-form:not([hidden])) .drv-foot{position:static}
  .rc4side .mnav a.active{background:#0d2630;color:#16d6e5}
  .rc4side .mnav details{padding-bottom:6px}.rc4side .mnav details:not([open]){padding-bottom:0}
 }
+/* Panel REVISAR del modal de publicación: pendientes resueltos ahí mismo (mismo estilo que el recuadro de revisión) */
+#pubReady[role="button"]{cursor:pointer}
+#pubReady .pendhint{font-weight:600;font-size:12px}
+.pendpanel{border:1px solid #f0b4b4;border-radius:12px;padding:10px 12px;margin:8px 0 12px;background:#fff}
+.pendpanel>b{display:block;font-size:12px;letter-spacing:.06em;margin-bottom:6px}
+.pendrow{border-top:1px solid #f3dede;padding:8px 0}
+.pendrow:first-of-type{border-top:0}
+.pendrow ul{margin:4px 0 6px;padding-left:18px;font-size:13px}
+.pendrow li.error{color:#a32020}.pendrow li.warn{color:#8a5a00}
+.pendrow .pendack{margin-left:6px;font-weight:600;white-space:nowrap}
+.pendctl{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:flex-end;margin:4px 0}
+.pendctl label{display:flex;flex-direction:column;font-size:12px;gap:2px}
+.pendctl .ed{min-width:140px}.pendctl small{color:#5d6b73;flex-basis:100%}
+.nocwhy{display:block;color:#8a5a00;font-size:12px}
+tr.main-row.flash{outline:3px solid #16d6e5}

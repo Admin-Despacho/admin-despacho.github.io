@@ -1060,6 +1060,64 @@ const Publisher = {
         resolver_version: window.OKFinancing.RESOLVER_VERSION, import_id: p.last_import_id }); }));
     return out;
   },
+  // ¿Se puede aplicar sola? Reglas: los créditos vigentes ya se reflejan en la cuenta corriente (tope del monto).
+  // Si el tope ya redujo el pedido en al menos el importe de la NOC → ya contemplada. Si no lo redujo nada → se aplica sola.
+  // Ambiguo (reducción parcial, varias entregas del cliente, financiación activa, importe manual) → revisión con los botones de siempre.
+  nocAuto(r, n, d, rows) {
+    const avail = Math.min(Number(n.amt) || 0, d && d.available != null ? Number(d.available) : (Number(n.amt) || 0));
+    if (!(avail > 0.004)) return { mode: 'none' };
+    const same = (rows || []).filter(x => (!x.stopType || x.stopType === 'PEDIDO') && rowKey(x) === rowKey(r)).length;
+    if (same > 1) return { mode: 'review', reason: 'el cliente tiene ' + same + ' entregas en la hoja: elegí a cuál aplicarla' };
+    if (FinancingPlans.active(rowKey(r)).length || FinancingPlans.blocked(rowKey(r))) return { mode: 'review', reason: 'el cliente tiene financiación propia: elegí el destino' };
+    if (r.montoManual) return { mode: 'review', reason: 'el pedido tiene importe manual: confirmá si ya la descontaste' };
+    const c = r.calc; if (!c || c.target == null || r.monto == null) return { mode: 'review', reason: 'sin saldo calculado para compararla' };
+    const tol = Number(Config.get().tolerance) || 1, red = Math.round(Math.max(0, c.target - r.monto) * 100) / 100;
+    if (red + tol >= avail) return { mode: 'reflected' };
+    if (red <= tol) { const amt = Math.round(Math.min(avail, (r.monto || 0) - (r.nocApplied || 0)) * 100) / 100; return amt > 0.004 ? { mode: 'auto', amount: amt } : { mode: 'reflected' }; }
+    return { mode: 'review', reason: 'la cuenta corriente ya refleja una parte (' + ars(red) + '): confirmá el importe' };
+  },
+  // Importe de la NOC desde su campo: el número EXACTO de la aplicación automática si el campo no se tocó; si no, formato argentino (1.234,56)
+  nocAmount(el) {
+    const inp = el.querySelector('[data-nocamt]'), raw = inp ? String(inp.value).trim() : '';
+    if (el.dataset.nocexact != null && raw === el.dataset.nocshown) return Number(el.dataset.nocexact);
+    const v = parseMoney(raw); return v == null ? NaN : v;
+  },
+  // ¿Se puede publicar? NO mientras haya una solicitud de NOC EN CURSO (registro real, no el estado visual) o una automática pendiente/fallida
+  nocBlocking(m) { return !!((m._nocInflight && m._nocInflight.size) || m.querySelector('.nocrow[data-nocstate="pending"], .nocrow[data-nocstate="failed"]')); },
+  // Rechazo DEFINITIVO (estado de la NOC o datos: reintentar no cambia nada) vs error RECUPERABLE (red, tiempo de espera, caída)
+  nocDefinitive(e) { const c = (e && (e.code || (String(e.message || '').match(/^(NOC_[A-Z_]+)/) || [])[1])) || ''; return /^NOC_/.test(c); },
+  // Ejecuta una solicitud al servidor para una fila: la registra (PUBLICAR la espera) y bloquea TODAS las acciones de esa fila mientras tanto
+  async nocTrack(m, el, fn) {
+    m._nocInflight = m._nocInflight || new Set();
+    const acts = [...el.querySelectorAll('[data-nocok],[data-nocfin],[data-nocno],[data-planpick],[data-nocamt],[data-nocretry]')];
+    const prev = acts.map(x => x.disabled); acts.forEach(x => { x.disabled = true; });
+    el.dataset.nocbusy = '1';
+    const req = (async () => fn())(); m._nocInflight.add(req); this.nocGate(m);
+    try { return await req; }
+    finally {
+      m._nocInflight.delete(req); delete el.dataset.nocbusy;
+      // se rehabilitan los controles SOLO si la fila sigue abierta a decisión (error recuperable o intento manual sin éxito)
+      const open = !['applied', 'resolved', 'rejected'].includes(el.dataset.nocstate || '') && !el.classList.contains('nocdone');
+      if (open) acts.forEach((x, i) => { if (x.isConnected) x.disabled = prev[i]; });   // vuelve cada control a como estaba (importe conservado)
+      this.nocGate(m);
+    }
+  },
+  // rechazo definitivo: causa + resolución coherente (no se aplica en esta hoja; no bloquea; sin reintento)
+  nocReject(m, el, msg, extra) {
+    const out = el.querySelector('[data-nocres]');
+    el.dataset.nocstate = 'rejected'; el.classList.add('blocked', 'nocdone');
+    el.querySelectorAll('[data-nocok],[data-nocfin],[data-nocno],[data-planpick],[data-nocamt]').forEach(x => { x.disabled = true; });
+    const rb = el.querySelector('[data-nocretry]'); if (rb) rb.remove();
+    if (out) out.innerHTML = '<b>NO SE APLICA EN ESTA HOJA</b> · ' + esc(msg) + (extra || '') + '. La hoja puede publicarse sin esta NOC.';
+    this.nocGate(m);
+  },
+  nocGate(m) {
+    const go = m.querySelector('#pubGo'); if (!go) return;
+    const busy = this.nocBlocking(m), base = m.dataset.baseBlocked === '1';
+    go.disabled = base || busy;
+    const note = m.querySelector('#pubNocWait');
+    if (note) { note.hidden = !busy; note.textContent = m.querySelector('.nocrow[data-nocstate="failed"]') ? 'Hay notas de crédito que no se pudieron aplicar: reintentá o elegí NO APLICAR antes de publicar.' : 'Aplicando notas de crédito… esperá a que terminen para publicar.'; }
+  },
   nocItem(r, n) { return { comp: n.comp, cuit: n.cuit || (r.calc && r.calc.cuit) || '', issued_date: n.d || '', original_amount: n.orig, available_amount: n.amt }; },
   rowOrders(r) { return [r.mainOrder, r.shipOrder].concat(r.orders || []).filter(Boolean).map(String).filter((v, i, a) => a.indexOf(v) === i); },
   // RC3: antecedente en una hoja CANCELADA (mismo pedido): en revisión → solo informa; MANTENIDA por Administración → se puede considerar sin un segundo consumo
@@ -1092,15 +1150,19 @@ const Publisher = {
       if (d.reserved_elsewhere) return '<div class="nocrow blocked"' + attrs + '>' + head + '<span class="nocres"><b>NOTA DE CRÉDITO RESERVADA EN OTRO BORRADOR</b>' + (d.reserved_by ? ' · ' + esc(d.reserved_by) : '') + '</span></div>';
       if (['IGNORADA', 'RECHAZADA'].includes(d.status)) return '<div class="nocrow blocked"' + attrs + '>' + head + '<span class="nocres"><b>NOC ' + d.status + '</b> por Administración</span></div>';
       if (d.mine > 0) return '<div class="nocrow"' + attrs + '>' + head + '<span class="nocres">APLICADA ' + ars(d.mine) + ' en esta hoja</span></div>';
+      // Aplicación AUTOMÁTICA cuando no hay duda; si la cuenta corriente ya la contempla, no se descuenta de nuevo
+      const dec = this.nocAuto(x.r, n, d, rows);
+      if (dec.mode === 'reflected') return '<div class="nocrow"' + attrs + '>' + head + '<span class="nocres"><b>YA CONTEMPLADA EN EL SALDO</b> · la cuenta corriente ya la descuenta: no se aplica de nuevo.</span></div>';
       const plans = FinancingPlans.blocked(rowKey(x.r)) ? [] : FinancingPlans.active(rowKey(x.r));
       const plan = plans.length === 1 ? plans[0] : null;
       const sel = plans.length > 1 ? '<select class="ed" data-planpick><option value="">Elegí el plan de financiación…</option>' + plans.map(p => '<option value="' + p.id + '">' + esc(p.comp_label || p.comp) + ' · ' + FinancingPlans.freqLabel(p.frequency) + ' · saldo ' + ars(p.operational_pending) + (p.next_due ? ' · próxima ' + esc(isoToDMY(p.next_due)) : '') + '</option>').join('') + '</select>' : '';
-      return '<div class="nocrow"' + attrs + (plan ? ' data-plan="' + plan.id + '"' : '') + '>' + head + '<span>disponible ' + ars(d.available) + (d.status === 'PARCIALMENTE_UTILIZADA' ? ' (remanente de ' + ars(d.original) + ')' : '') + '</span>' +
-        '<span class="nocq">¿Dónde querés aplicar esta Nota de Crédito?</span><input class="ed" data-nocamt inputmode="decimal" value="' + d.available + '">' +
+      return '<div class="nocrow"' + attrs + (plan ? ' data-plan="' + plan.id + '"' : '') + (dec.mode === 'auto' ? ' data-nocauto="' + dec.amount + '"' : '') + '>' + head +
+        (dec.mode === 'review' ? '<span class="nocwhy"><b>REVISAR</b> · ' + esc(dec.reason) + '</span>' : '') + '<span>disponible ' + ars(d.available) + (d.status === 'PARCIALMENTE_UTILIZADA' ? ' (remanente de ' + ars(d.original) + ')' : '') + '</span>' +
+        '<span class="nocq">¿Dónde querés aplicar esta Nota de Crédito?</span><input class="ed" data-nocamt inputmode="decimal" value="' + num(Number(d.available) || 0) + '">' +
         (plans.length ? sel + '<button type="button" class="btn soft" data-nocfin>APLICAR A FINANCIACIÓN PROPIA</button>' : (FinancingPlans.blocked(rowKey(x.r)) ? '<span class="nocres">Financiación sin sincronizar: REVISAR</span>' : '')) +
         '<button type="button" class="btn soft" data-nocok>APLICAR AL PEDIDO ACTUAL</button><button type="button" class="btn ghost" data-nocno>NO APLICAR</button><span class="nocres" data-nocres></span></div>';
     };
-    return '<div class="nocbox" id="pubNoc"><b>NOTAS DE CRÉDITO (NOC) · se aplican solo si las aceptás</b><p class="rp-note">Por defecto el piso del cobro es el Saldo CC. Si aceptás una NOC, su importe reduce ese piso y el cobro. Si no la aceptás, el piso sigue siendo el Saldo CC. Cada NOC se usa una sola vez: se ofrece solo el remanente real según el servidor.</p>' +
+    return '<div class="nocbox" id="pubNoc"><b>NOTAS DE CRÉDITO (NOC) · se aplican automáticamente cuando no hay duda</b><p class="rp-note">Si la cuenta corriente ya descuenta la NOC, no se aplica de nuevo. Si no la descuenta, se aplica sola al pedido (reduce el piso y el cobro). Los casos dudosos quedan para que elijas dónde aplicarla. Cada NOC se usa una sola vez: se ofrece solo el remanente real según el servidor.</p>' +
       items.map(x => x.list.map(n => row(x, n)).join('')).join('') + '</div>';
   },
   bindNoc(m, rows) {
@@ -1117,45 +1179,77 @@ const Publisher = {
     m.querySelectorAll('.nocrow').forEach(el => { if (!el.querySelector('[data-nocok]')) return; // NOC ya utilizada / reservada / bloqueada: sin acciones
       const r = rows[+el.dataset.i], out = el.querySelector('[data-nocres]');
       const done = () => el.querySelectorAll('[data-nocok],[data-nocfin],[data-nocno],[data-planpick]').forEach(x => { x.disabled = true; });
-      el.querySelector('[data-nocno]').onclick = () => { out.textContent = 'NO SE APLICA'; done(); };
+      el.querySelector('[data-nocno]').onclick = () => { if (el.dataset.nocbusy) return;   // con una solicitud en curso no se puede decidir otra cosa
+        out.textContent = 'NO SE APLICA'; done(); el.classList.add('nocdone'); if (el.dataset.nocstate) el.dataset.nocstate = 'resolved'; this.nocGate(m); };
       const fin = el.querySelector('[data-nocfin]');
       if (fin) fin.onclick = async () => {
-        const amount = Number(String(el.querySelector('[data-nocamt]').value).replace(/\./g, '').replace(',', '.'));
+        const amount = this.nocAmount(el);
         if (!(amount > 0)) { out.textContent = 'Importe inválido.'; return; }
         const pick = el.querySelector('[data-planpick]'); const planId = pick ? pick.value : el.dataset.plan;
         if (!planId) { out.textContent = 'Elegí a qué plan de financiación aplicar la NOC (hay más de uno activo).'; return; }   // sin prioridad inventada
         if (FinancingPlans.blocked(rowKey(r))) { out.textContent = 'Financiación sin sincronizar: REVISAR.'; return; }
         el.dataset.plan = planId;
-        done();
-        try {
+        if (el.dataset.nocbusy) return;
+        await this.nocTrack(m, el, async () => { try {
           // Solo baja el saldo operativo del plan; el pedido actual no cambia y no se incorpora al plan
           const res = await b.applyFinancing({ plan_id: el.dataset.plan, cuit: el.dataset.cuit, comp: el.dataset.comp, issued_date: el.dataset.date, original_amount: el.dataset.orig ? Number(el.dataset.orig) : null,
             available_amount: Number(el.dataset.amt), amount, op_id: 'nocfin-' + RouteStore.sheetId + '-' + el.dataset.comp, accept: true });
-          if (res.ok === false) { out.innerHTML = '<b>' + esc(res.message) + '</b>'; el.classList.add('blocked'); return; }
+          if (res.ok === false) { this.nocReject(m, el, res.message); return; }
+          el.dataset.nocstate = 'applied'; el.classList.add('nocdone'); done();
           out.textContent = 'APLICADA A FINANCIACIÓN PROPIA ' + ars(res.applied) + ' · saldo del plan ' + ars(res.plan_operational_pending) + ' · remanente NOC ' + ars(res.remaining);
           FinancingPlans.store([Object.assign({}, (FinancingPlans.byClient.get(rowKey(r)) || []).find(p => p.id === el.dataset.plan) || {}, { id: el.dataset.plan, client_key: rowKey(r), operational_pending: res.plan_operational_pending, noc_adjustments: res.plan_noc_adjustments, status: res.plan_status })]);
           const box = m.querySelector('.finbox[data-plan="' + el.dataset.plan + '"] [data-finsaldo]'); if (box) box.textContent = ars(res.plan_operational_pending);
           RouteStore.log({ tipo: 'NOC aplicada a financiación propia', comp: el.dataset.comp, importe: res.applied });
-        } catch (e) {   // error transitorio (red/servidor): se rehabilitan controles conservando plan e importe
+        } catch (e) {
+          if (this.nocDefinitive(e)) { this.nocReject(m, el, String(e.message || e).replace(/^NOC_[A-Z_]+:\s*/, '')); return; }
+          // error transitorio (red/servidor): al terminar se rehabilitan los controles conservando plan e importe
           out.textContent = 'No se pudo aplicar: ' + String(e.message || e).replace(/^[A-Z_]+:\s*/, '') + '. Podés reintentar.';
-          el.querySelectorAll('[data-nocok],[data-nocfin],[data-nocno],[data-planpick]').forEach(x => { x.disabled = false; });
-        }
+        } });
       };
       el.querySelector('[data-nocok]').onclick = async ev => {
-        const amount = Number(String(el.querySelector('[data-nocamt]').value).replace(/\./g, '').replace(',', '.'));
+        const amount = this.nocAmount(el);
         if (!(amount > 0)) { out.textContent = 'Importe inválido.'; return; }
         const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null;
-        ev.target.disabled = true;
-        try {
+        if (el.dataset.nocbusy) return;   // ya hay una solicitud en curso para esta NOC
+        await this.nocTrack(m, el, async () => { try {
           // Identidad de la NOC: tipo+letra+PV+número (del comprobante) + CUIT + fecha de emisión + importe original (columna "Monto original")
           const res = await b.apply({ sheet_key: RouteStore.sheetId, cuit: el.dataset.cuit, comp: el.dataset.comp, issued_date: el.dataset.date, original_amount: el.dataset.orig ? Number(el.dataset.orig) : null,
             available_amount: Number(el.dataset.amt), amount, order_numbers: this.rowOrders(r), order_amount: (r.monto || 0) - (r.nocApplied || 0), cc_saldo: cc && cc.s != null ? cc.s : 0, op_id: 'noc-' + RouteStore.sheetId + '-' + el.dataset.comp, accept: true });
-          if (res.ok === false) { out.innerHTML = '<b>' + esc(res.message) + '</b>' + (res.code === 'NOC_CONSUMED' ? ' · consumido ' + ars(res.consumed) : ''); el.classList.add('blocked'); el.querySelector('[data-nocamt]').remove(); return; } // otra sesión la usó/reservó: estado actualizado
+          if (res.ok === false) { this.nocReject(m, el, res.message || res.code || 'rechazada por el servidor', res.code === 'NOC_CONSUMED' ? ' · consumido ' + ars(res.consumed) : ''); return; }   // definitivo // otra sesión la usó/reservó: estado actualizado
           if (!res.repeated) { r.nocApplied = Math.round(((r.nocApplied || 0) + res.applied) * 100) / 100; (r.nocList = r.nocList || []).push({ fingerprint: res.fingerprint, comp: el.dataset.comp, applied: res.applied }); }
+          el.dataset.nocstate = 'applied'; el.classList.add('nocdone'); done(); this.nocGate(m);
           out.textContent = 'APLICADA ' + ars(res.applied) + (res.floor_after != null ? ' · piso ' + ars(res.floor_before) + ' → ' + ars(res.floor_after) : '') + ' · remanente NOC ' + ars(res.remaining); RouteStore.log({ tipo: 'NOC aplicada', comp: el.dataset.comp, importe: res.applied });
-        } catch (e) { out.textContent = String(e.message || e).replace(/^NOC_[A-Z_]+:\s*/, ''); ev.target.disabled = false; }
+        } catch (e) {
+          if (this.nocDefinitive(e)) { this.nocReject(m, el, String(e.message || e).replace(/^NOC_[A-Z_]+:\s*/, '')); return; }   // definitivo: sin reintento
+          // recuperable (red, tiempo de espera, servidor): se conserva el importe; la automática queda PENDIENTE con REINTENTAR
+          out.textContent = String(e.message || e) + '.';
+          if (el.dataset.nocstate) el.dataset.nocstate = 'failed';
+        } });
       };
     });
+    // Aplicación AUTOMÁTICA (sin duda): mismo camino que "APLICAR AL PEDIDO ACTUAL" (validación e idempotencia del servidor por hoja+comprobante).
+    // PUBLICAR queda bloqueado mientras haya NOC aplicándose o con error; un error deja la fila PENDIENTE con REINTENTAR.
+    const autos = [...m.querySelectorAll('.nocrow[data-nocauto]')].filter(el => el.querySelector('[data-nocok]') && !el.querySelector('[data-nocok]').disabled);
+    const runAuto = async el => {
+      const ok = el.querySelector('[data-nocok]'), amt = el.querySelector('[data-nocamt]'), out = el.querySelector('[data-nocres]');
+      if (el.dataset.nocbusy) return;   // ya hay una solicitud en curso para esta NOC
+      el.dataset.nocstate = 'pending'; this.nocGate(m); if (out) out.textContent = 'Aplicando automáticamente…';
+      const old = el.querySelector('[data-nocretry]'); if (old) old.remove();
+      await ok.onclick({ target: ok });   // registrada en m._nocInflight: PUBLICAR la espera
+      if (el.dataset.nocstate === 'applied') { if (out && /^APLICADA/.test(out.textContent)) out.textContent = 'APLICADA AUTOMÁTICAMENTE · ' + out.textContent.replace(/^APLICADA\s*/, ''); if (amt) amt.disabled = true; }
+      else if (el.dataset.nocstate === 'pending') { el.dataset.nocstate = 'failed'; }   // terminó sin éxito ni rechazo definitivo
+      if (el.dataset.nocstate === 'failed') {
+        if (out) out.textContent = 'PENDIENTE · no se pudo aplicar (error transitorio): ' + (out.textContent || 'error').replace(/\.$/, '') + '. Podés reintentar o elegir NO APLICAR.';
+        const rb = document.createElement('button'); rb.type = 'button'; rb.className = 'btn soft'; rb.dataset.nocretry = '1'; rb.textContent = 'REINTENTAR';
+        rb.onclick = () => runAuto(el); ok.insertAdjacentElement('beforebegin', rb);
+      }
+      this.nocGate(m);
+    };
+    autos.forEach(el => { el.dataset.nocstate = 'pending'; const amt = el.querySelector('[data-nocamt]');
+      el.dataset.nocexact = el.dataset.nocauto; if (amt) { amt.value = num(Number(el.dataset.nocauto)); el.dataset.nocshown = amt.value; } });
+    this.nocGate(m);
+    this._nocRun = (async () => { for (const el of autos) await runAuto(el); })();
+    return this._nocRun;
   },
   // Preparación antes de publicar: LISTO / LISTO CON ADVERTENCIAS / REVISAR
   readiness(rows, carrier, resp, bad, vehicles, external) {
@@ -1177,12 +1271,53 @@ const Publisher = {
     const dupLoc = rows.filter(r => r.stopType === 'UBICACION_INTERNA').map(r => r.internalLocationKey).filter((k, i, a) => a.indexOf(k) !== i);
     if (dupLoc.length) add('err', 'La ubicación ' + dupLoc[0] + ' está repetida en la hoja: dejá una sola parada');
     const noAddr = rows.filter(r => r.stopType === 'TAREA' ? !String(r.domicilio || '').trim() : (!String(r.domicilio || '').trim() || !String(r.localidad || '').trim())).length; if (noAddr) add('warn', noAddr + ' parada(s) sin domicilio completo');
-    const noBul = deliveryRows.filter(r => !(parseInt(r.bultos, 10) > 0)).length; if (noBul) add('warn', noBul + ' entrega(s) con 0 bultos');
+    // los bultos son OPCIONALES: vacío o 0 no es error ni revisión
     const warns = deliveryRows.filter(r => { const st = baseStatus(r); return !st.blocking && st.issues.some(i => i.level === 'warn'); }).length; if (warns) add('warn', warns + ' entrega(s) con advertencias');
     const noMail = deliveryRows.filter(r => { const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null; return !(r.email || (cc && cc.email)); }).length;
     if (noMail) add('warn', noMail + ' cliente(s) sin email (no reciben avisos)');
     const level = items.some(i => i[0] === 'err') ? 'REVISAR' : items.some(i => i[0] === 'warn') ? 'LISTO CON ADVERTENCIAS' : 'LISTO';
     return { level: level === 'REVISAR' ? 'REVISAR' : level === 'LISTO' ? 'LISTO' : 'WARN', label: level, items };
+  },
+  // Panel de pendientes (se abre tocando REVISAR): motivo de cada pedido y cómo resolverlo ahí mismo
+  pendingHtml(bad) {
+    if (!bad.length) return '';
+    return '<div class="pendpanel" id="pubPend"' + (this._pendOpen ? '' : ' hidden') + '><b>PENDIENTES (' + bad.length + ')</b>' + bad.map(r => {
+      const st = baseStatus(r), probs = st.issues.filter(i => i.level === 'error' || i.level === 'warn');
+      const absent = r.monto == null || probs.some(i => SALDO_AUSENTE.has(i.code)) || manualSaldoOk(r);
+      const pay = probs.some(i => i.text === 'Forma de pago a revisar.'), payShip = r.hasShip && r.payShip === 'REVISAR';
+      const other = probs.filter(i => !SALDO_AUSENTE.has(i.code) && !canAck(i) && !FIELD_TEXTS.has(i.text));
+      return '<div class="pendrow" data-pid="' + esc(r.id) + '"><div class="pendhead"><b>' + esc(r.mainOrder || r.shipOrder || '') + '</b> · ' + esc(r.cliente) + '</div><ul>' +
+        probs.map(i => '<li class="' + i.level + '">' + esc(i.code) + (i.text && i.text !== i.code ? ': ' + esc(i.text) : '') +
+          (canAck(i) ? ' <label class="chk pendack"><input type="checkbox" data-pack="' + esc(ackKey(i)) + '"> Revisado</label>' : '') + '</li>').join('') +
+        (r.monto == null && !probs.length ? '<li class="error">Sin monto a cobrar</li>' : '') + '</ul>' +
+        (absent ? '<div class="pendctl"><label>Importe de mercadería <input class="ed" data-pamt inputmode="decimal" placeholder="$" value="' + (manualSaldoOk(r) ? esc(num(r.montoMercaderiaManual)) : '') + '"></label>' +
+          '<button class="btn soft" type="button" data-psave>GUARDAR IMPORTE</button><small>Al guardarlo, la revisión de saldo queda hecha.</small></div>' : '') +
+        (pay ? '<div class="pendctl"><label>Forma de pago' + (payShip ? ' (mercadería)' : '') + ' <input class="ed" data-ppay value="' + esc(r.payMain === 'REVISAR' ? '' : (r.payMain || '')) + '"></label>' +
+          (payShip ? '<label>Forma de pago (envío) <input class="ed" data-ppayship value=""></label>' : '') + '<button class="btn soft" type="button" data-psavepay>GUARDAR FORMA DE PAGO</button></div>' : '') +
+        (other.length ? '<div class="pendctl"><small>Esto se resuelve en la fila del pedido.</small><button class="btn ghost" type="button" data-pgo>VER EN LA TABLA</button></div>' : '') +
+        '<span class="shiperr" data-perr hidden></span></div>';
+    }).join('') + '</div>';
+  },
+  bindPending(m) {
+    const ready = m.querySelector('#pubReady'), panel = m.querySelector('#pubPend'); if (!panel) return;
+    const toggle = () => { panel.hidden = !panel.hidden; this._pendOpen = !panel.hidden; };
+    ready.addEventListener('click', toggle); ready.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    const refresh = async () => { CalculationEngine.computeAll(RouteStore.rows); RouteStore.save(); if (typeof UI !== 'undefined' && UI.renderTable) UI.renderTable(); this._pendOpen = true; m.remove(); await this.open(); };
+    panel.querySelectorAll('.pendrow').forEach(el => {
+      const row = RouteStore.find(el.dataset.pid), er = el.querySelector('[data-perr]'), fail = t => { er.textContent = t; er.hidden = false; };
+      if (!row) return;
+      const sv = el.querySelector('[data-psave]');
+      if (sv) sv.onclick = async () => { const raw = el.querySelector('[data-pamt]').value; if (!setManualAmount(row, raw)) return fail('Ingresá un importe válido (número mayor o igual a 0).'); await refresh(); };
+      el.querySelectorAll('[data-pack]').forEach(cb => cb.onchange = async () => { row.acks = row.acks || {}; if (cb.checked) row.acks[cb.dataset.pack] = new Date().toISOString(); else delete row.acks[cb.dataset.pack];
+        RouteStore.log({ tipo: cb.checked ? 'aviso revisado' : 'revisión quitada', pedido: row.mainOrder, aviso: cb.dataset.pack }); await refresh(); });
+      const sp = el.querySelector('[data-psavepay]');
+      if (sp) sp.onclick = async () => { const a = el.querySelector('[data-ppay]').value.trim(), bs = el.querySelector('[data-ppayship]');
+        if (!a || a.toUpperCase() === 'REVISAR') return fail('Completá la forma de pago.');
+        if (bs && (!bs.value.trim() || bs.value.trim().toUpperCase() === 'REVISAR')) return fail('Completá la forma de pago del envío.');
+        row.payMain = a; row.payMainManual = true; if (bs) row.payShip = bs.value.trim(); RouteStore.log({ tipo: 'forma de pago completada', pedido: row.mainOrder, pago: a }); await refresh(); };
+      const go = el.querySelector('[data-pgo]');
+      if (go) go.onclick = () => { m.remove(); const tr = document.querySelector('tr.main-row[data-id="' + row.id + '"]'); if (tr) { tr.scrollIntoView({ block: 'center' }); tr.classList.add('flash'); setTimeout(() => tr.classList.remove('flash'), 1600); } };
+    });
   },
   problems() {
     return this.rows().filter(r => (!r.stopType || r.stopType === 'PEDIDO')).filter(r => { const st = baseStatus(r); return r.monto == null || (st.blocking && !(r.calc && r.calc.shipProv && st.issues.every(i => i.level !== 'error' && (i.level !== 'warn' || i.code === 'ENVÍO A CONFIRMAR')))); });
@@ -1231,12 +1366,14 @@ const Publisher = {
       (!external && resp.length ? '<label>Responsable <select class="ed" id="pubResp">' + resp.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select></label>' : '') +
       (carrier && carrier.kind === 'INTERNO' && vehicles.length ? '<label>Vehículo (obligatorio) <select class="ed" id="pubVeh">' + vehicles.map(v => '<option value="' + v.id + '">' + esc(v.name + ' · ' + v.plate) + '</option>').join('') + '</select></label>' : '') +
       (blockMsg ? '<p class="shiperr" id="pubBlock">' + esc(blockMsg) + '</p>' : '') +
-      '<div class="ready ' + ready.level + '" id="pubReady"><b>' + ready.label + '</b><ul>' + ready.items.map(i => '<li class="' + i[0] + '">' + esc(i[1]) + '</li>').join('') + '</ul></div>' +
-      '<div class="bulwrap"><table class="bultab"><thead><tr><th>PARADA</th><th>BULTOS</th></tr></thead><tbody>' + rows.map((r, i) => '<tr><td>' + esc(r.cliente) + ' <small>' + esc(r.mainOrder || '') + '</small></td><td><input class="ed" data-bul="' + i + '" inputmode="numeric" value="' + (parseInt(r.bultos, 10) || 0) + '"></td></tr>').join('') +
+      '<div class="ready ' + ready.level + '" id="pubReady"' + (bad.length ? ' role="button" tabindex="0" title="Tocá para ver y resolver los pendientes"' : '') + '><b>' + ready.label + '</b>' +
+        (bad.length ? ' <span class="pendhint">· ' + bad.length + ' pendiente(s) — tocá para resolverlos acá</span>' : '') + '<ul>' + ready.items.map(i => '<li class="' + i[0] + '">' + esc(i[1]) + '</li>').join('') + '</ul></div>' +
+      this.pendingHtml(bad) +
+      '<div class="bulwrap"><table class="bultab"><thead><tr><th>PARADA</th><th>BULTOS</th></tr></thead><tbody>' + rows.map((r, i) => '<tr><td>' + esc(r.cliente) + ' <small>' + esc(r.mainOrder || '') + '</small></td><td><input class="ed" data-bul="' + i + '" inputmode="numeric" placeholder="opcional" value="' + (Number.isInteger(parseInt(r.bultos, 10)) && parseInt(r.bultos, 10) >= 0 ? parseInt(r.bultos, 10) : '') + '"></td></tr>').join('') +
       '</tbody></table><p class="sheetsum" id="pubSum">' + sheetSummary(rows) + '</p></div>' +
       this.finHtml(rows) + this.nocHtml(rows, nocInfo) +
       (tpl ? '<p class="rp-note">Plantilla de hoja: ' + (tpl.version ? 'v' + tpl.version : 'predeterminada') + '</p>' : '') +
-      '<p class="shiperr" id="pubErr" hidden></p></div>' +
+      '<p class="shiperr" id="pubErr" hidden></p><p class="rp-note" id="pubNocWait" hidden></p></div>' +
       '<footer><button class="btn ghost" type="button" id="pubCancel">Cancelar</button>' + (this.tplErr || rows.some(r => FinancingPlans.blocked(rowKey(r))) ? '<button class="btn soft" type="button" id="pubRetry">REINTENTAR</button>' : '') +
       '<button class="btn go" type="button" id="pubGo"' + (blockMsg ? ' disabled' : '') + '>' + title + '</button></footer></div>';
     document.body.appendChild(m);
@@ -1247,14 +1384,21 @@ const Publisher = {
     const habitual = () => { if (!vs || !rs) return; const v = vehicles.find(x => x.habitual_driver_id === rs.value); if (v) vs.value = v.id; };
     if (rs) rs.addEventListener('change', habitual); habitual();
     if (ready.level === 'REVISAR') m.querySelector('#pubGo').disabled = true;
+    m.dataset.baseBlocked = m.querySelector('#pubGo').disabled ? '1' : '0';
+    this.bindPending(m);
     this.bindNoc(m, rows);
     const rt = m.querySelector('#pubRetry');
     if (rt) rt.onclick = async () => { rt.disabled = true; await FinancingPlans.retry(); m.remove(); this.open(); }; // vuelve a verificar plantilla y financiación
     m.querySelector('#pubGo').onclick = async ev => {
+      // nunca se publica con NOC aplicándose o con error (aunque el clic llegue antes de que el botón se deshabilite)
+      if (this._nocRun) { try { await this._nocRun; } catch (e) { } }
+      while (m._nocInflight && m._nocInflight.size) { try { await Promise.allSettled([...m._nocInflight]); } catch (e) { } }   // reintentos y aplicaciones manuales incluidos
+      if (this.nocBlocking(m)) { const er = m.querySelector('#pubErr'); er.textContent = 'Hay notas de crédito pendientes de aplicar: reintentá o elegí NO APLICAR.'; er.hidden = false; this.nocGate(m); return; }
       ev.target.disabled = true;
       try {
-        const bv = bulVals(); if (bv.some(v => !/^\d+$/.test(v))) { const er = m.querySelector('#pubErr'); er.textContent = 'Los bultos deben ser números enteros mayores o iguales a 0.'; er.hidden = false; ev.target.disabled = false; return; }
-        rows.forEach((r, i) => { r.bultos = parseInt(bv[i], 10); });
+        // bultos OPCIONALES: vacío = sin dato (no se completa un 0 ficticio); si se informa, debe ser un entero ≥ 0
+        const bv = bulVals(); if (bv.some(v => v !== '' && !/^\d+$/.test(v))) { const er = m.querySelector('#pubErr'); er.textContent = 'Si informás bultos, tiene que ser un número entero (o dejalo vacío).'; er.hidden = false; ev.target.disabled = false; return; }
+        rows.forEach((r, i) => { r.bultos = bv[i] === '' ? null : parseInt(bv[i], 10); });
         const keep = rows.map(r => ({ r, monto: r.monto, obs: r.obsPago }));
         rows.forEach(r => { if (r.nocApplied > 0 && r.monto != null) { r.monto = Math.round((r.monto - r.nocApplied) * 100) / 100; r.obsPago = [r.obsPago, (r.nocList || []).map(x => 'NOC ' + x.comp + ' aplicada ' + ars(x.applied)).join(' · ')].filter(Boolean).join(' · '); } });
         try {
@@ -1557,6 +1701,33 @@ const RouteStore = {
 };
 
 /* ---------------- Estado de fila ---------------- */
+// Problemas que nacen SOLO de que el informe no trae el saldo/comprobante del pedido (p. ej. todavía no estaba facturado al exportar).
+// Un importe manual válido, escrito por el operador, los resuelve. NO incluye financiación, NOC, envíos ni forma de pago.
+const SALDO_AUSENTE = new Set(['SALDO NO ENCONTRADO', 'SALDO NO INFORMADO — REVISAR', 'SIN COMPROBANTE EN INFORME', 'SIN COMPROBANTE / NO ENCONTRADO', 'SIN COMPROBANTE / NO FACTURADO']);
+// Avisos con su propio flujo de resolución (no se "tildan"): asociación de envío, financiación, envío a confirmar, diferencia de envío
+const NO_ACK = new Set(['ENVÍO POR ASOCIAR', 'POSIBLE FINANCIACIÓN PROPIA · REVISAR', 'ENVÍO A CONFIRMAR', 'DIFERENCIA ENTRE COSTO DE ENVÍO Y SALDO COMPROBANTE · REVISAR']);
+// Avisos que se resuelven completando el dato (no tildando)
+const FIELD_TEXTS = new Set(['Forma de pago a revisar.', 'Falta transportista.', 'Pedido manual: completá y verificá los datos.']);
+const ackKey = i => i.code + '|' + (i.text || '');
+const canAck = i => i.level === 'warn' && !NO_ACK.has(i.code) && !FIELD_TEXTS.has(i.text);
+// importe manual EXPLÍCITO y válido (no un campo vacío/inválido ni un cero automático) que coincide con el guardado como revisión
+function manualSaldoOk(row) {
+  const s = row.saldoRevisado, v = row.montoMercaderiaManual;
+  return !!(row.montoManual && s && v != null && Number.isFinite(Number(v)) && Number(v) >= 0 && Math.abs(Number(s.amount) - Number(v)) < 0.005);
+}
+// guarda el importe de mercadería escrito por el operador (tabla o panel REVISAR) y, si es válido, marca revisado el saldo ausente
+function setManualAmount(row, raw) {
+  const txt = String(raw == null ? '' : raw).trim(), v = txt === '' ? null : parseMoney(txt);
+  if (!row.montoManual) RouteStore.log({ tipo: 'monto de mercadería editado', pedido: row.mainOrder, sugerido: Money.suggestedMain(row) });
+  row.montoMercaderiaManual = v; row.montoManual = true;
+  row.manualBase = row.calc ? row.calc.suggested : null;
+  const ok = v != null && Number.isFinite(Number(v)) && Number(v) >= 0;
+  const had = !!row.saldoRevisado;
+  row.saldoRevisado = ok ? { amount: Number(v), at: new Date().toISOString() } : null;
+  if (ok && !had) RouteStore.log({ tipo: 'saldo revisado por importe manual', pedido: row.mainOrder, importe: Number(v) });
+  Money.apply(row);
+  return ok;
+}
 function rowIssues(row) {
   let list = [].concat(row.linkFlags || [], (row.calc && row.calc.flags) || []);
   if (list.some(i => i.code === 'ENVÍO NO ENCONTRADO')) {
@@ -1569,6 +1740,14 @@ function rowIssues(row) {
   if (row.payMain === 'REVISAR' || (row.hasShip && row.payShip === 'REVISAR')) list.push({ level: 'warn', code: 'REVISAR', text: 'Forma de pago a revisar.' });
   if (row.manual && !row.auto) list.push({ level: 'warn', code: 'REVISAR', text: 'Pedido manual: completá y verificá los datos.' });
   if (row.domicilioNote) list.push({ level: 'info', code: 'DOMICILIO SUGERIDO', text: row.domicilioNote });
+  // importe manual válido → el saldo ausente queda REVISADO (solo esos avisos; el resto sigue)
+  if (manualSaldoOk(row) && list.some(i => SALDO_AUSENTE.has(i.code))) {
+    list = list.filter(i => !SALDO_AUSENTE.has(i.code));
+    list.push({ level: 'info', code: 'SALDO REVISADO · IMPORTE MANUAL', text: 'El informe no traía el saldo de este pedido: se usa el importe cargado por el operador (' + ars(Number(row.montoMercaderiaManual)) + ').' });
+  }
+  // revisiones marcadas por el operador (aviso por aviso, con su texto: si el aviso cambia, vuelve a pedir revisión)
+  const acks = row.acks || {};
+  list = list.map(i => canAck(i) && acks[ackKey(i)] ? { level: 'info', code: 'REVISADO · ' + i.code, text: 'Revisado por el operador: ' + (i.text || i.code) } : i);
   return list;
 }
 const STATUS_ORDER = {
@@ -2479,11 +2658,7 @@ const UI = {
     if (f === 'fecha') { const iso = dmyToISO(t.value); t.classList.toggle('need', !iso); if (iso) { row.fecha = iso; RouteStore.save(); } return; }
     if (f === 'monto') {
       // Lo que se escribe es SOLO la mercadería; el total = mercadería + envío pendiente
-      const v = parseMoney(t.value);
-      if (!row.montoManual) RouteStore.log({ tipo: 'monto de mercadería editado', pedido: row.mainOrder, sugerido: Money.suggestedMain(row) });
-      row.montoMercaderiaManual = v; row.montoManual = true;
-      row.manualBase = row.calc ? row.calc.suggested : null;
-      Money.apply(row);
+      setManualAmount(row, t.value);   // importe válido → saldo ausente revisado (vacío/inválido: no)
       this.syncRowMoney(row, t);
       RouteStore.save();
       return;
@@ -2618,7 +2793,7 @@ const UI = {
       RouteStore.save(); this.replaceRow(row); return;
     }
     if (act === 'restore') {
-      row.montoManual = false; row.montoMercaderiaManual = undefined; row.manualBase = undefined; Money.apply(row);
+      row.montoManual = false; row.montoMercaderiaManual = undefined; row.manualBase = undefined; row.saldoRevisado = null; Money.apply(row);
       RouteStore.log({ tipo: 'monto sugerido restaurado', pedido: row.mainOrder, monto: row.monto });
       RouteStore.save(); this.replaceRow(row); toast('Se volvió al monto sugerido: ' + (row.monto == null ? 'PENDIENTE' : ars(row.monto))); return;
     }
@@ -2828,7 +3003,7 @@ const ExportModel = {
       const r = it.r, cur = it.cells;
       it.cells = use.map(c => {
         if (LEG.includes(c.key)) return m.idx[c.key] >= 0 ? cur[m.idx[c.key]] : [L('')];
-        if (c.key === 'bultos') return [L(parseInt(r.bultos, 10) || 0)];
+        if (c.key === 'bultos') return [L(Number.isInteger(parseInt(r.bultos, 10)) ? parseInt(r.bultos, 10) : '')];   // sin dato → vacío, no 0
         if (c.key === 'accion') return [L((r.monto || 0) > 0 ? 'ENTREGA + COBRO' : 'ENTREGA')];
         if (c.key === 'responsable') return [L(ctx.responsable || '')];
         return [L((rowStatus(r) || {}).label || '')];

@@ -191,3 +191,117 @@ No se encontró ninguna falla en la app, así que no se modificó su código. So
 | Build de producción + guardián | OK | 0 |
 
 `run_builder_legacy_owner.py` necesita el build demo de la versión anterior en `OKD_PREV_DIST`.
+
+## V4.11: importe manual = saldo revisado, panel REVISAR, NOC automática y bultos opcionales
+**Caso reproducido** con los Excel recibidos (cargados en una carpeta temporal, fuera del proyecto): los pedidos están en la pestaña "pedidos" del informe, pero sus comprobantes no figuran en el detalle de cuenta corriente, porque se exportó antes de facturarlos.
+- Uno quedaba en "SALDO NO ENCONTRADO".
+- El otro en "SIN COMPROBANTE EN INFORME", más dos motivos independientes del saldo: "ENVÍO NO ENCONTRADO" y "Forma de pago a revisar". Por eso el bloqueo continuaba después de cargar el importe.
+
+**Cambios** (`public/legacy/despacho-v15.js`, `src/styles/online.css`):
+1. **Importe manual válido** (escrito por el operador, número ≥ 0) → la revisión de saldo queda hecha automáticamente.
+   - Desaparecen **solo** los avisos que nacen del saldo ausente (`SALDO NO ENCONTRADO`, `SALDO NO INFORMADO — REVISAR`, `SIN COMPROBANTE EN INFORME / NO ENCONTRADO / NO FACTURADO`), y también en el estado que usa la publicación (`problems()`).
+   - Envíos, forma de pago, financiación, NOC y comprobante distinto **siguen** detectándose.
+   - Un campo vacío o inválido **no** queda aprobado.
+   - Se conserva al recalcular, cambiar de hoja, guardar, reabrir y recargar (`saldoRevisado` en la fila).
+2. **Panel REVISAR:** al tocar el recuadro REVISAR del modal de publicación aparecen los pedidos pendientes con su motivo.
+   - Permite cargar el importe (marca solo la revisión de saldo), completar la forma de pago y tildar "Revisado" en cada aviso independiente.
+   - "Revisado" queda guardado por aviso y texto: si el aviso cambia, vuelve a pedirse.
+   - Lo que se resuelve en la tabla trae un botón "VER EN LA TABLA".
+   - Al resolver se actualizan el contador y los avisos y se habilita continuar.
+3. **Bultos opcionales:**
+   - Se quitó el aviso "entregas con 0 bultos".
+   - La validación final acepta casillas vacías (antes exigía un número y **bloqueaba**).
+   - La casilla arranca vacía, no se completa un 0 ficticio, el PDF/Excel deja la celda vacía y una cantidad informada se conserva.
+4. **Notas de crédito automáticas**, con la regla existente: "los créditos vigentes ya están reflejados en la cuenta corriente".
+   - Si el tope de cuenta corriente ya redujo el pedido en al menos la NOC: **"YA CONTEMPLADA EN EL SALDO"**, no se aplica de nuevo.
+   - Si no lo redujo: **se aplica sola**, por el mismo camino del servidor que "APLICAR AL PEDIDO ACTUAL" (idempotente por hoja y comprobante).
+   - Casos ambiguos (reducción parcial, varias entregas del cliente, financiación propia, importe manual): quedan para revisión con los botones de siempre.
+   - El importe manual no borra ni duplica una NOC ya aplicada.
+
+**Pruebas** (datos **sintéticos**: `tests/e2e/generate_synthetic_saldo_noc.py`, misma forma que el caso real, sin datos reales):
+
+| Prueba | Resultado | Exit |
+|---|---|---|
+| `run_saldo_revisar_noc.py` (nueva) | 14/14 | 0 |
+| `run_builder_orders_date.py` | 13/13 | 0 |
+| `run_builder_legacy_owner.py` | 8/8 | 0 |
+| `run_e2e_g2.py` | 23/23 | 0 |
+| Build de producción + guardián | OK | 0 |
+
+`run_saldo_revisar_noc.py` cubre:
+- saldo ausente → importe manual → revisado;
+- conservación al reabrir;
+- vacío o inválido no aprobado;
+- otros errores siguen;
+- PUBLICAR → REVISAR → resolver → continuar;
+- decisiones guardadas;
+- NOC automática una vez (1000 − 300 = 700) y la ya contemplada no;
+- publicación con bultos vacíos y uno informado conservado.
+
+**Pendiente / no verificado:**
+- Con datos reales en Supabase: la aplicación automática de NOC usa la misma RPC `apply_credit_note`; se probó en modo demo, que replica su idempotencia.
+- En la computadora del operador.
+
+No se tocaron Supabase, permisos ni migraciones, y no se publicó.
+
+## V4.12: NOC automática con importe exacto, espera antes de publicar y reintento
+Cambios solo en `public/legacy/despacho-v15.js`:
+1. **Importe exacto.**
+   - **Antes:** el campo de la NOC mostraba el número en formato JavaScript ("300.5") y el botón le quitaba los puntos, así que $300,50 se enviaba como **3005**. Pasaba en la aplicación automática y también en la manual.
+   - **Ahora:** el campo se muestra en formato argentino ("300,50", "1.234,56") y se lee con el mismo lector de importes de la app (`parseMoney`). En la aplicación automática se envía el número exacto mientras el operador no cambie el campo.
+2. **Espera y reintento.**
+   - Cada NOC automática tiene estado: aplicándose, aplicada o con error. **PUBLICAR queda bloqueado** mientras alguna esté aplicándose o con error, con un aviso.
+   - Un intento de publicar en ese momento **espera** el resultado y no publica si queda algo sin resolver.
+   - Si falla (por ejemplo, un error de red), la fila queda **PENDIENTE** con **REINTENTAR**, y "APLICAR AL PEDIDO ACTUAL" y "NO APLICAR" siguen disponibles. Ya no se deshabilitan todos los controles sin importar el resultado.
+   - El reintento usa el mismo identificador de operación, así que el servidor no la aplica dos veces.
+3. **Textos:** el recuadro dice "se aplican automáticamente cuando no hay duda" (antes: "solo si las aceptás").
+
+**Pruebas** (sintéticas; `generate_synthetic_saldo_noc.py --decimales`):
+
+| Prueba | Resultado | Exit |
+|---|---|---|
+| `run_noc_decimales.py` (nueva) | 8/8 | 0 |
+| La misma prueba sobre la V4.11 (sin corrección): PUBLICAR habilitado con la NOC fallida, campo "300.5", sin reintento | detecta | 2 |
+| `run_saldo_revisar_noc.py` (importe manual, REVISAR, NOC, bultos) | 14/14 | 0 |
+| Build de producción + guardián | OK | 0 |
+
+`run_noc_decimales.py` cubre:
+- NOC de $300,50 y $1.234,56 con el importe enviado exacto;
+- error de red → pendiente y reintento;
+- respuesta demorada con intento de publicar, sin publicar hasta resolver;
+- importe escrito a mano "1.234,56" → 1234.56;
+- reapertura sin doble descuento (una aplicación por NOC);
+- hoja publicada con 699,50 y 765,44.
+
+Sin cambios en Supabase, permisos ni migraciones; no se publicó. Se conservan el importe manual revisado, el panel REVISAR y los bultos opcionales.
+
+## V4.13: NOC automática, solicitudes en curso y rechazos definitivos
+Cambios solo en `bindNoc` (`public/legacy/despacho-v15.js`):
+1. **Solicitudes en curso.**
+   - Cada llamada al servidor (automática, reintento, manual y a financiación) se registra (`m._nocInflight`).
+   - Mientras está en curso, la fila **bloquea todas sus acciones**: NO APLICAR, APLICAR, financiación, plan, importe y REINTENTAR. Además, NO APLICAR ignora la llamada aunque se fuerce.
+   - **PUBLICAR** queda bloqueado y el intento de publicar **espera todas** las solicitudes, reintentos incluidos, antes de decidir.
+   - El bloqueo depende del registro real y no del estado visual.
+2. **Errores diferenciados.**
+   - **Rechazo definitivo:** `ok: false` (`NOC_CONSUMED`, `NOC_RESERVED_ELSEWHERE`, `NOC_BLOCKED`, `NOC_UNDER_REVIEW`, `NOC_DESTINATION_LOCKED`) o errores con código `NOC_*`. Se muestra **"NO SE APLICA EN ESTA HOJA · causa"**, sin REINTENTAR y sin borrar el importe (queda deshabilitado), y **no bloquea** la publicación.
+   - **Error recuperable** (red, tiempo de espera, servidor): la fila queda **PENDIENTE**, con el importe conservado, REINTENTAR y NO APLICAR.
+
+**Pruebas** (sintéticas, `--decimales`):
+
+| Prueba | Resultado | Exit |
+|---|---|---|
+| `run_noc_robustez.py` (nueva) | 8/8 | 0 |
+| La misma prueba sobre la V4.12: NO APLICAR habilitado durante la solicitud; ok:false con reintento imposible y publicación bloqueada | detecta | 2 |
+| `run_noc_decimales.py` (V4.12) | 8/8 | 0 |
+| Build de producción + guardián | OK | 0 |
+
+`run_noc_robustez.py` cubre:
+- error transitorio → pendiente con el importe conservado;
+- reintento demorado con intento de NO APLICAR, cambio del estado visual e intento de publicar: nada tiene efecto y no se publica;
+- reintento exitoso con $300,50 exactos;
+- rechazo ok:false con la causa, sin reintento y sin bloquear;
+- reapertura sin doble aplicación;
+- publicación con 699,50 y 2.000;
+- importes enviados siempre exactos.
+
+Se conservan los cambios anteriores. Sin cambios en Supabase ni permisos; no se publicó.
