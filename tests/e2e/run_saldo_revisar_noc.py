@@ -90,9 +90,9 @@ async def main():
             await pg.evaluate('()=>{const r=RouteStore.rows.find(x=>String(x.mainOrder)==="72003"); delete r.compConflict; }')
             res('SAL-05 otros problemas reales siguen: envío no encontrado (independiente) y comprobante distinto (error)', ind and 'error:COMPROBANTE DIFERENTE AL VINCULADO' in cf['codes'] and cf['blocked'], {'72001': a2['codes'], '72003': cf['codes']})
             # ===== PUBLICAR → REVISAR → resolver → continuar =====
-            await open_publish(pg); p0 = await pend(pg)
-            await pg.click('#pubReady'); await pg.wait_for_timeout(300); p1 = await pend(pg)
-            res('REV-01 REVISAR al publicar: tocándolo se ven los pedidos pendientes con su motivo', p0['ready'] == 'REVISAR' and not p0['open'] and p1['open'] and p1['n'] == 4 and not p1['go']
+            await open_publish(pg); p0 = await pend(pg); p1 = p0
+            # V4.14: el panel REVISAR se abre DESPLEGADO al intentar publicar (antes había que tocarlo)
+            res('REV-01 REVISAR al publicar: el panel aparece desplegado con los pedidos pendientes y su motivo', p0['ready'] == 'REVISAR' and p0['open'] and p1['n'] == 4 and not p1['go']
                 and all(r['motivos'] for r in p1['rows']), {'n': p1['n'], 'filas': p1['rows'][:2]})
             # NOC: se aplica sola una vez; la ya reflejada no
             noc_txt = await pg.evaluate('()=>[...document.querySelectorAll(".nocrow")].map(e=>e.innerText.replace(/\\s+/g," "))')

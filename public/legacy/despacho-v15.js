@@ -931,7 +931,8 @@ const SheetTabs = {
   },
   apply(sheet) {
     sheet = sheet || {};
-    RouteStore.rows = sheet.rows || []; RouteStore.selected = new Set(sheet.selected || []); RouteStore.sheetId = sheet.sheetId || sheetUid(); RouteStore.sheetDate = sheet.sheetDate || '';
+    RouteStore.rows = sheet.rows || [];
+    RouteStore.rows.forEach(r => { if (migrateLegacySaldo(r)) (sheet.audit = sheet.audit || []).push({ at: new Date().toISOString(), tipo: 'saldo revisado por importe manual de versión anterior', pedido: r.mainOrder, importe: r.saldoRevisado.amount }); }); RouteStore.selected = new Set(sheet.selected || []); RouteStore.sheetId = sheet.sheetId || sheetUid(); RouteStore.sheetDate = sheet.sheetDate || '';
     RouteStore.audit = sheet.audit || []; RouteStore.showCash = sheet.showCash !== false; RouteStore.showCheques = sheet.showCheques !== false; RouteStore.showTransfers = sheet.showTransfers !== false;
     RouteStore.oldDecisions = sheet.oldDecisions || {}; RouteStore.published = sheet.published || null;
   },
@@ -1264,7 +1265,7 @@ const Publisher = {
     if (external) add('ok', 'Despacho tercerizado: no requiere responsable de app');
     else add(resp.length ? 'ok' : 'err', resp.length ? 'Responsable compatible disponible' : 'Sin responsable compatible');
     add(rows.length ? 'ok' : 'err', rows.length + ' entrega(s)');
-    if (bad.length) add('err', bad.length + ' pedido(s) con montos/documentos, financiación o NOC por revisar');
+    if (bad.length) this.reasons(bad).forEach(x => add('err', x.orders.length + ' pedido(s) · ' + x.text + ' (' + x.orders.join(', ') + ')'));
     // Borradores de la versión anterior: pedidos de una ubicación interna cargados como filas sueltas → hay que rehacerlos como UNA parada
     const legacyLoc = rows.filter(r => (!r.stopType || r.stopType === 'PEDIDO') && (r.internalLocationKey || r.locationGroup));
     if (legacyLoc.length) add('err', legacyLoc.length + ' pedido(s) quedaron como paradas sueltas de una ubicación interna (versión anterior): quitalos y volvé a cargarlos desde la ubicación (una sola parada)');
@@ -1278,10 +1279,50 @@ const Publisher = {
     const level = items.some(i => i[0] === 'err') ? 'REVISAR' : items.some(i => i[0] === 'warn') ? 'LISTO CON ADVERTENCIAS' : 'LISTO';
     return { level: level === 'REVISAR' ? 'REVISAR' : level === 'LISTO' ? 'LISTO' : 'WARN', label: level, items };
   },
-  // Panel de pendientes (se abre tocando REVISAR): motivo de cada pedido y cómo resolverlo ahí mismo
+  // Motivo concreto de cada pedido pendiente y cómo resolverlo (reemplaza el mensaje genérico de montos/documentos/financiación/NOC)
+  reasonOf(i) {
+    if (SALDO_AUSENTE.has(i.code)) return 'saldo no encontrado en el informe: cargá el importe';
+    if (i.text === 'Forma de pago a revisar.') return 'forma de pago a completar';
+    if (i.text === 'Falta transportista.') return 'falta transportista';
+    if (canAck(i)) return (i.code === 'REVISAR' ? (i.text || 'revisar').replace(/\.$/, '') : i.code.toLowerCase()) + ': revisalo y marcá Revisado';
+    return i.code.toLowerCase() + ': resolvelo en la fila del pedido';
+  },
+  reasons(bad) {
+    const by = new Map();
+    bad.forEach(r => {
+      const probs = baseStatus(r).issues.filter(i => i.level === 'error' || i.level === 'warn');
+      const list = probs.length ? [...new Set(probs.map(i => this.reasonOf(i)))] : ['sin monto a cobrar: cargá el importe'];
+      list.forEach(t => { if (!by.has(t)) by.set(t, []); by.get(t).push(r.mainOrder || r.shipOrder || '—'); });
+    });
+    return [...by.entries()].map(([t, o]) => ({ text: t, orders: o }));
+  },
+  blockFor(ctx, bad) {
+    const { carrier, names, external, resp } = ctx;
+    return !carrier ? (names.length > 1 ? 'La hoja tiene pedidos de varios transportistas (' + names.join(', ') + '). Prepará una hoja por transportista.' : 'El transportista "' + (names[0] || '') + '" no está dado de alta.')
+      : (!external && !resp.length) ? 'No hay usuarios activos compatibles con ' + carrier.name + '.'
+      : bad.length ? 'Falta resolver ' + bad.length + ' pedido(s) antes de publicar: ' + bad.map(r => (r.mainOrder || r.shipOrder) + ' (' + this.reasons([r]).map(x => x.text.split(':')[0]).join('; ') + ')').join(' · ') + '.' : '';
+  },
+  readyHtml(ready, bad) {
+    return '<div class="ready ' + ready.level + '" id="pubReady"' + (bad.length ? ' role="button" tabindex="0" title="Pendientes: se resuelven acá abajo"' : '') + '><b>' + ready.label + '</b>' +
+      (bad.length ? ' <span class="pendhint">· ' + bad.length + ' pendiente(s) — resolvelos acá abajo</span>' : '') + '<ul>' + ready.items.map(i => '<li class="' + i[0] + '">' + esc(i[1]) + '</li>').join('') + '</ul></div>';
+  },
+  // Actualiza la ventana EN EL LUGAR (resumen, panel, mensaje de bloqueo y PUBLICAR) sin cerrarla ni volver a detectar NOC
+  refreshInPlace(m) {
+    const ctx = m._ctx; if (!ctx) return;
+    CalculationEngine.computeAll(RouteStore.rows);
+    const rows = this.rows(), bad = this.problems(), ready = this.readiness(rows, ctx.carrier, ctx.resp, bad, ctx.vehicles, ctx.external), block = this.blockFor(ctx, bad);
+    const rd = m.querySelector('#pubReady'); if (rd) rd.outerHTML = this.readyHtml(ready, bad);
+    const pp = m.querySelector('#pubPend'), html = this.pendingHtml(bad);
+    if (pp) { if (html) pp.outerHTML = html; else pp.remove(); } else if (html) m.querySelector('#pubReady').insertAdjacentHTML('afterend', html);
+    const pb = m.querySelector('#pubBlock'); if (pb) { pb.textContent = block; pb.hidden = !block; }
+    m.dataset.baseBlocked = (block || ready.level === 'REVISAR') ? '1' : '0';
+    const go = m.querySelector('#pubGo'); if (go) go.disabled = m.dataset.baseBlocked === '1';
+    this.nocGate(m); this.bindPending(m);
+  },
+  // Panel de pendientes (DESPLEGADO al abrir): motivo de cada pedido y cómo resolverlo ahí mismo
   pendingHtml(bad) {
     if (!bad.length) return '';
-    return '<div class="pendpanel" id="pubPend"' + (this._pendOpen ? '' : ' hidden') + '><b>PENDIENTES (' + bad.length + ')</b>' + bad.map(r => {
+    return '<div class="pendpanel" id="pubPend"' + (this._pendOpen === false ? ' hidden' : '') + '><b>PENDIENTES (' + bad.length + ')</b>' + bad.map(r => {
       const st = baseStatus(r), probs = st.issues.filter(i => i.level === 'error' || i.level === 'warn');
       const absent = r.monto == null || probs.some(i => SALDO_AUSENTE.has(i.code)) || manualSaldoOk(r);
       const pay = probs.some(i => i.text === 'Forma de pago a revisar.'), payShip = r.hasShip && r.payShip === 'REVISAR';
@@ -1302,7 +1343,8 @@ const Publisher = {
     const ready = m.querySelector('#pubReady'), panel = m.querySelector('#pubPend'); if (!panel) return;
     const toggle = () => { panel.hidden = !panel.hidden; this._pendOpen = !panel.hidden; };
     ready.addEventListener('click', toggle); ready.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
-    const refresh = async () => { CalculationEngine.computeAll(RouteStore.rows); RouteStore.save(); if (typeof UI !== 'undefined' && UI.renderTable) UI.renderTable(); this._pendOpen = true; m.remove(); await this.open(); };
+    // se guarda, se actualiza la tabla y la ventana EN EL LUGAR (sin cerrarla): avisos, contador y PUBLICAR al instante
+    const refresh = async () => { CalculationEngine.computeAll(RouteStore.rows); RouteStore.save(); if (typeof UI !== 'undefined' && UI.renderTable) UI.renderTable(); this._pendOpen = true; this.refreshInPlace(m); };
     panel.querySelectorAll('.pendrow').forEach(el => {
       const row = RouteStore.find(el.dataset.pid), er = el.querySelector('[data-perr]'), fail = t => { er.textContent = t; er.hidden = false; };
       if (!row) return;
@@ -1356,18 +1398,15 @@ const Publisher = {
     await FinancingPlans.forClients(rows.filter(r => (!r.stopType || r.stopType === 'PEDIDO')).map(rowKey)); // espera la sincronización de financiación pendiente
     const ready = this.readiness(rows, carrier, resp, bad, vehicles, external);
     const nocInfo = await this.nocDetect(rows); // estado REAL de cada NOC en el servidor (nunca solo el Excel)
-    const blockMsg = !carrier ? (names.length > 1 ? 'La hoja tiene pedidos de varios transportistas (' + names.join(', ') + '). Prepará una hoja por transportista.' : 'El transportista "' + (names[0] || '') + '" no está dado de alta.')
-      : (!external && !resp.length) ? 'No hay usuarios activos compatibles con ' + carrier.name + '.'
-      : bad.length ? 'Hay ' + bad.length + ' pedido(s) con revisión pendiente o sin monto: ' + bad.map(r => r.mainOrder || r.shipOrder).join(', ') + '.' : '';
+    const blockMsg = this.blockFor({ carrier, names, external, resp }, bad);
     const title = external ? 'DESPACHAR E IMPRIMIR' : 'PUBLICAR HOJA';
     m.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"><header><b>' + title + '</b></header><div class="body">' +
       '<p>Transportista: <b>' + esc(carrier ? carrier.name : (names.join(', ') || '—')) + '</b> · ' + rows.length + ' entregas</p>' +
       (external ? '<p>Al confirmar, la hoja quedará registrada como <b>despachada al transporte tercerizado</b>, contará en Informes → Otros transportistas, se guardará el PDF y se abrirá la impresión.</p>' : '') +
       (!external && resp.length ? '<label>Responsable <select class="ed" id="pubResp">' + resp.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select></label>' : '') +
       (carrier && carrier.kind === 'INTERNO' && vehicles.length ? '<label>Vehículo (obligatorio) <select class="ed" id="pubVeh">' + vehicles.map(v => '<option value="' + v.id + '">' + esc(v.name + ' · ' + v.plate) + '</option>').join('') + '</select></label>' : '') +
-      (blockMsg ? '<p class="shiperr" id="pubBlock">' + esc(blockMsg) + '</p>' : '') +
-      '<div class="ready ' + ready.level + '" id="pubReady"' + (bad.length ? ' role="button" tabindex="0" title="Tocá para ver y resolver los pendientes"' : '') + '><b>' + ready.label + '</b>' +
-        (bad.length ? ' <span class="pendhint">· ' + bad.length + ' pendiente(s) — tocá para resolverlos acá</span>' : '') + '<ul>' + ready.items.map(i => '<li class="' + i[0] + '">' + esc(i[1]) + '</li>').join('') + '</ul></div>' +
+      '<p class="shiperr" id="pubBlock"' + (blockMsg ? '' : ' hidden') + '>' + esc(blockMsg) + '</p>' +
+      this.readyHtml(ready, bad) +
       this.pendingHtml(bad) +
       '<div class="bulwrap"><table class="bultab"><thead><tr><th>PARADA</th><th>BULTOS</th></tr></thead><tbody>' + rows.map((r, i) => '<tr><td>' + esc(r.cliente) + ' <small>' + esc(r.mainOrder || '') + '</small></td><td><input class="ed" data-bul="' + i + '" inputmode="numeric" placeholder="opcional" value="' + (Number.isInteger(parseInt(r.bultos, 10)) && parseInt(r.bultos, 10) >= 0 ? parseInt(r.bultos, 10) : '') + '"></td></tr>').join('') +
       '</tbody></table><p class="sheetsum" id="pubSum">' + sheetSummary(rows) + '</p></div>' +
@@ -1385,6 +1424,7 @@ const Publisher = {
     if (rs) rs.addEventListener('change', habitual); habitual();
     if (ready.level === 'REVISAR') m.querySelector('#pubGo').disabled = true;
     m.dataset.baseBlocked = m.querySelector('#pubGo').disabled ? '1' : '0';
+    m._ctx = { carrier, names, external, resp, vehicles }; this._pendOpen = undefined;
     this.bindPending(m);
     this.bindNoc(m, rows);
     const rt = m.querySelector('#pubRetry');
@@ -1727,6 +1767,15 @@ function setManualAmount(row, raw) {
   if (ok && !had) RouteStore.log({ tipo: 'saldo revisado por importe manual', pedido: row.mainOrder, importe: Number(v) });
   Money.apply(row);
   return ok;
+}
+// Borradores anteriores a V4.11: el importe manual se guardaba sin la marca saldoRevisado. montoManual solo lo pone una acción
+// EXPLÍCITA del operador (escribir el importe o elegir un saldo); un campo vacío quedaba en null. Se reconoce como revisado y se registra.
+function migrateLegacySaldo(r) {
+  if (!r || r.saldoRevisado || !r.montoManual) return false;
+  const v = r.montoMercaderiaManual;
+  if (v == null || !Number.isFinite(Number(v)) || Number(v) < 0) return false;   // vacío o inválido: no se aprueba
+  r.saldoRevisado = { amount: Number(v), at: new Date().toISOString(), origen: 'importe manual guardado en una versión anterior' };
+  return true;
 }
 function rowIssues(row) {
   let list = [].concat(row.linkFlags || [], (row.calc && row.calc.flags) || []);

@@ -305,3 +305,41 @@ Cambios solo en `bindNoc` (`public/legacy/despacho-v15.js`):
 - importes enviados siempre exactos.
 
 Se conservan los cambios anteriores. Sin cambios en Supabase ni permisos; no se publicó.
+
+## V4.14: "saldo no encontrado" del caso real (Hoja 21)
+**Causa encontrada** (reproducida con un borrador hecho con el constructor anterior y reabierto con V4.13, también con los Excel reales en una carpeta temporal):
+1. **Borradores anteriores a V4.11:** el importe manual quedaba guardado (`montoManual`) pero **sin la marca `saldoRevisado`**, que recién existe desde V4.11.
+   - Al reabrir con V4.13 el pedido seguía en "saldo no encontrado" o "sin comprobante", aunque el importe se viera en el campo.
+   - Entrar al campo y salir sin tipear no lo guardaba de nuevo.
+2. **Ventana de publicación:** aunque el saldo quedara resuelto, el operador no podía terminar ahí.
+   - El panel REVISAR arrancaba **plegado**.
+   - El resumen mostraba el mensaje **genérico** ("montos/documentos, financiación o NOC").
+   - Al guardar, la ventana se **cerraba y volvía a abrir**.
+   - Además, el pedido tenía **otros motivos independientes** (envío no encontrado y forma de pago) que no se veían.
+
+No era caché ni falta de publicación: ocurre con V4.13 publicada.
+
+**Corrección** (`public/legacy/despacho-v15.js`):
+- **Borradores anteriores:** al cargar cualquier borrador (inicio, cambio de pestaña, ABRIR BORRADOR o reapertura), un importe manual **explícito y válido** sin la marca se reconoce como saldo revisado. Queda con su origen y en el historial. Vacío o inválido: no se aprueba.
+- **Panel REVISAR desplegado** al intentar publicar, con el campo del importe actual y GUARDAR IMPORTE en "saldo no encontrado".
+- **Actualización en el lugar** (sin cerrar la ventana) del resumen, los motivos, el contador, el mensaje de bloqueo y PUBLICAR.
+- **Motivos concretos** por pedido ("saldo no encontrado: cargá el importe", "envío no encontrado: revisalo y marcá Revisado", "forma de pago a completar") en lugar del mensaje genérico.
+- **Tabla y panel** usan la misma función (`setManualAmount`): mismo resultado.
+
+**Pruebas** (sintéticas, solo clics y campos reales; sin asignar `saldoRevisado`):
+
+| Prueba | Resultado | Exit |
+|---|---|---|
+| `run_saldo_borrador_antiguo.py` (nueva) | 11/11 | 0 |
+| La misma prueba sobre V4.13: importe antiguo no reconocido, panel plegado, mensaje genérico | detecta | 2 |
+| `run_saldo_revisar_noc.py` (REV-01 actualizado: el panel ahora arranca desplegado) | 14/14 | 0 |
+| `run_noc_decimales.py` | 8/8 | 0 |
+| `run_noc_robustez.py` | 8/8 | 0 |
+| Build de producción + guardián | OK | 0 |
+
+`run_saldo_borrador_antiguo.py` cubre:
+- borrador antiguo → PUBLICAR → saldo no encontrado → GUARDAR IMPORTE en REVISAR (el inválido se rechaza) → motivo y contador quitados en la misma ventana → resolver lo independiente → PUBLICAR;
+- edición desde la tabla con el mismo resultado (vacío no se aprueba);
+- persistencia al reabrir.
+
+Se requiere `OKD_PREV_DIST` (build demo anterior a V4.11). Bultos opcionales y correcciones de NOC sin cambios. Sin cambios en Supabase, permisos ni migraciones; no se publicó.
