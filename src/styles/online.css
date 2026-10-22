@@ -794,3 +794,6 @@ body:has(.drv-stop .drv-form:not([hidden])) .drv-foot{position:static}
 .pendctl .ed{min-width:140px}.pendctl small{color:#5d6b73;flex-basis:100%}
 .nocwhy{display:block;color:#8a5a00;font-size:12px}
 tr.main-row.flash{outline:3px solid #16d6e5}
+/* Foto del DNI (V4.16): estado del procesamiento y vista previa CONTENIDA (antes se mostraba a 1600 px y desbordaba la pantalla) */
+#drv .drv-dnist{display:block;font-size:12.5px;font-weight:700;color:#0b6b52;margin-top:4px}
+#drv .drv-dniprev{display:block;max-width:100%;width:auto;max-height:150px;object-fit:contain;border-radius:10px;border:1px solid #dbe4e8;margin:6px 0 2px;background:#fff}

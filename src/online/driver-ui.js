@@ -7,6 +7,9 @@ import { byOrder, currentStop, futureStops } from '../../supabase/functions/_sha
 import { passkeysSupported } from './webauthn.js';
 
 const OUT = { ENTREGADO: 'ENTREGADO', ENTREGA_PARCIAL: 'ENTREGA PARCIAL', NO_ENTREGADO: 'NO ENTREGADO', REPROGRAMAR: 'REPROGRAMAR' };
+// Perfil del chofer por la CONFIGURACIÓN del transportista de la hoja (carriers.kind), nunca por nombres:
+// EXTERNO (p. ej. Cristian Torres): sin LLEGADA A DESTINO · INTERNO (p. ej. Gabriel Figueroa): con LLEGADA A DESTINO.
+const isInternal = r => r && r.carrier_kind === 'INTERNO';
 // Resultados por tipo: TAREA (operativa) y UBICACIÓN INTERNA (traslado entre sucursales) no son entregas al cliente
 const outLabel = (s, k) => s && s.stop_type === 'TAREA'
   ? ({ ENTREGADO: 'REALIZADO', ENTREGA_PARCIAL: 'REALIZADO PARCIAL', NO_ENTREGADO: 'NO REALIZADO', REPROGRAMAR: 'REPROGRAMAR' }[k] || OUT[k])
@@ -14,7 +17,7 @@ const outLabel = (s, k) => s && s.stop_type === 'TAREA'
     ? ({ ENTREGADO: 'RECIBIDO EN SUCURSAL', ENTREGA_PARCIAL: 'RECEPCIÓN PARCIAL', NO_ENTREGADO: 'NO RECIBIDO', REPROGRAMAR: 'REPROGRAMAR' }[k] || OUT[k])
     : OUT[k];
 // Contadores GENERALES de una hoja: en Transporte Interno se mezclan traslados, tareas y entregas → "paradas". Externos: "entregas".
-const stopNoun = (r, n) => (r && r.carrier_id === 'INTERNO') ? (n === 1 ? 'parada' : 'paradas') : (n === 1 ? 'entrega' : 'entregas');
+const stopNoun = (r, n) => isInternal(r) ? (n === 1 ? 'parada' : 'paradas') : (n === 1 ? 'entrega' : 'entregas');
 // Observación / instrucciones de la parada (TAREA, UBICACIÓN INTERNA y paradas agregadas por el chofer)
 const stopInfo = s => {
   const contact = [s.contact_name, s.contact_phone].filter(Boolean).join(' · ');
@@ -33,19 +36,65 @@ const day = iso => iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/A
 const hhmm = iso => iso ? new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
 const offline = e => e && (e.code === 'OFFLINE' || e.status === 0);
 // Foto DNI: comprimir en el celular sin librerías extras (máx. 1200 px, JPEG).
-async function shrink(f) {
-  const b64 = async blob => { const u = new Uint8Array(await blob.arrayBuffer()); let t = ''; for (let i = 0; i < u.length; i += 0x8000) t += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(t); };
+// Foto del DNI liviana SIN picos de memoria (V4.16). Causa del "memoria insuficiente": se decodificaba la foto ORIGINAL a resolución
+// completa (createImageBitmap sin tamaño) y después se copiaba a base64 por concatenación de texto; si fallaba, se pasaba a base64 el
+// archivo original entero. Ahora: se pide al navegador decodificarla YA REDUCIDA (resizeWidth), un solo canvas chico, JPEG 0,75 con
+// el lado mayor en 1600 px, se devuelve un Blob (nunca base64) y se liberan bitmap y canvas siempre.
+// Dimensiones desde el ENCABEZADO del archivo (JPEG/PNG), sin decodificar la imagen. null si no se pueden leer.
+export async function imageDims(f) {
   try {
-    const bmp = await createImageBitmap(f), k = Math.min(1, 1200 / Math.max(bmp.width, bmp.height));
-    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
-    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    bmp.close(); // liberar memoria inmediatamente en dispositivos antiguos
-    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.72));
-    c.width = 0; c.height = 0;
-    if (!blob) throw new Error('No se pudo comprimir la foto del DNI.');
-    return { b64: await b64(blob), mime: 'image/jpeg', size: blob.size };
-  } catch (e) { return { b64: await b64(f), mime: f.type, size: f.size }; }
+    const b = new Uint8Array(await f.slice(0, 512 * 1024).arrayBuffer());
+    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) {   // PNG: IHDR
+      const v = (o) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0; return { w: v(16), h: v(20) };
+    }
+    if (b[0] === 0xFF && b[1] === 0xD8) {   // JPEG: primer SOFn
+      let o = 2;
+      while (o + 9 < b.length) {
+        if (b[o] !== 0xFF) { o++; continue; }
+        const m = b[o + 1]; if (m === 0xD8 || m === 0x01 || (m >= 0xD0 && m <= 0xD7)) { o += 2; continue; }
+        const len = (b[o + 2] << 8) | b[o + 3];
+        if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) return { h: (b[o + 5] << 8) | b[o + 6], w: (b[o + 7] << 8) | b[o + 8] };
+        o += 2 + len;
+      }
+    }
+  } catch (e) { }
+  return null;
 }
+// Foto del DNI liviana SIN picos de memoria (V4.16/V4.17). Causa del "memoria insuficiente": se decodificaba la foto ORIGINAL a resolución
+// completa y se copiaba a base64. Ahora se decodifica YA REDUCIDA (lado mayor 1600 px), un solo canvas chico, JPEG 0,75, Blob (sin base64).
+// V4.17: NUNCA se vuelve a abrir el original sin límites. Solo una imagen con dimensiones CONOCIDAS (leídas del encabezado) y chicas
+// (≤ 1600 px por lado) se decodifica entera; el peso del archivo no decide (una imagen de pocos KB puede tener dimensiones enormes).
+export async function processDniPhoto(f, opts = {}) {
+  const MAX = opts.max || 1600, Q = opts.quality || 0.75, t0 = (globalThis.performance || Date).now();
+  if (!f || !/^image\//i.test(f.type || '')) throw new Error('el archivo no es una imagen');
+  const dims = await imageDims(f), small = !!(dims && dims.w > 0 && dims.h > 0 && dims.w <= MAX && dims.h <= MAX);
+  let bmp = null, c = null;
+  try {
+    if (small) bmp = await createImageBitmap(f);   // chica y con tamaño conocido: decodificarla entera no genera un pico
+    else {
+      const k = dims && dims.w > 0 && dims.h > 0 ? MAX / Math.max(dims.w, dims.h) : null;
+      const o = k ? { resizeWidth: Math.max(1, Math.round(dims.w * k)), resizeHeight: Math.max(1, Math.round(dims.h * k)), resizeQuality: 'medium' } : { resizeWidth: MAX, resizeQuality: 'medium' };
+      try { bmp = await createImageBitmap(f, o); }
+      catch (e) { throw new Error('este celular no pudo reducir la foto; no se abre la original completa para no agotar la memoria'); }
+    }
+    const k2 = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
+    c = document.createElement('canvas'); c.width = Math.max(1, Math.round(bmp.width * k2)); c.height = Math.max(1, Math.round(bmp.height * k2));
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const w = c.width, h = c.height; bmp.close(); bmp = null;
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', Q));
+    if (!blob) throw new Error('no se pudo generar la imagen');
+    return { blob, mime: 'image/jpeg', size: blob.size, w, h, original: f.size, srcW: dims ? dims.w : null, srcH: dims ? dims.h : null, ms: Math.round((globalThis.performance || Date).now() - t0) };
+  } finally { if (bmp) bmp.close(); if (c) { c.width = 0; c.height = 0; } }
+}
+// Fotos de la cola SIN CONEXIÓN: Blob en IndexedDB (no base64 en localStorage, que se llenaba y fallaba en silencio)
+const BLOBS = {
+  _db: null,
+  open() { return this._db || (this._db = new Promise((ok, ko) => { const q = indexedDB.open('okd_drv_blobs', 1); q.onupgradeneeded = () => q.result.createObjectStore('b'); q.onsuccess = () => ok(q.result); q.onerror = () => ko(q.error); })); },
+  async put(k, v) { const d = await this.open(); return new Promise((ok, ko) => { const t = d.transaction('b', 'readwrite'); t.objectStore('b').put(v, k); t.oncomplete = () => ok(true); t.onerror = () => ko(t.error); }); },
+  async get(k) { const d = await this.open(); return new Promise((ok, ko) => { const q = d.transaction('b').objectStore('b').get(k); q.onsuccess = () => ok(q.result || null); q.onerror = () => ko(q.error); }); },
+  async del(k) { const d = await this.open(); return new Promise(ok => { const t = d.transaction('b', 'readwrite'); t.objectStore('b').delete(k); t.oncomplete = () => ok(true); t.onerror = () => ok(false); }); }
+};
+const kb = n => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 
 export class DriverApp {
   constructor(api, me, onLogout, opts = {}) {
@@ -55,7 +104,19 @@ export class DriverApp {
     this.tab = 'HOY'; this.openId = null; this.conn = 'live'; this.known = new Set(this.routes.map(r => r.id));
   }
   _ls(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }
-  _sv(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
+  _sv(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  // antes de dejar una entrega en la cola: la foto del DNI pasa a IndexedDB y en la cola queda solo su referencia
+  async _stash(op) {
+    const ev = op.kind === 'outcome' && op.args.extra && op.args.extra.evidence;
+    if (ev && ev.dni_upload && ev.dni_upload.blob) { const k = 'dni:' + op.op_id; await BLOBS.put(k, ev.dni_upload.blob);
+      ev.dni_blob = { key: k, mime: ev.dni_upload.mime, size: ev.dni_upload.size }; delete ev.dni_upload; }
+  }
+  async _enqueue(op) {
+    try { await this._stash(op); } catch (e) { this.toast('No se pudo guardar la foto en el celular: liberá espacio y reintentá. Los datos cargados se conservan.'); return false; }
+    this.queue.push(op);
+    if (!this._sv(this.kQ, this.queue)) { this.queue.pop(); this.toast('No se pudo guardar el cambio en el celular. Los datos cargados se conservan: reintentá.'); return false; }
+    this._applyLocal(op); this._sv(this.kC, this.routes); this.render(); return true;
+  }
   start() {
     const top = document.querySelector('#noPanel .top');
     const chip = document.getElementById('np-who');
@@ -161,10 +222,10 @@ export class DriverApp {
   // Acción: primero se guarda localmente; si no hay conexión queda en cola
   async act(kind, args) {
     const op = { op_id: uid(), kind, args, offline: this.conn !== 'live' };
-    if (this.conn !== 'live') { this.queue.push(op); this._sv(this.kQ, this.queue); this._applyLocal(op); this._sv(this.kC, this.routes); this.render(); return true; }
+    if (this.conn !== 'live') return this._enqueue(op);
     try { await this._send(op); this._applyLocal(op); this._sv(this.kC, this.routes); await this.load(); return true; }
     catch (e) {
-      if (offline(e)) { this.setConn('off'); this.queue.push(op); this._sv(this.kQ, this.queue); this._applyLocal(op); this._sv(this.kC, this.routes); this.render(); return true; }
+      if (offline(e)) { this.setConn('off'); return this._enqueue(op); }
       this.toast(e.message); return false;
     }
   }
@@ -202,7 +263,7 @@ export class DriverApp {
     const r = this.routes.find(x => x.id === this.openId); if (!r) { this.openId = null; return this.render(); }
     const running = !this.readOnly && r.operational_status === 'EN_CURSO', closed = r.operational_status === 'COMPLETADA';
     const pend = r.stops.filter(s => s.outcome === 'PENDIENTE').length;
-    const internal = r.carrier_id === 'INTERNO' && running, cur = currentStop(r.stops), fut = futureStops(r.stops).map(s => s.id);
+    const internal = isInternal(r) && running, cur = currentStop(r.stops), fut = futureStops(r.stops).map(s => s.id);
     el.innerHTML = '<button class="linkbtn" type="button" id="drvBack">← Mis hojas</button><div class="drv-title">HOJA ' + esc(r.number) + ' · ' + esc(r.carrier_name || r.carrier_id) + '</div>' +
       '<div class="drv-m">' + r.stops.length + ' ' + stopNoun(r, r.stops.length) + ' · ' + this.badge(r)[0] + (r.started_at ? ' · iniciada ' + hhmm(r.started_at) : '') + (closed ? ' · finalizada ' + hhmm(r.completed_at) : '') + '</div>' +
       (r.approval_status === 'OBSERVADA' && r.review_note ? '<div class="drv-q">ACLARACIÓN SOLICITADA: ' + esc(r.review_note) + '</div>' : '') +
@@ -213,7 +274,7 @@ export class DriverApp {
         (s.location_warning ? '<small class="drv-note"><b>⚠ ' + esc(s.location_warning) + '</b></small>' : '') +
         (running ? '<div class="drv-acts">' + Object.keys(OUT).map(k => '<button type="button" class="btn drv-result-btn ' + (k === 'ENTREGADO' ? 'result-done' : k === 'ENTREGA_PARCIAL' ? 'result-partial' : k === 'NO_ENTREGADO' ? 'result-failed' : k === 'REPROGRAMAR' ? 'result-reschedule' : '') + (s.outcome === k ? ' selected' : '') + '" data-o="' + k + '">' + outLabel(s, k) + '</button>').join('') + '</div>' +
           '<div class="drv-form" hidden></div>' : '') +
-        (running && s.outcome === 'PENDIENTE' && cur && s.id === cur.id ? (s.arrived_at ? '<small class="drv-note">Llegada registrada ' + hhmm(s.arrived_at) + (s.arrive_location && s.arrive_location.missing_reason ? ' · sin ubicación' : '') + '</small>' : '<button class="btn soft drv-arrive" type="button" data-arrive>LLEGUÉ A LA PARADA</button>') : '') + '</div>').join('') +
+        (running && isInternal(r) && s.outcome === 'PENDIENTE' && cur && s.id === cur.id ? (s.arrived_at ? '<small class="drv-note">Llegada registrada ' + hhmm(s.arrived_at) + (s.arrive_location && s.arrive_location.missing_reason ? ' · sin ubicación' : '') + '</small>' : '<button class="btn soft drv-arrive" type="button" data-arrive>LLEGUÉ A LA PARADA</button>') : '') + '</div>').join('') +
       (internal ? '<button class="btn soft" type="button" id="drvAddOpen">+ AGREGAR PARADA</button><div class="drv-add" id="drvAdd" hidden><b class="drv-ft">NUEVA PARADA</b>' +
         '<div class="drv-type" role="radiogroup" aria-label="Tipo de parada"><b>TIPO DE PARADA</b><div class="drv-seg"><button type="button" class="btn dark" data-ntype="TAREA" aria-pressed="true">TAREA</button><button type="button" class="btn soft" data-ntype="UBICACION_INTERNA" aria-pressed="false">UBICACIÓN INTERNA</button></div></div>' +
         '<div data-nt="TAREA"><input class="ed" id="naName" placeholder="Destino / qué hay que hacer (obligatorio)"><input class="ed" id="naAddr" placeholder="Domicilio"></div>' +
@@ -307,6 +368,12 @@ export class DriverApp {
   async _sendOutcome(op) {
     const a = op.args, ev = a.extra && a.extra.evidence;
     if (ev && ev.dni_upload) { ev.dni_storage_path = await this.api.uploadIdentityDoc(ev.cuil, ev.dni_upload); delete ev.dni_upload; this._sv(this.kQ, this.queue); }
+    if (ev && ev.dni_blob) {   // foto guardada sin conexión (IndexedDB)
+      const blob = await BLOBS.get(ev.dni_blob.key);
+      if (!blob) throw Object.assign(new Error('La foto del DNI guardada en el celular no está disponible: volvé a cargar la entrega.'), { code: 'DNI_LOST' });
+      ev.dni_storage_path = await this.api.uploadIdentityDoc(ev.cuil, { blob, mime: ev.dni_blob.mime, size: ev.dni_blob.size });
+      const k = ev.dni_blob.key; delete ev.dni_blob; this._sv(this.kQ, this.queue); BLOBS.del(k);
+    }
     return this.api.setStopOutcome(a.stop, a.outcome, a.note, a.reason, op.op_id, a.extra);
   }
   canReturn(r) {
@@ -332,33 +399,37 @@ export class DriverApp {
       navigator.geolocation.getCurrentPosition(p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy }), ask, { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
     });
   }
-  // Resolver parada: receptor + firma (ENTREGADO/PARCIAL), CUIL/DNI (Cristian), cobranza (si corresponde), observación/motivo y ubicación final
+  // Resolver parada según su TIPO (stop_type), sin que el chofer elija formulario:
+  //  · PEDIDO (entrega comercial a un cliente): nombre y apellido + CUIL + foto del DNI + firma
+  //  · UBICACION_INTERNA (sucursal precargada, p. ej. Montecaseros / San Juan): nombre y apellido + firma (recepción interna)
+  //  · TAREA: sin receptor ni firma (observación opcional)
+  // Sin cobranza ni medio de pago: entregar NO es cobrar. Solo las hojas publicadas ANTES de este cambio con task COBRANZA/AMBAS
+  // la conservan, porque el servidor vigente todavía la exige ahí (cambio de servidor pendiente de aprobación).
   openForm(box, r, st, o) {
-    const form = box.querySelector('.drv-form'); form.hidden = false; form.dataset.o = o;
+    const form = box.querySelector('.drv-form'); if (form._release) form._release();   // cambiar de resultado libera la foto anterior
+    form.hidden = false; form.dataset.o = o;
     const type = st.stop_type || 'PEDIDO', task = type === 'TAREA', transfer = type === 'UBICACION_INTERNA', commercial = type === 'PEDIDO';
-    const delivered = o === 'ENTREGADO' || o === 'ENTREGA_PARCIAL', cristian = commercial && ['CT-ESTE', 'CT-ALR'].includes(r.carrier_id), cob = commercial && ['COBRANZA', 'AMBAS'].includes(st.task);
+    const delivered = o === 'ENTREGADO' || o === 'ENTREGA_PARCIAL', idReq = commercial;   // sin cobranza para ningún chofer (V4.16)
     // TAREA: sin firma ni receptor obligatorios (GPS + observación). Traslado interno: RECEPCIÓN INTERNA firmada por la sucursal (no es Recibido Conforme).
     const sign = delivered && !task;
     form.innerHTML = '<b class="drv-ft">' + outLabel(st, o) + '</b>' +
       (transfer && delivered ? '<div class="drv-rec"><b>RECEPCIÓN INTERNA DE TRASLADO</b><small>' + esc(st.client_name) + ((st.order_numbers || []).length ? ' · pedidos ' + esc(st.order_numbers.join(', ')) : '') + '</small></div>' : '') +
       (task && o === 'ENTREGADO' ? '<input class="ed" data-f="txt" placeholder="Observación (opcional)">' : '') +
-      (sign ? '<input class="ed" data-f="recv" placeholder="' + (transfer ? 'Nombre de quien recibe en la sucursal (obligatorio)' : 'Nombre de quien recibe (obligatorio)') + '"><div class="sigbox"><canvas width="600" height="240" data-sig></canvas><div class="sig-actions"><button type="button" class="btn soft" data-sigexpand>FIRMAR EN PANTALLA GRANDE</button><button type="button" class="linkbtn" data-sigclr>Borrar firma</button></div></div>' : '') +
-      // pedido comercial: CUIL/DNI (Cristian) y email del cliente (Recibido Conforme). Nunca en traslado interno ni en TAREA.
-      (sign && commercial ? (cristian ? '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') +
-        '<input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Email del receptor (obligatorio para Cristian)"><span class="drv-mailhint" data-mailhint></span>' : '') +
-      (cob ? '<div class="drv-cob"><b>COBRANZA</b>' + (st.expected_amount != null ? ' · esperado $ ' + Number(st.expected_amount).toLocaleString('es-AR') : '') +
-        '<select class="ed" data-f="cst"><option value="">Resultado de la cobranza…</option><option value="COBRADO">COBRADO</option><option value="COBRO_PARCIAL">COBRO PARCIAL</option><option value="NO_COBRADO">NO COBRADO</option></select>' +
-        '<input class="ed" data-f="camt" inputmode="decimal" placeholder="Importe cobrado"><select class="ed" data-f="cmode"><option value="">Modo de pago…</option><option>EFECTIVO</option><option>TRANSFERENCIA</option><option>CHEQUE</option></select><input class="ed" data-f="cnote" placeholder="Observación / motivo de la cobranza"></div>' : '') +
+      (sign ? '<input class="ed" data-f="recv" placeholder="' + (transfer ? 'Nombre y apellido de quien recibe en la sucursal (obligatorio)' : 'Nombre y apellido de quien recibe (obligatorio)') + '"><div class="sigbox"><canvas width="600" height="240" data-sig></canvas><div class="sig-actions"><button type="button" class="btn soft" data-sigexpand>FIRMAR EN PANTALLA GRANDE</button><button type="button" class="linkbtn" data-sigclr>Borrar firma</button></div></div>' : '') +
+      // entrega comercial: CUIL + foto del DNI (ambos transportistas). Nunca en sucursal/ubicación interna ni en TAREA.
+      (sign && idReq ? '<input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Email del receptor (obligatorio)"><span class="drv-mailhint" data-mailhint></span>' +
+        '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') +
       (o === 'ENTREGA_PARCIAL' ? '<input class="ed" data-f="txt" placeholder="Observación (obligatoria)">' : o !== 'ENTREGADO' ? '<input class="ed" data-f="txt" placeholder="Motivo (obligatorio)">' : '') +
       '<button class="btn dark" type="button" data-save>GUARDAR</button><span class="shiperr" hidden></span>';
     const er = form.querySelector('.shiperr'), fail = t => { er.textContent = t; er.hidden = false; };
+    form.addEventListener('input', () => { er.hidden = true; });   // el aviso se oculta apenas se corrige un dato
     // firma táctil
     const cv = form.querySelector('[data-sig]'); let drawn = false;
     if (cv) { const ctx = cv.getContext('2d'); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#000E18'; let down = false;
       const pos = e => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left) * cv.width / b.width, (e.clientY - b.top) * cv.height / b.height]; };
       cv.onpointerdown = e => { down = true; cv.setPointerCapture(e.pointerId); ctx.beginPath(); ctx.moveTo(...pos(e)); };
       cv.onpointermove = e => { if (!down) return; ctx.lineTo(...pos(e)); ctx.stroke(); drawn = true; };
-      cv.onpointerup = () => { down = false; };
+      cv.onpointerup = () => { down = false; keep(); };
       const origin = cv.parentElement;
       const expand = form.querySelector('[data-sigexpand]');
       let modal = null;
@@ -385,29 +456,50 @@ export class DriverApp {
     // Autocompletar con el perfil reutilizable (CUIL → DNI → cliente). Sin conexión, simplemente no se completa.
     const em = form.querySelector('[data-f="email"]'), hint = form.querySelector('[data-mailhint]'), rv = form.querySelector('[data-f="recv"]');
     const fill = async cuil => {
-      if (!em || !this.api.deliveryIdentityLookup) return;
+      if (!this.api.deliveryIdentityLookup || (!em && !cuil)) return;
       const p = await this.api.deliveryIdentityLookup(st.id, cuil || null).catch(() => null);
       if (!p) return;
-      if (p.email && (!em.value || em.dataset.auto === '1')) { em.value = p.email; em.dataset.auto = '1'; hint.textContent = 'Email recuperado del cliente (podés corregirlo)'; }
+      if (em && p.email && (!em.value || em.dataset.auto === '1')) { em.value = p.email; em.dataset.auto = '1'; hint.textContent = 'Email recuperado del cliente (podés corregirlo)'; }
       if (p.full_name && rv && !rv.value) rv.value = p.full_name;
     };
     if (em) { em.oninput = () => { em.dataset.auto = ''; hint.textContent = ''; }; fill(null); }
     // DNI: si el CUIL ya tiene DNI no se pide foto
-    let dni = null; let dniRegistered = false; const cu = form.querySelector('[data-f="cuil"]');
+    // DNI: si el CUIL ya tiene DNI registrado, se reutiliza (no se pide foto). Foto nueva: se procesa al aceptarla, con vista previa
+    let dni = null, dniRegistered = false, dniBusy = false, dniTok = 0, prevUrl = null; const cu = form.querySelector('[data-f="cuil"]'), saveBtn = form.querySelector('[data-save]');
+    const release = () => { if (prevUrl) { URL.revokeObjectURL(prevUrl); prevUrl = null; } };
+    form._release = () => { dniTok++; release(); dni = null; };   // cancelar/cerrar: libera la vista previa y descarta resultados en curso
     if (cu) cu.onchange = async () => {
       const n = cu.value.replace(/\D/g, ''), box2 = form.querySelector('[data-dni]');
       if (n.length !== 11) { box2.textContent = 'El CUIL debe tener 11 dígitos.'; return; }
-      fill(n);
+      fill(n); keep();
       dniRegistered = false;
       const has = await this.api.cuilHasDni(n).catch(() => false);
       dniRegistered = has;
-      box2.innerHTML = has ? '✓ DNI YA REGISTRADO' : 'CUIL nuevo · foto del DNI (obligatoria, JPEG/PNG hasta 5 MB) <input type="file" accept="image/jpeg,image/png" capture="environment" data-dnifile>';
-      const fi = box2.querySelector('[data-dnifile]');
-      if (fi) fi.onchange = async () => { dni = null; const f = fi.files[0]; if (!f) return;
-        if (!['image/jpeg', 'image/png'].includes(f.type)) { fail('La foto del DNI debe ser JPEG o PNG.'); fi.value = ''; return; }
-        if (f.size > 5242880) { fail('La foto del DNI supera 5 MB.'); fi.value = ''; return; }
-        dni = await shrink(f); er.hidden = true; };
+      form._release(); dniBusy = false; saveBtn.disabled = false;
+      box2.innerHTML = has ? '✓ DNI YA REGISTRADO (se reutiliza la identidad)' : 'CUIL nuevo · foto del DNI (obligatoria) <input type="file" accept="image/jpeg,image/png" capture="environment" data-dnifile><span class="drv-dnist" data-dnist></span><img class="drv-dniprev" data-dniprev alt="Vista previa del DNI" hidden>';
+      const fi = box2.querySelector('[data-dnifile]'), stt = box2.querySelector('[data-dnist]'), prev = box2.querySelector('[data-dniprev]');
+      if (fi) fi.onchange = async () => {
+        const f = fi.files[0], tok = ++dniTok; dni = null; release(); prev.hidden = true;
+        if (!f) { stt.textContent = ''; return; }
+        dniBusy = true; saveBtn.disabled = true; stt.textContent = 'Procesando foto…'; er.hidden = true;
+        try {
+          const p = await processDniPhoto(f);
+          if (tok !== dniTok) return;   // la reemplazaron mientras se procesaba: este resultado se descarta
+          if (p.size > 5242880) throw new Error('la imagen procesada supera 5 MB');
+          dni = p; prevUrl = URL.createObjectURL(p.blob); prev.src = prevUrl; prev.hidden = false;
+          stt.textContent = '✓ Foto lista · ' + kb(p.original) + ' → ' + kb(p.size) + ' (' + p.w + '×' + p.h + ')';
+        } catch (e) {
+          if (tok === dniTok) { stt.textContent = ''; fail('No se pudo procesar la foto del DNI: ' + (e.message || e) + '. Nombre, email, CUIL y firma se conservan: volvé a sacar la foto (si se repite, bajá la resolución de la cámara).'); }
+        } finally { if (tok === dniTok) { dniBusy = false; saveBtn.disabled = false; } fi.value = ''; }   // se suelta el archivo original
+      };
     };
+    // Los datos cargados sobreviven a una recarga (p. ej. Android cerró la página al volver de la cámara) y a un fallo de la foto
+    const draftKey = 'okd_drv_form:' + st.id + ':' + o;
+    function keep() { try { sessionStorage.setItem(draftKey, JSON.stringify({ recv: rv ? rv.value : '', email: em ? em.value : '', cuil: cu ? cu.value : '', sig: cv && drawn ? cv.toDataURL('image/png') : null })); } catch (e) { } }
+    form.addEventListener('input', keep);
+    try { const d = JSON.parse(sessionStorage.getItem(draftKey) || 'null');
+      if (d) { if (rv && d.recv) rv.value = d.recv; if (em && d.email) { em.value = d.email; em.dataset.auto = ''; } if (cu && d.cuil) { cu.value = d.cuil; cu.onchange(); }
+        if (cv && d.sig) { const im = new Image(); im.onload = () => { cv.getContext('2d').drawImage(im, 0, 0); drawn = true; }; im.src = d.sig; } } } catch (e) { }
     form.querySelector('[data-save]').onclick = async ev => {
       er.hidden = true;
       const txt = (form.querySelector('[data-f="txt"]') || {}).value; const extra = {};
@@ -418,24 +510,21 @@ export class DriverApp {
         if (!recv) return fail(transfer ? 'Indicá quién recibe en la sucursal.' : 'Indicá el nombre de quien recibe.');
         if (!drawn) return fail(transfer ? 'Falta la firma de quien recibe en la sucursal.' : 'Falta la firma de quien recibe.');
         extra.evidence = { receiver_name: recv, signature_png_b64: cv.toDataURL('image/png').split(',')[1] };
-        if (cristian) { const n = cu.value.replace(/\D/g, ''); if (n.length !== 11) return fail('El CUIL debe tener 11 dígitos.'); if (!dniRegistered && !dni) return fail('La foto del DNI es obligatoria para un CUIL nuevo.'); extra.evidence.cuil = n; if (dni) extra.evidence.dni_upload = dni; }
         const mail = em ? em.value.trim().toLowerCase() : '';
-        if (cristian && !mail) return fail('El email del receptor es obligatorio para Cristian Torres.');
+        if (idReq && !mail) return fail('El email del receptor es obligatorio.');
         if (mail && !/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(mail)) return fail('El email del receptor no es válido.');
+        if (idReq) { const n = cu.value.replace(/\D/g, ''); if (n.length !== 11) return fail('El CUIL debe tener 11 dígitos.');
+          if (dniBusy) return fail('Esperá a que termine de procesarse la foto del DNI.');
+          if (!dniRegistered && !dni) return fail('La foto del DNI es obligatoria para un CUIL nuevo.'); extra.evidence.cuil = n; if (dni) extra.evidence.dni_upload = { blob: dni.blob, mime: dni.mime, size: dni.size }; }
         if (mail) extra.evidence.email = mail;
-      }
-      if (cob) {
-        const cst = form.querySelector('[data-f="cst"]').value, amt = form.querySelector('[data-f="camt"]').value.replace(/\./g, '').replace(',', '.'), note = form.querySelector('[data-f="cnote"]').value.trim();
-        if (!cst) return fail('Indicá el resultado de la cobranza.');
-        if (cst !== 'NO_COBRADO' && !(Number(amt) > 0)) return fail('Indicá el importe cobrado.');
-        if (cst !== 'COBRADO' && !note) return fail(cst === 'COBRO_PARCIAL' ? 'Cobro parcial exige observación.' : 'No cobrado exige motivo.');
-        extra.collection = { status: cst, amount: cst === 'NO_COBRADO' ? null : Number(amt), mode: form.querySelector('[data-f="cmode"]').value || null, note: note || null };
       }
       ev.target.disabled = true;
       const loc = await this.locate(box); if (!loc) { ev.target.disabled = false; return; }
       extra.location = loc;
       const ok = await this.act('outcome', { route: r.id, stop: st.id, outcome: o, note: (o === 'ENTREGA_PARCIAL' || (task && o === 'ENTREGADO')) ? (String(txt || '').trim() || null) : null, reason: ['NO_ENTREGADO', 'REPROGRAMAR'].includes(o) ? txt : null, extra });
-      if (!ok) ev.target.disabled = false; this.render();
+      if (!ok) ev.target.disabled = false;   // falló: se conservan nombre, email, CUIL, firma y la foto procesada para reintentar
+      else { try { sessionStorage.removeItem(draftKey); } catch (e) { } if (form._release) form._release(); }
+      this.render();
     };
   }
 }

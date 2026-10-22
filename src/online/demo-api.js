@@ -8,10 +8,16 @@ import { DemoRC4 } from './demo-rc4.js';
 
 
 const KEY = 'okd_online_demo_v2';
+// CONTRATO DE SERVIDOR que emula la demo (explícito):
+//  · 'V4.16-PROPUESTA' (por defecto; contenido V4.17): propuestas/v4_17/20261108000100_v4_17_set_stop_outcome.sql — cobranza OPCIONAL
+//    y, en TODA entrega comercial (externo e interno), CUIL + email + identidad con DNI registrado (vinculada). NO está aplicada en producción.
+//  · 'VIGENTE': definición más reciente del repo (cristian_email_dni_required): exige cobranza en COBRANZA/AMBAS; CUIL, DNI y email solo para Cristian.
+// Se elige con localStorage 'okd_demo_contract'. Lo que funcione solo con la propuesta NO funciona en producción hasta aplicarla.
+export const demoContract = () => { try { return localStorage.getItem('okd_demo_contract') === 'VIGENTE' ? 'VIGENTE' : 'V4.16-PROPUESTA'; } catch (e) { return 'V4.16-PROPUESTA'; } };
 export const DEMO_CARRIERS = [
   { id: 'INTERNO', name: 'TRANSPORTE INTERNO', kind: 'INTERNO', active: true },
-  { id: 'CT-ESTE', name: 'CRISTIAN TORRES - ESTE', kind: 'EXTERNO', active: true },
-  { id: 'CT-ALR', name: 'CRISTIAN TORRES - ALREDEDORES', kind: 'EXTERNO', active: true },
+  { id: 'CT-ESTE', name: 'CRISTIAN TORRES - ESTE', kind: 'EXTERNO', report_group: 'CRISTIAN_TORRES', active: true },   // report_group: igual que la migración fase2a
+  { id: 'CT-ALR', name: 'CRISTIAN TORRES - ALREDEDORES', kind: 'EXTERNO', report_group: 'CRISTIAN_TORRES', active: true },
   { id: 'UCO', name: 'UCO', kind: 'EXTERNO', active: true },
   { id: 'VASCA', name: 'VASCA', kind: 'EXTERNO', active: true },
   { id: 'ANDESMAR', name: 'ANDESMAR', kind: 'EXTERNO', active: true },
@@ -397,7 +403,8 @@ export class DemoApi {
   _mine(id) { const me = this._user(this.session && this.session.userId); const r = (this.db.routes2 || []).find(x => x.id === id); if (!r || !me || r.responsable_id !== me.id || !hasPerm(me, 'routes.view_assigned')) throw err('FORBIDDEN', 'FORBIDDEN', 403); return { r, me }; }
   async myRoutes() {
     this._net(); this._refresh(); const me = await this.me(); if (!me) throw err('Sesión inválida.', 'NO_AUTH', 401);
-    return (this.db.routes2 || []).filter(r => r.responsable_id === me.id).map(r => JSON.parse(JSON.stringify(r))).sort((a, b) => b.published_at.localeCompare(a.published_at));
+    const cs = this._carriers(), cfg = id => cs.find(c => c.id === id) || DEMO_CARRIERS.find(c => c.id === id) || {};
+    return (this.db.routes2 || []).filter(r => r.responsable_id === me.id).map(r => Object.assign(JSON.parse(JSON.stringify(r)), { carrier_kind: cfg(r.carrier_id).kind || null, carrier_report_group: cfg(r.carrier_id).report_group || null })).sort((a, b) => b.published_at.localeCompare(a.published_at));
   }
   async markDelivered(id) { this._net(); this._refresh(); const { r } = this._mine(id); if (!r.notified_at) { r.notified_at = new Date().toISOString(); this._save(); } }
   async markViewed(id) { this._net(); this._refresh(); const { r, me } = this._mine(id); const t = new Date().toISOString(); r.viewed_at = r.viewed_at || t; r.notified_at = r.notified_at || t; (this.db.notifs || []).filter(x => x.route_id === id && x.user_id === me.id).forEach(x => { x.read_at = x.read_at || t; }); this._save(); return r; }
@@ -443,7 +450,9 @@ export class DemoApi {
     if (!['image/jpeg', 'image/png'].includes(file.mime)) throw err('La foto del DNI debe ser JPEG o PNG.', 'BAD_TYPE', 400);
     if (!(file.size > 0) || file.size > 5242880) throw err('La foto del DNI supera 5 MB.', 'BAD_SIZE', 400);
     const path = String(cuil).replace(/\D/g, '') + '/' + crypto.randomUUID() + (file.mime === 'image/png' ? '.png' : '.jpg');
-    this.db.storage = this.db.storage || {}; this.db.storage[path] = { b64: file.b64, mime: file.mime, size: file.size, owner: me.id }; this._save(); return path;
+    // la foto llega como Blob (V4.16, sin base64 en memoria del chofer); la demo la guarda en su almacenamiento local
+    const b64 = file.b64 || await new Promise((ok, ko) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1]); fr.onerror = ko; fr.readAsDataURL(file.blob); });
+    this.db.storage = this.db.storage || {}; this.db.storage[path] = { b64, mime: file.mime, size: file.size, owner: me.id }; this._save(); return path;
   }
   async identityDocUrl(cuil) {
     this._refresh(); const me = await this.me(); if (!hasPerm(me, 'identity_docs.view')) throw err('Sin permiso.', 'FORBIDDEN', 403);
@@ -495,29 +504,38 @@ export class DemoApi {
     if (outcome === 'ENTREGA_PARCIAL' && !String(note || '').trim()) throw err('Entrega parcial exige observación.', 'NOTE_REQUIRED', 400);
     if (['NO_ENTREGADO', 'REPROGRAMAR'].includes(outcome) && !String(reason || '').trim()) throw err('Indicá el motivo.', 'REASON_REQUIRED', 400);
     const type = st.stop_type || 'PEDIDO', commercial = type === 'PEDIDO', task = type === 'TAREA';
-    const ev = (extra && extra.evidence) || {}, col = commercial ? extra && extra.collection : null, cristian = commercial && ['CT-ESTE', 'CT-ALR'].includes(r.carrier_id);
+    const ev = (extra && extra.evidence) || {}, col = commercial ? extra && extra.collection : null;
+    // igual que el servidor: Cristian = transportista con report_group CRISTIAN_TORRES (configuración, no identificadores)
+    const cfgC = this._carriers().find(c => c.id === r.carrier_id) || DEMO_CARRIERS.find(c => c.id === r.carrier_id) || {}, cristian = commercial && cfgC.report_group === 'CRISTIAN_TORRES';
     let cuil = null;
     if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome)) {
       if (!task && (!String(ev.receiver_name || '').trim() || !ev.signature_png_b64)) throw err('EVIDENCE_REQUIRED: nombre del receptor y firma obligatorios', 'EVIDENCE_REQUIRED', 400);
-      if (cristian) { cuil = String(ev.cuil || '').replace(/\D/g, ''); if (cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
+      // contrato VIGENTE (migración cristian_email_dni_required): CUIL + DNI + email obligatorios solo para Cristian.
+      // contrato V4.17-PROPUESTA: los mismos controles para TODA entrega comercial (externo e interno). Sucursal/TAREA: sin ellos.
+      var idReq = cristian || (demoContract() !== 'VIGENTE' && commercial);
+      if (idReq) { cuil = String(ev.cuil || '').replace(/\D/g, ''); if (cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
       else { cuil = String(ev.cuil || '').replace(/\D/g, '') || null; if (cuil && cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
       // RC4.1: email del receptor (segunda pantalla), opcional; si viene debe ser válido
       var vEmail = String(ev.email || '').trim().toLowerCase() || null;
+      if (idReq && !vEmail) throw err('EMAIL_REQUIRED: el email del receptor es obligatorio', 'EMAIL_REQUIRED', 400);
       if (vEmail && !(/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(vEmail) && vEmail.length <= 254)) throw err('EMAIL_INVALID: el email no es válido', 'EMAIL_INVALID', 400);
       var vDni = String(ev.dni || '').replace(/\D/g, '') || (cuil ? cuil.slice(2, 10) : null);
       if (vDni && !/^[0-9]{7,8}$/.test(vDni)) throw err('DNI_INVALID: el DNI debe tener 7 u 8 dígitos', 'DNI_INVALID', 400);
       if (ev.dni_photo_b64) throw err('DNI_STORAGE_REQUIRED: la foto del DNI se sube a Storage privado', 'DNI_STORAGE_REQUIRED', 400);
-      if (cristian && ev.dni_storage_path) { const o = (this.db.storage || {})[ev.dni_storage_path];
+      if ((cristian || (demoContract() !== 'VIGENTE' && commercial && cuil)) && ev.dni_storage_path) { const o = (this.db.storage || {})[ev.dni_storage_path];
         if (!new RegExp('^' + cuil + '/[0-9a-f-]{36}\\.(jpg|png)$').test(ev.dni_storage_path) || !o || o.owner !== me.id) throw err('DNI_UPLOAD_INVALID', 'DNI_UPLOAD_INVALID', 400); }
+      // DNI_REQUIRED: la identidad tiene que quedar con DNI registrado (foto subida ahora o identidad ya registrada que se reutiliza)
+      if (idReq && !(((this.db.identity || {})[cuil] || {}).storage_path || ev.dni_storage_path)) throw err('DNI_REQUIRED: cargá la foto del DNI para el CUIL nuevo', 'DNI_REQUIRED', 400);
     }
-    if (commercial && ['COBRANZA', 'AMBAS'].includes(st.task)) {
-      if (!col || !col.status || col.status === 'PENDIENTE') throw err('COLLECTION_REQUIRED: indicá el resultado de la cobranza', 'COLLECTION_REQUIRED', 400);
+    const contract = demoContract(), colGiven = !!(col && col.status && col.status !== 'PENDIENTE');
+    if (commercial && ['COBRANZA', 'AMBAS'].includes(st.task) && (contract === 'VIGENTE' || colGiven)) {   // propuesta: solo se valida si se informa
+      if (!colGiven) throw err('COLLECTION_REQUIRED: indicá el resultado de la cobranza', 'COLLECTION_REQUIRED', 400);
       if (['COBRO_PARCIAL', 'NO_COBRADO'].includes(col.status) && !String(col.note || '').trim()) throw err('COLLECTION_NOTE_REQUIRED: cobro parcial exige observación y no cobrado exige motivo', 'COLLECTION_NOTE_REQUIRED', 400);
       if (['COBRADO', 'COBRO_PARCIAL'].includes(col.status) && !(Number(col.amount) > 0)) throw err('Indicá el importe cobrado.', 'COLLECTION_AMOUNT_REQUIRED', 400);
     }
     const loc = this._loc(extra && extra.location, st);
     Object.assign(st, { outcome, outcome_at: new Date().toISOString(), outcome_by: me.id, outcome_note: note || null, outcome_reason: reason || null, finish_location: loc });
-    if (['COBRANZA', 'AMBAS'].includes(st.task)) Object.assign(st, { collection_status: col.status, collected_amount: col.amount != null ? Number(col.amount) : null, payment_mode: col.mode || null, collection_note: col.note || null });
+    if (['COBRANZA', 'AMBAS'].includes(st.task) && colGiven) Object.assign(st, { collection_status: col.status, collected_amount: col.amount != null ? Number(col.amount) : null, payment_mode: col.mode || null, collection_note: col.note || null });
     if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome) && !commercial) {
       // TAREA / traslado interno: nunca email, Recibido Conforme, identidad ni cobranza. La recepción interna queda con su evidencia PROPIA.
       if (ev.signature_png_b64) { st.receiver_name = String(ev.receiver_name || '').trim() || null; this.db.evidence = this.db.evidence || {};
@@ -530,7 +548,7 @@ export class DemoApi {
       this.db.evidence = this.db.evidence || {};
       if (!this.db.evidence[st.id]) this.db.evidence[st.id] = { evidence_kind: 'ENTREGA_CLIENTE', receiver_name: st.receiver_name, signature_png_b64: ev.signature_png_b64, cuil, created_by: me.id, at: new Date().toISOString(), receiver_email: vEmail, receiver_dni: vDni, client_key: st.client_key || null };
       this.db.identity = this.db.identity || {};
-      if (cristian && ev.dni_storage_path) { const id0 = this.db.identity[cuil]; if (!id0 || !id0.storage_path) this.db.identity[cuil] = Object.assign(id0 || {}, { storage_path: ev.dni_storage_path, mime: this.db.storage[ev.dni_storage_path].mime, registered_by: me.id, registered_at: new Date().toISOString() }); }
+      if ((cristian || (contract !== 'VIGENTE' && commercial && cuil)) && ev.dni_storage_path) { const id0 = this.db.identity[cuil]; if (!id0 || !id0.storage_path) this.db.identity[cuil] = Object.assign(id0 || {}, { storage_path: ev.dni_storage_path, mime: this.db.storage[ev.dni_storage_path].mime, registered_by: me.id, registered_at: new Date().toISOString() }); }
       // Perfil reutilizable (misma capa de identidad): nombre, DNI, email y cliente
       if (cuil) { const p0 = this.db.identity[cuil] = this.db.identity[cuil] || { registered_by: me.id, registered_at: new Date().toISOString() };
         if (vEmail && vEmail !== p0.email) Object.assign(p0, { email: vEmail, email_updated_at: new Date().toISOString(), email_updated_by: me.id });

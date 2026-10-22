@@ -888,25 +888,65 @@ const SheetTabs = {
   // las suyas. Una hoja SIN dueño (creada antes de V4.9) no es de nadie: se intenta recuperar su dueño desde el borrador del
   // servidor; si no se puede, queda guardada y separada (no se ve, no bloquea, no se modifica) y se ofrece recuperarla a mano.
   mine(t) { const me = (window.OKD_ME || {}).id; return !!t && !!me && t.owner === me; },
+  // ===== Nombres claros de borradores (V4.16) =====
+  // nameMode 'auto' = nombre automático (se muestra "Borrador · Transportista"); 'custom' = puesto por una persona (se conserva tal cual).
+  // Pestañas anteriores (sin nameMode): automáticas SOLO con evidencia de origen = el nombre es exactamente el que la app les asignó
+  // por su posición al crearlas ("Hoja N" en el lugar N). Cualquier otro nombre se conserva como personalizado.
+  isAuto(t) { if (!t) return false; if (t.nameMode) return t.nameMode === 'auto'; const i = (this.idx ? this.idx.tabs : []).indexOf(t); return i >= 0 && t.name === 'Hoja ' + (i + 1); },
+  niceCarrier(c) { return String(c || '').split(' / ').map(x => x.trim().toLowerCase().replace(/(^|[\s(])([a-záéíóúñ])/g, (m, a, b) => a + b.toUpperCase()).replace(/ - /g, ' — ')).filter(Boolean).join(' / '); },
+  carrierOf(t) { return t.id === RouteStore.sheetId ? [...new Set(RouteStore.rows.filter(r => r.sale !== false).map(r => r.transportista).filter(Boolean))].join(' / ') : (t.carrier || ''); },
+  shortId(t) { return String(t.id || '').replace(/[^a-z0-9]/gi, '').slice(-4).toUpperCase(); },
+  label(t) {
+    if (!t) return '';
+    if (t.published) return 'Hoja ' + t.published;                  // publicada: número oficial
+    if (!this.isAuto(t)) return t.name;                              // personalizado: se conserva
+    const c = this.carrierOf(t), base = c ? 'Borrador · ' + this.niceCarrier(c) : 'Borrador sin asignar';
+    // varios borradores propios del mismo transportista: identificador breve y ESTABLE (del id; no se renumera al cerrar otros)
+    const same = (this.idx ? this.idx.tabs : []).filter(x => x !== t && !x.published && this.mine(x) && this.isAuto(x) && (this.carrierOf(x) ? 'Borrador · ' + this.niceCarrier(this.carrierOf(x)) : 'Borrador sin asignar') === base);
+    return same.length ? base + ' · ' + this.shortId(t) : base;
+  },
   _foreign: new Set(),   // hojas sin dueño cuyo borrador del servidor es de OTRO usuario que no puedo ver: no se ofrecen ni se asignan
+  // V4.17: estado de verificación de cada hoja sin dueño. Solo 'ok' (el servidor confirmó que NO tiene borrador) es recuperable;
+  // ante error o sin conexión queda 'unknown' (SIN VERIFICAR) y no se puede adoptar. Las hojas nunca se modifican por esto.
+  _verify: new Map(),
   unowned() { return (this.idx ? this.idx.tabs : []).filter(t => !t.owner && !t.published && !this._foreign.has(t.id)); },
+  recoverable() { return this.unowned().filter(t => this._verify.get(t.id) === 'ok'); },
+  // consulta al servidor por UNA hoja: 'ok' (sin borrador → dueño indeterminable, recuperable), 'foreign' (borrador de otro usuario),
+  // 'unknown' (error, sin conexión o respuesta que no permite decidir)
+  async verifyOne(b, t, list) {
+    if (!b || !b.content || !list) return 'unknown';
+    if (list.some(x => x.client_sheet_key === t.id)) return 'unknown';   // tiene borrador visible: el dueño sale de ahí, no se adopta
+    try { const c = await b.content(t.id); return c == null ? 'ok' : 'unknown'; }
+    catch (e) { return /FORBIDDEN_DRAFT/.test(e.code || e.message || '') ? 'foreign' : 'unknown'; }
+  },
   async resolveOwners() {
-    const pend = this.unowned(); if (!pend.length) return;
+    const pend = this.unowned(); if (!pend.length && !this.idx.tabs.some(t => t.nameMode === 'auto' && t.sentName)) return;
     const b = window.OKD_BRIDGE && window.OKD_BRIDGE.drafts; let list = null;
     try { list = b && b.list ? await b.list() : null; } catch (e) { list = null; }   // sin conexión: no se decide nada, no se asigna
-    if (!list) return;
+    if (!Array.isArray(list)) { pend.forEach(t => this._verify.set(t.id, 'unknown')); if (document.getElementById('sheetTabs')) this.render(); return; }
     let changed = false;
     pend.forEach(t => { const d = list.find(x => x.client_sheet_key === t.id); if (d && d.owner_id) { t.owner = d.owner_id; t.ownerFrom = 'servidor'; changed = true; } });
+    this.idx.tabs.forEach(t => { const d = list.find(x => x.client_sheet_key === t.id);
+      if (d && d.name && t.nameMode === 'auto' && t.sentName && d.name !== t.sentName) { t.name = d.name; t.nameMode = 'custom'; changed = true; } });
     if (changed) await DB.set('sheets_index', this.idx);
     // las que siguen sin dueño: si el servidor tiene un borrador de OTRO usuario (no visible para mí), no son recuperables por mí
     for (const t of this.unowned()) {
-      try { await b.content(t.id); } catch (e) { if (/FORBIDDEN_DRAFT/.test(e.code || e.message || '')) this._foreign.add(t.id); }
+      const v = await this.verifyOne(b, t, list); this._verify.set(t.id, v); if (v === 'foreign') this._foreign.add(t.id);
     }
+    // las pestañas pudieron dibujarse antes (touch() las redibuja): se vuelven a dibujar con dueños y hojas ajenas ya resueltos
+    if (document.getElementById('sheetTabs')) this.render();
   },
   // recuperación EXPLÍCITA de una hoja sin dueño (desde "Reabrir borrador…", con confirmación)
   async adopt(id) {
     const t = this.tab(id); if (!t || t.owner) return;
+    if (this._verify.get(id) !== 'ok') { toast('Esta hoja todavía no se pudo verificar con el servidor: no se puede recuperar ahora. Reintentá con conexión.'); return; }
     if (!confirm('"' + t.name + '" quedó guardada en esta computadora sin dueño identificado (versión anterior).\n¿Recuperarla como hoja tuya?')) return;
+    // se REVALIDA al confirmar: el servidor tiene que volver a confirmar que no hay un borrador (propio o ajeno) para esta hoja
+    const b = window.OKD_BRIDGE && window.OKD_BRIDGE.drafts; let list = null;
+    try { list = b && b.list ? await b.list() : null; } catch (e) { list = null; }
+    const v = Array.isArray(list) ? await this.verifyOne(b, t, list) : 'unknown'; this._verify.set(id, v);
+    if (v !== 'ok') { if (v === 'foreign') this._foreign.add(id); this.render();
+      toast(v === 'foreign' ? 'Esta hoja corresponde a un borrador de otro usuario: no se recupera.' : 'No se pudo verificar con el servidor: la hoja queda sin cambios. Reintentá con conexión.'); return; }
     t.owner = (window.OKD_ME || {}).id; t.ownerFrom = 'recuperada'; t.closed = false;
     RouteStore.log({ tipo: 'hoja sin dueño recuperada', hoja: t.name, id: t.id });
     await DB.set('sheets_index', this.idx); await this.switchTo(id);
@@ -924,7 +964,7 @@ const SheetTabs = {
     if (!this.mine(this.tab(this.idx.active))) {
       const own = this.idx.tabs.find(t => !t.closed && !t.published && this.mine(t));
       if (own) this.idx.active = own.id;
-      else { const id = sheetUid(); this.idx.tabs.push({ id, name: 'Hoja ' + (this.idx.tabs.length + 1), closed: false, orders: [], owner: (window.OKD_ME || {}).id || null }); this.idx.active = id; }
+      else { const id = sheetUid(); this.idx.tabs.push({ id, name: 'Hoja ' + (this.idx.tabs.length + 1), nameMode: 'auto', closed: false, orders: [], owner: (window.OKD_ME || {}).id || null }); this.idx.active = id; }
       await DB.set('sheets_index', this.idx);
     }
     return (await DB.get('sheet:' + this.idx.active)) || { sheetId: this.idx.active };
@@ -939,30 +979,39 @@ const SheetTabs = {
   tab(id) { return this.idx && this.idx.tabs.find(t => t.id === (id || RouteStore.sheetId)); },
   touch() {
     if (!this.idx) return;
-    let t = this.tab(); if (!t) { t = { id: RouteStore.sheetId, name: 'Hoja ' + (this.idx.tabs.length + 1), closed: false, orders: [] }; this.idx.tabs.push(t); }
+    let t = this.tab(); if (!t) { t = { id: RouteStore.sheetId, name: 'Hoja ' + (this.idx.tabs.length + 1), nameMode: 'auto', closed: false, orders: [] }; this.idx.tabs.push(t); }
     t.orders = RouteStore.rows.flatMap(r => [r.mainOrder, r.shipOrder]).filter(Boolean).map(String);
     t.published = RouteStore.published ? RouteStore.published.number : null;
     this.idx.active = RouteStore.sheetId;
     DB.set('sheets_index', this.idx);
     this.sync(t);
+    this.render();   // el nombre automático depende de los pedidos: se actualiza al guardar
   },
   sync(t) {
     const b = window.OKD_BRIDGE && window.OKD_BRIDGE.drafts; if (!b || RouteStore.published || !RouteStore.rows.length) return;
     clearTimeout(this._st); const id = RouteStore.sheetId, rows = RouteStore.rows.filter(r => r.sale);
     const content = { rows: RouteStore.rows, selected: [...RouteStore.selected], sheetDate: RouteStore.sheetDate, oldDecisions: RouteStore.oldDecisions, showCash: RouteStore.showCash, showCheques: RouteStore.showCheques, showTransfers: RouteStore.showTransfers };
     const carriers = [...new Set(rows.map(r => r.transportista).filter(Boolean))].join(' / ');
-    this._st = setTimeout(() => b.touch(id, t.name, carriers, rows.length, t.orders, JSON.parse(JSON.stringify(content))).catch(() => null), 600);
+    t.carrier = carriers; t.count = rows.length; content.nameMode = this.isAuto(t) ? 'auto' : 'custom';
+    const send = this.isAuto(t) ? this.label(t) : '';   // touch_draft: nombre vacío = el servidor conserva el actual
+    if (send) t.sentName = send;
+    // otros borradores automáticos propios cuyo nombre cambió (p. ej. ahora hay dos del mismo transportista): se actualiza su nombre en el servidor
+    this.idx.tabs.forEach(x => { if (x === t || x.published || !this.mine(x) || !this.isAuto(x) || !x.sentName) return; const l = this.label(x);
+      if (l !== x.sentName) { x.sentName = l; b.touch(x.id, l, x.carrier || '', x.count || 0, x.orders || [], undefined).catch(() => null); } });
+    DB.set('sheets_index', this.idx);
+    this._st = setTimeout(() => b.touch(id, send, carriers, rows.length, t.orders, JSON.parse(JSON.stringify(content))).catch(() => null), 600);
   },
   rename(id) {
     const t = this.tab(id); if (!t) return;
-    const n = prompt('Nombre de la hoja', t.name); if (!n || !n.trim()) return;
-    t.name = n.trim().slice(0, 40); DB.set('sheets_index', this.idx); this.render(); if (id === RouteStore.sheetId) this.sync(t);
+    const n = prompt('Nombre de la hoja', this.label(t)); if (!n || !n.trim()) return;
+    t.name = n.trim().slice(0, 40); t.nameMode = 'custom'; DB.set('sheets_index', this.idx);
+    if (id === RouteStore.sheetId) { const b = window.OKD_BRIDGE && window.OKD_BRIDGE.drafts; if (b && RouteStore.rows.length) b.touch(id, t.name, t.carrier || '', RouteStore.rows.filter(r => r.sale).length, t.orders, undefined).catch(() => null); } this.render(); if (id === RouteStore.sheetId) this.sync(t);
   },
   // Abre un borrador (propio o, con permiso, de otro operador) desde BORRADORES o desde un conflicto de pedido
   async openDraft(key, name, content) {
     if (this.tab(key)) { await this.switchTo(key); return; }
     await RouteStore.flush();
-    this.idx.tabs.push({ id: key, name: name || 'Borrador', closed: false, orders: [], owner: (window.OKD_ME || {}).id || null });
+    this.idx.tabs.push({ id: key, name: name || 'Borrador', nameMode: content && content.nameMode === 'auto' ? 'auto' : 'custom', sentName: content && content.nameMode === 'auto' ? name : undefined, closed: false, orders: [], owner: (window.OKD_ME || {}).id || null });
     await this.show(key, Object.assign({}, content || {}, { sheetId: key })); await RouteStore.flush();
   },
   // Borrador eliminado en el servidor: se quita del equipo (no toca hojas publicadas)
@@ -977,7 +1026,7 @@ const SheetTabs = {
   // ya no bloquea en silencio. La protección real es la reserva del servidor (avisa en qué borrador/operador y permite liberarlo).
   orderInOther(id) { const me = (window.OKD_ME || {}).id || null;
     const t = (this.idx ? this.idx.tabs : []).find(x => x.id !== RouteStore.sheetId && !x.published && !x.closed && this.mine(x) && (x.orders || []).includes(String(id)));
-    return t ? t.name : null; },
+    return t ? this.label(t) : null; },
   async show(id, sheet) {
     this.apply(sheet || (await DB.get('sheet:' + id)) || { sheetId: id });
     if (!RouteStore.sheetDate) RouteStore.sheetDate = RouteStore.rows.length ? (RouteStore.rows[0].fecha || todayISO()) : todayISO();
@@ -993,7 +1042,7 @@ const SheetTabs = {
   async create() {
     await RouteStore.flush();
     const id = sheetUid(), n = this.idx.tabs.length + 1;
-    this.idx.tabs.push({ id, name: 'Hoja ' + n, closed: false, orders: [], owner: (window.OKD_ME || {}).id || null });
+    this.idx.tabs.push({ id, name: 'Hoja ' + n, nameMode: 'auto', closed: false, orders: [], owner: (window.OKD_ME || {}).id || null });
     await this.show(id, { sheetId: id }); await RouteStore.flush();
   },
   // Cerrar la pestaña NO borra el borrador: se puede reabrir
@@ -1009,10 +1058,12 @@ const SheetTabs = {
   render() {
     const el = document.getElementById('sheetTabs'); if (!el || !this.idx) return;
     const open = this.idx.tabs.filter(t => !t.closed && this.mine(t)), closed = this.idx.tabs.filter(t => t.closed && this.mine(t));
-    el.innerHTML = open.map(t => '<span class="stab' + (t.id === RouteStore.sheetId ? ' on' : '') + '" data-tab="' + t.id + '"><b>' + esc(t.name) + '</b>' + (t.published ? '<i>' + esc(t.published) + '</i>' : '') + '<button type="button" class="stx" data-close="' + t.id + '" title="Cerrar pestaña (no borra)">×</button></span>').join('') +
+    el.innerHTML = open.map(t => '<span class="stab' + (t.id === RouteStore.sheetId ? ' on' : '') + '" data-tab="' + t.id + '"><b>' + esc(this.label(t)) + '</b>' + (t.published ? '<i>' + esc(t.published) + '</i>' : '') + '<button type="button" class="stx" data-close="' + t.id + '" title="Cerrar pestaña (no borra)">×</button></span>').join('') +
       '<button class="btn soft" type="button" id="tabNew">+ NUEVA HOJA</button>' +
-      ((closed.length || this.unowned().length) ? '<select id="tabReopen"><option value="">Reabrir borrador…</option>' + closed.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('') +
-        (this.unowned().length ? '<optgroup label="Hojas anteriores sin dueño (recuperar)">' + this.unowned().map(t => '<option value="adopt:' + t.id + '">' + esc(t.name) + ' · ' + ((t.orders || []).length) + ' pedido(s)</option>').join('') + '</optgroup>' : '') + '</select>' : '') +
+      ((closed.length || this.unowned().length) ? '<select id="tabReopen"><option value="">Reabrir borrador…</option>' + closed.map(t => '<option value="' + t.id + '">' + esc(this.label(t)) + '</option>').join('') +
+        (this.unowned().length ? '<optgroup label="Hojas anteriores sin dueño (recuperar)">' + this.unowned().map(t => this._verify.get(t.id) === 'ok'
+          ? '<option value="adopt:' + t.id + '">' + esc(this.label(t)) + ' · ' + ((t.orders || []).length) + ' pedido(s)</option>'
+          : '<option value="" disabled data-unverified="' + t.id + '">' + esc(this.label(t)) + ' · sin verificar (sin conexión)</option>').join('') + '</optgroup>' : '') + '</select>' : '') +
       '<span class="sheetsum" id="sheetSummary">' + sheetSummary() + '</span>';
     el.querySelectorAll('.stab').forEach(b => { b.addEventListener('click', e => { if (!e.target.closest('[data-close]')) this.switchTo(b.dataset.tab); }); b.addEventListener('dblclick', () => this.rename(b.dataset.tab)); b.title = 'Doble clic para renombrar'; });
     el.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => this.close(b.dataset.close)));
@@ -1370,7 +1421,8 @@ const Publisher = {
         const cc = FinancialIndex.findCC ? FinancialIndex.findCC(r.calc && r.calc.cuit, r.cliente) : null, cristian = ['CT-ESTE', 'CT-ALR'].includes(carrier.id);
         return { client_name: r.cliente, client_key: r.stopType === 'TAREA' ? ('TASK-' + r.id) : (r.stopType === 'UBICACION_INTERNA' ? r.internalLocationKey : ((r.calc && r.calc.cuit) || Normalizer.name(r.cliente))), zone: this.zone(r, carrier), order_numbers: RouteStore.stopOrders(r),
           // Cristian cobra el monto de la hoja: entrega + cobranza con importe esperado (el chofer no lo modifica)
-          task: cristian && (r.monto || 0) > 0 ? 'AMBAS' : 'ENTREGA', expected_amount: cristian && (r.monto || 0) > 0 ? r.monto : null,
+          // el chofer ya no registra cobranza: la parada es ENTREGA; el importe esperado queda como registro administrativo
+          task: 'ENTREGA', expected_amount: cristian && (r.monto || 0) > 0 ? r.monto : null,
           stop_type: r.stopType || 'PEDIDO', internal_location_key: r.internalLocationKey || null, instructions: RouteStore.stopInstructions(r) || null, contact_name: r.taskContact || null, contact_phone: r.taskPhone || null,
           customer_email: (r.stopType && r.stopType !== 'PEDIDO') ? null : (r.email || (cc && cc.email) || null),
           merchandise_amount: (r.stopType && r.stopType !== 'PEDIDO') ? 0 : (p.main || 0), shipping_fee: (r.stopType && r.stopType !== 'PEDIDO') ? 0 : (p.ship || 0), ship_fee_status: prov ? 'PROVISIONAL' : 'SALDO', ship_order: (r.stopType && r.stopType !== 'PEDIDO') ? null : (r.shipOrder || null), address: r.domicilio || '', ready: true }; }) };

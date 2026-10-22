@@ -169,9 +169,9 @@ export class SupabaseApi {
   async routeStatus(id) { const { data } = await this.sb.from('routes').select('id, number, operational_status, dispatch_mode, dispatched_at, published_at, notified_at, viewed_at, started_at, completed_at').eq('id', id).maybeSingle(); return data; }
   async myRoutes() {
     const s = await this.getSession(); if (!s) throw Object.assign(new Error('Sesión inválida.'), { code: 'NO_AUTH' });
-    let r; try { r = await this.sb.from('routes').select('*, carriers(name), route_stops(*)').eq('responsable_id', s.userId).order('published_at', { ascending: false }); } catch (e) { throw Object.assign(new Error('Sin conexión'), { code: 'OFFLINE' }); }
+    let r; try { r = await this.sb.from('routes').select('*, carriers(name, kind, report_group), route_stops(*)').eq('responsable_id', s.userId).order('published_at', { ascending: false }); } catch (e) { throw Object.assign(new Error('Sin conexión'), { code: 'OFFLINE' }); }
     if (r.error) throw this._rpcErr(r.error);
-    return (r.data || []).map(x => ({ ...x, carrier_name: x.carriers && x.carriers.name, stops: (x.route_stops || []).sort((a, b) => a.seq - b.seq) }));
+    return (r.data || []).map(x => ({ ...x, carrier_name: x.carriers && x.carriers.name, carrier_kind: x.carriers && x.carriers.kind, carrier_report_group: x.carriers && x.carriers.report_group, stops: (x.route_stops || []).sort((a, b) => a.seq - b.seq) }));
   }
   async markDelivered(id) { return this._rpc('mark_notification_delivered', { p_route: id }); }
   async markViewed(id) { return this._rpc('mark_route_viewed', { p_route: id }); }
@@ -186,7 +186,7 @@ export class SupabaseApi {
     if (!['image/jpeg', 'image/png'].includes(file.mime)) throw new Error('La foto del DNI debe ser JPEG o PNG.');
     if (!(file.size > 0) || file.size > 5242880) throw new Error('La foto del DNI supera 5 MB.');
     const path = String(cuil).replace(/\D/g, '') + '/' + crypto.randomUUID() + (file.mime === 'image/png' ? '.png' : '.jpg');
-    const bytes = Uint8Array.from(atob(file.b64), c => c.charCodeAt(0));
+    const bytes = file.blob ? file.blob : Uint8Array.from(atob(file.b64), c => c.charCodeAt(0));   // V4.16: Blob directo, sin copias base64
     const { error } = await this.sb.storage.from('identity-docs').upload(path, bytes, { contentType: file.mime, upsert: false });
     if (error) throw Object.assign(new Error(error.message), { code: /fetch|network/i.test(error.message) ? 'OFFLINE' : 'UPLOAD_FAILED' });
     return path;
