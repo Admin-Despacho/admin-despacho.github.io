@@ -47,7 +47,7 @@ jobs:
         run: |
           npm install --no-save --package-lock=false playwright@1.51.1
           npx playwright install --with-deps chromium
-          python -m pip install --quiet playwright==1.51.0
+          python -m pip install --quiet playwright==1.51.0 openpyxl==3.1.5
           python -m playwright install chromium
 
       # Build DEMO en un directorio SEPARADO, solo para probar el flujo de invitación. Nunca se publica.
@@ -56,6 +56,11 @@ jobs:
           VITE_SUPABASE_URL: ""
           VITE_SUPABASE_ANON_KEY: ""
         run: npx vite build --outDir dist-demo
+
+      - name: E2E new carrier created by Operario (demo build, blocking)
+        run: |
+          python tests/e2e/generate_synthetic_saldo_noc.py /tmp/okd_synth_saldo
+          python tests/e2e/run_transportista_nuevo.py dist-demo
 
       - name: E2E invitation / first access (demo build, blocking)
         run: python tests/e2e/run_invite_access.py dist-demo

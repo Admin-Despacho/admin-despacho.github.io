@@ -95,11 +95,16 @@ export const DemoAdmin = {
 
   // ===== Configuración: transportistas y plantillas =====
   async upsertCarrier(p) {
-    this._refresh(); const me = await this.me(); this._need(me, 'settings.manage');
-    if (!p.id || !p.name) throw err('Id y nombre obligatorios.', 'BAD_CARRIER', 400);
-    if (!/^[0-9]{2}$/.test(p.sequence_code || '')) throw err('El código de correlativo son 2 dígitos.', 'BAD_CODE', 400);
-    const C = this._carriers(); let c = C.find(x => x.id === p.id.toUpperCase()); if (!c) { c = { id: p.id.toUpperCase() }; C.push(c); }
-    Object.assign(c, { name: p.name.toUpperCase(), kind: p.kind || 'EXTERNO', active: p.active !== false, sequence_code: p.sequence_code, report_group: p.report_group || null, emails: p.emails || [], notes: p.notes || '' });
+    // igual que el servidor (20261018190731_carrier_auto_sequence): settings.manage O carriers.manage; el correlativo se asigna solo
+    // (siguiente libre de 2 dígitos) y es INMUTABLE
+    this._refresh(); const me = await this.me();
+    if (!(hasPerm(me, 'settings.manage') || hasPerm(me, 'carriers.manage'))) throw err('FORBIDDEN', 'FORBIDDEN', 403);
+    if (!p.id || !p.name) throw err('BAD_CARRIER: id y nombre obligatorios', 'BAD_CARRIER', 400);
+    const C = this._carriers(); let c = C.find(x => x.id === p.id.toUpperCase()), code;
+    if (c && c.sequence_code) { code = c.sequence_code; if (p.sequence_code && p.sequence_code !== code) throw err('IMMUTABLE_CODE: el correlativo histórico no se puede modificar', 'IMMUTABLE_CODE', 400); }
+    else { const n = Math.max(0, ...C.map(x => /^[0-9]{2}$/.test(x.sequence_code || '') ? +x.sequence_code : 0)) + 1; if (n > 99) throw err('NO_SEQUENCE_CODE', 'NO_SEQUENCE_CODE', 400); code = String(n).padStart(2, '0'); }
+    if (!c) { c = { id: p.id.toUpperCase() }; C.push(c); }
+    Object.assign(c, { name: p.name.toUpperCase(), kind: p.kind || 'EXTERNO', active: p.active !== false, sequence_code: code, report_group: p.report_group || null, emails: p.emails || [], notes: p.notes || '' });
     this._audit(me, 'CARRIER_SAVED', c.id, null, c); this._save(); return c;
   },
   async currentTemplate(carrierId) {

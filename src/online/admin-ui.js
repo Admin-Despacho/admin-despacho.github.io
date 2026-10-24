@@ -351,7 +351,8 @@ const CFG = {
       const code = null;
       const email = sec.querySelector('#ncEmail').value.trim();
       if (!id || !name) throw new Error('Completá ID y nombre del transportista.');
-      return api.upsertCarrier({ id, name, kind: sec.querySelector('#ncKind').value, sequence_code: code, active: true, report_group: null, emails: email ? [email] : [], notes: null });
+      return api.upsertCarrier({ id, name, kind: sec.querySelector('#ncKind').value, sequence_code: code, active: true, report_group: null, emails: email ? [email] : [], notes: null })
+        .then(res => { window.dispatchEvent(new Event('okd:carriers-changed')); return res; });   // el constructor recarga su catálogo
     }, 'Transportista creado.', again);
     sec.querySelectorAll('tr[data-cid]').forEach(tr => {
       const g = k => tr.querySelector('[data-f="' + k + '"]'), c = cs.find(x => x.id === tr.dataset.cid);
@@ -723,3 +724,4 @@ export async function openBackup(api, me) { const w = frame(me, 'Backup', '#/bac
 // RC4: secciones reutilizables desde Configuración operativa (el servidor valida el permiso igual)
 export const plantillasSection = (api, me, sec, again) => CFG.plantillas(api, me, sec, again);
 export const frameFor = (me, title, active) => frame(me, title, active);
+

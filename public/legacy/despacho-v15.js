@@ -26,6 +26,35 @@ function autoSheetDate() {
   RouteStore.rows.forEach(r => { if (!r.fecha || r.fecha < t) r.fecha = t; });
   return old;
 }
+// ===== Catálogo de transportistas del SERVIDOR (V4.18.1) =====
+// En modo online el selector usa el catálogo del servidor (no la lista fija de la configuración inicial): aparecen los transportistas
+// activos autorizados aunque tengan 0 pedidos. La identidad es el ID (renombrar no duplica ni pierde la selección).
+const CarrierCatalog = {
+  list: null, error: null, _p: null,
+  async load() {
+    const b = window.OKD_BRIDGE && window.OKD_BRIDGE.routes; if (!b || !b.carriers) return null;   // sin servidor (modo local): se usa la lista de la configuración
+    if (this._p) return this._p;
+    this._p = (async () => {
+      try { const l = await b.carriers(); this.list = Array.isArray(l) ? l : []; this.error = null; this.reconcile(); }
+      catch (e) { this.error = String(e.message || e); }
+      finally { this._p = null; }
+      if (typeof UI !== 'undefined' && $('#carriers')) UI.renderCarriers();
+      return this.list;
+    })();
+    return this._p;
+  },
+  active() { return this.list ? this.list.filter(c => c.active !== false) : null; },
+  byName(n) { return (this.list || []).find(c => c.name === n) || null; },
+  byId(id) { return (this.list || []).find(c => c.id === id) || null; },
+  // renombrado: si el transportista elegido (por ID) cambió de nombre, la selección y las filas pasan al nombre nuevo
+  reconcile() {
+    const id = RouteStore.selectedCarrierId, c = id && this.byId(id), cur = [...RouteStore.selected][0];
+    if (c && cur && c.name !== cur) {
+      RouteStore.selected = new Set([c.name]); RouteStore.rows.forEach(r => { if (r.transportista === cur) r.transportista = c.name; if (r.carrierOrig === cur) r.carrierOrig = c.name; });
+      RouteStore.log({ tipo: 'transportista renombrado en el catálogo', antes: cur, ahora: c.name, id }); RouteStore.save();
+    } else if (!id && cur && this.byName(cur)) { RouteStore.selectedCarrierId = this.byName(cur).id; }   // hojas anteriores: se completa el ID
+  }
+};
 function todayISO() { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
 function isoToDMY(iso) { if (!iso) return ''; const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '/' + m[2] + '/' + m[1] : iso; }
 function dmyToISO(s) {
@@ -971,7 +1000,7 @@ const SheetTabs = {
   },
   apply(sheet) {
     sheet = sheet || {};
-    RouteStore.rows = sheet.rows || [];
+    RouteStore.rows = sheet.rows || []; RouteStore.selectedCarrierId = sheet.selectedCarrierId || null;
     RouteStore.rows.forEach(r => { if (migrateLegacySaldo(r)) (sheet.audit = sheet.audit || []).push({ at: new Date().toISOString(), tipo: 'saldo revisado por importe manual de versión anterior', pedido: r.mainOrder, importe: r.saldoRevisado.amount }); }); RouteStore.selected = new Set(sheet.selected || []); RouteStore.sheetId = sheet.sheetId || sheetUid(); RouteStore.sheetDate = sheet.sheetDate || '';
     RouteStore.audit = sheet.audit || []; RouteStore.showCash = sheet.showCash !== false; RouteStore.showCheques = sheet.showCheques !== false; RouteStore.showTransfers = sheet.showTransfers !== false;
     RouteStore.oldDecisions = sheet.oldDecisions || {}; RouteStore.published = sheet.published || null;
@@ -990,7 +1019,7 @@ const SheetTabs = {
   sync(t) {
     const b = window.OKD_BRIDGE && window.OKD_BRIDGE.drafts; if (!b || RouteStore.published || !RouteStore.rows.length) return;
     clearTimeout(this._st); const id = RouteStore.sheetId, rows = RouteStore.rows.filter(r => r.sale);
-    const content = { rows: RouteStore.rows, selected: [...RouteStore.selected], sheetDate: RouteStore.sheetDate, oldDecisions: RouteStore.oldDecisions, showCash: RouteStore.showCash, showCheques: RouteStore.showCheques, showTransfers: RouteStore.showTransfers };
+    const content = { rows: RouteStore.rows, selected: [...RouteStore.selected], selectedCarrierId: RouteStore.selectedCarrierId || null, sheetDate: RouteStore.sheetDate, oldDecisions: RouteStore.oldDecisions, showCash: RouteStore.showCash, showCheques: RouteStore.showCheques, showTransfers: RouteStore.showTransfers };
     const carriers = [...new Set(rows.map(r => r.transportista).filter(Boolean))].join(' / ');
     t.carrier = carriers; t.count = rows.length; content.nameMode = this.isAuto(t) ? 'auto' : 'custom';
     const send = this.isAuto(t) ? this.label(t) : '';   // touch_draft: nombre vacío = el servidor conserva el actual
@@ -1036,7 +1065,7 @@ const SheetTabs = {
     await DB.set('sheets_index', this.idx);
     CalculationEngine.computeAll(RouteStore.rows);
     $('#sheetDate').value = isoToDMY(RouteStore.sheetDate); $('#optCash').checked = RouteStore.showCash; $('#optCheques').checked = RouteStore.showCheques; $('#optTransfers').checked = RouteStore.showTransfers;
-    $('#log').innerHTML = ''; UI.renderTable(); this.render(); Publisher.render();
+    $('#log').innerHTML = ''; UI.renderCarriers(); UI.renderTable(); this.render(); Publisher.render();   // el selector refleja la hoja mostrada
   },
   async switchTo(id) { if (id === RouteStore.sheetId) return; await RouteStore.flush(); await this.show(id); },
   async create() {
@@ -1617,7 +1646,7 @@ const RouteStore = {
   rows: [], selected: new Set(), data: { pedidos: null, sc: null, cc: null }, sheetDate: '', audit: [], opNotesInExcel: false, showCash: true, showCheques: true, showTransfers: true, oldDecisions: {},
   save: null,
   init() {
-    this.flush = () => { SheetTabs.touch(); return DB.set('sheet:' + this.sheetId, { rows: this.rows, selected: Array.from(this.selected), sheetDate: this.sheetDate, audit: this.audit.slice(-2000), showCash: this.showCash, showCheques: this.showCheques, showTransfers: this.showTransfers, oldDecisions: this.oldDecisions, sheetId: this.sheetId, published: this.published || null }); };
+    this.flush = () => { SheetTabs.touch(); return DB.set('sheet:' + this.sheetId, { rows: this.rows, selected: Array.from(this.selected), selectedCarrierId: this.selectedCarrierId || null, sheetDate: this.sheetDate, audit: this.audit.slice(-2000), showCash: this.showCash, showCheques: this.showCheques, showTransfers: this.showTransfers, oldDecisions: this.oldDecisions, sheetId: this.sheetId, published: this.published || null }); };
     this.save = debounce(this.flush, 350);
     // guardar también al cerrar o cambiar de pestaña
     window.addEventListener('pagehide', () => this.flush());
@@ -2072,6 +2101,7 @@ const UI = {
       if (e.target.matches('input[name="route_carrier"]')) {
         RouteStore.selected.clear();
         if (e.target.checked) RouteStore.selected.add(e.target.value);
+        const cc = CarrierCatalog.byName(e.target.value); RouteStore.selectedCarrierId = cc ? cc.id : null;   // identidad por ID
         RouteStore.save(); this.refreshStatuses(); this.renderCards(); Publisher.render(); this.updateEntryMode();
       }
     });
@@ -2217,19 +2247,26 @@ const UI = {
       if (c) counts.set(c, (counts.get(c) || 0) + 1);
       else other.set(o.estado || '(sin estado)', (other.get(o.estado || '(sin estado)') || 0) + 1);
     });
-    const list = cfg.carriers.slice();
-    counts.forEach((v, k) => { if (list.indexOf(k) < 0) list.push(k); });
+    const act = CarrierCatalog.active(), inactive = new Set();
+    const list = act ? act.map(c => c.name) : cfg.carriers.slice();
+    if (act) {   // catálogo del servidor: solo activos (aunque tengan 0 pedidos); un inactivo ya elegido se muestra pero no se puede elegir de nuevo
+      // hoja NUEVA (sin pedidos) con un transportista ya inactivo elegido: se descarta (no se puede elegir para hojas nuevas)
+      if (!RouteStore.rows.length && [...RouteStore.selected].some(n => list.indexOf(n) < 0)) { RouteStore.selected = new Set(); RouteStore.selectedCarrierId = null; RouteStore.save(); }
+      [...RouteStore.selected].forEach(n => { if (list.indexOf(n) < 0) { list.push(n); inactive.add(n); } });   // hoja con pedidos: se conserva la referencia
+    } else counts.forEach((v, k) => { if (list.indexOf(k) < 0) list.push(k); });
     if (RouteStore.selected.size > 1) {
       const first = Array.from(RouteStore.selected)[0];
       RouteStore.selected = new Set(first ? [first] : []);
       RouteStore.save();
     }
-    $('#carriers').innerHTML = list.map(c => '<label class="carrier"><input type="radio" name="route_carrier" value="' + esc(c) + '"' + (RouteStore.selected.has(c) ? ' checked' : '') + '>' + esc(c) +
+    $('#carriers').innerHTML = (CarrierCatalog.error ? '<div class="msg warn" id="carrierErr">No se pudo cargar el catálogo de transportistas (' + esc(CarrierCatalog.error) + '). <button class="btn soft" type="button" id="carrierRetry">REINTENTAR</button></div>' : '') +
+      list.map(c => '<label class="carrier' + (inactive.has(c) ? ' inactive' : '') + '"><input type="radio" name="route_carrier" value="' + esc(c) + '"' + (RouteStore.selected.has(c) ? ' checked' : '') + (inactive.has(c) ? ' disabled' : '') + '>' + esc(c) + (inactive.has(c) ? ' (inactivo)' : '') +
       (OrderIndex.size() ? '<span class="c" title="Pedidos en el informe">' + (counts.get(c) || 0) + '</span>' : '') + '</label>').join('');
     if (OrderIndex.size() && other.size) {
       const tot = Array.from(other.values()).reduce((a, b) => a + b, 0);
       $('#otherStates').textContent = tot + ' pedidos del informe tienen estados sin transportista (' + Array.from(other.keys()).slice(0, 4).join(', ') + (other.size > 4 ? '…' : '') + ').';
     } else $('#otherStates').textContent = OrderIndex.size() ? '' : 'Cargá el informe de pedidos para ver cuántos pedidos hay por transportista.';
+    const rt = $('#carrierRetry'); if (rt) rt.onclick = () => CarrierCatalog.load();
     this.updateEntryMode();
   },
 
@@ -2524,7 +2561,7 @@ const UI = {
   },
   autosize(t) { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; },
   carrierOptions(cur) {
-    const list = Config.get().carriers.slice();
+    const act = CarrierCatalog.active(), list = act ? act.map(c => c.name) : Config.get().carriers.slice();
     if (cur && list.indexOf(cur) < 0) list.push(cur);
     return '<option value="">— elegir —</option>' + list.map(c => '<option' + (c === cur ? ' selected' : '') + '>' + esc(c) + '</option>').join('');
   },
@@ -3550,6 +3587,10 @@ const PdfExporter = {
   $('#optOpNotes').checked = !!Config.get().opNotesInExcel;
   $('#optCash').checked = RouteStore.showCash; $('#optCheques').checked = RouteStore.showCheques; $('#optTransfers').checked = RouteStore.showTransfers;
   UI.renderHead(); UI.renderFiles(); UI.renderCarriers(); UI.renderTable();
+  CarrierCatalog.load();
+  window.addEventListener('hashchange', () => { if (/^#\/(despacho|nueva-hoja)/.test(location.hash)) CarrierCatalog.load(); });
+  window.addEventListener('okd:carriers-changed', () => CarrierCatalog.load());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) CarrierCatalog.load(); });
   SheetTabs.render(); Publisher.render();
   window.OKD_BOOTED = true; if (window.OKD_PENDING_RULES) { const f = window.OKD_PENDING_RULES; window.OKD_PENDING_RULES = null; window.OKD_APPLY_RULES(f); }
   if (window.OKD_PENDING_ROUTING) { const f = window.OKD_PENDING_ROUTING; window.OKD_PENDING_ROUTING = null; window.OKD_APPLY_ROUTING(f); }

@@ -265,6 +265,31 @@ export class DemoApi {
   _refresh() { const d = this._load(); if (d) this.db = d; }
   _net() { if (typeof window !== 'undefined' && window.OKD_NET && window.OKD_NET.offline) throw err('Sin conexión', 'OFFLINE', 0); }
   _mendozaDay() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Mendoza' }).format(new Date()); }
+  // DESPACHAR E IMPRIMIR (tercerizados): igual que el servidor dispatch_external_route — hoja COMPLETADA, dispatch_mode EXTERNAL,
+  // número del correlativo del transportista, reservas y borrador PUBLICADA. El PDF lo genera/guarda el constructor después.
+  async dispatchExternalRoute(p) {
+    this._refresh(); const me = await this.me();
+    if (!hasPerm(me, 'routes.publish')) throw err('FORBIDDEN', 'FORBIDDEN', 403);
+    const draft = this._draft(p.sheet_key, me, true, false);   // mismo control de borrador que publishRoute
+    if (draft.status === 'PUBLICADA') return (this.db.routes2 || []).find(r => r.id === draft.route_id);   // reintento
+    const carrier = this._carriers().find(c => c.id === p.carrier_id && c.active !== false);
+    if (!carrier) throw err('BAD_CARRIER: elegí el transportista', 'BAD_CARRIER', 400);
+    if (carrier.kind !== 'EXTERNO' || carrier.report_group === 'CRISTIAN_TORRES') throw err('NOT_EXTERNAL_DISPATCH: este transportista usa PUBLICAR HOJA', 'NOT_EXTERNAL_DISPATCH', 400);
+    if (!(p.stops || []).length) throw err('EMPTY_SHEET: la hoja no tiene pedidos', 'EMPTY_SHEET', 400);
+    const ords = [...new Set(p.stops.flatMap(x => x.order_numbers || []))], now = new Date().toISOString();
+    const code = carrier.sequence_code || SEQ_CODE[carrier.id]; this.db.sequences = this.db.sequences || {}; const n = this.db.sequences[code] = (this.db.sequences[code] || 0) + 1;
+    const r = { id: 'rt-' + (++this.db.seq) + '-' + Date.now().toString(36), number: code + '-' + String(n).padStart(6, '0'), carrier_id: carrier.id, carrier_name: carrier.name,
+      responsable_id: null, responsable_name: null, operational_status: 'COMPLETADA', status: 'COMPLETADA', dispatch_mode: 'EXTERNAL', dispatched_at: now, dispatched_by: me.id,
+      sheet_key: p.sheet_key, published_at: now, published_by: me.id, completed_at: now, version: 1, approval_status: 'NO_REQUERIDA', events: [],
+      stops: p.stops.map((x, i) => ({ id: 'st-' + this.db.seq + '-' + i, seq: i + 1, sequence_number: i + 1, provenance: 'DESPACHO', stop_type: x.stop_type || 'PEDIDO', client_name: x.client_name,
+        address: x.address, order_numbers: x.order_numbers || [], merchandise_amount: x.merchandise_amount ?? null, shipping_fee: x.shipping_fee ?? null, bultos: x.bultos ?? null,
+        task: x.task || 'ENTREGA', outcome: 'PENDIENTE', collection_status: 'PENDIENTE' })) };
+    (this.db.routes2 = this.db.routes2 || []).push(r);
+    Object.assign(draft, { status: 'PUBLICADA', route_id: r.id, updated_at: now });
+    Object.entries(this.db.reservations || {}).filter(([o, x]) => x.sheet_key === p.sheet_key && ords.includes(o)).forEach(([, x]) => { x.status = 'PUBLICADA'; x.route_id = r.id; x.number = r.number; });
+    this._audit(me, 'ROUTE_DISPATCHED_EXTERNAL', r.id, null, { number: r.number, carrier: carrier.id });
+    this._save(); return r;
+  }
   async publishRoute(p) {
     this._net(); this._refresh(); const me = await this.me();
     if (!hasPerm(me, 'routes.publish')) throw err('No tenés permiso para publicar.', 'FORBIDDEN', 403);
