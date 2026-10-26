@@ -29,7 +29,8 @@ Deno.test('R-SCH-01 Sábado 15:00: genera el semanal y lo envía una vez a cada 
   eq(r.status, 200); eq(r.body.done.map(d => d.type), ['WEEKLY']); eq(s.sent.length, 2);
   eq(s.sent[0].subject, 'OK Despacho · Informe semanal Cristian Torres · cierre 10/10/2026 15:00');
   eq(s.sent[0].attachments[0].filename, 'Informe_Cristian_Torres_Semanal_2026-10-10.pdf'); ok(s.sent[0].attachments[0].content.length > 2000, 'PDF adjunto');
-  ok(s.sent[0].html.includes('CUBRE EL COSTO') && s.sent[0].text.includes('ENVÍOS COMPLETADOS'));
+  // criterio de hojas PUBLICADAS: el resumen habla de envíos incluidos (no presenta pendientes como completados)
+  ok(s.sent[0].html.includes('CUBRE EL COSTO') && s.sent[0].text.includes('ENVÍOS INCLUIDOS (hojas publicadas)') && !s.sent[0].text.includes('ENVÍOS COMPLETADOS'));
 });
 Deno.test('REPORT-MAIL-21 Cron repetido / redeploy / refresh: no duplica informe ni emails', async () => {
   const s = setup();

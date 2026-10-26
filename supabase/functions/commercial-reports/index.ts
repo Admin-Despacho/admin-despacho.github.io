@@ -1,5 +1,6 @@
 // Edge Function "commercial-reports" en Supabase (Deno).
 // Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (automáticos), CRON_SECRET, RESEND_API_KEY, REPORT_FROM
+import { loadCristianRoutes } from '../_shared/report-loader.js';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { json } from '../_shared/http.js';
 import { handle } from './handler.js';
@@ -11,11 +12,24 @@ const must = <T>(r: { data: T; error: any }) => { if (r.error) throw new Error(r
 const BUCKET = 'commercial-reports';
 
 const store = {
+  // Carga COMPLETA (paginada por cursor, orden estable por id) de hojas de Cristian + paradas + fecha histórica de publicación.
+  // Ver _shared/report-loader.js. Sin límite implícito de filas del servidor.
   async loadRoutes() {
-    const carriers = must(await admin.from('carriers').select('id').eq('report_group', 'CRISTIAN_TORRES')) as any[];
-    const routes = must(await admin.from('routes').select('id, number, carrier_id, operational_status, completed_at, route_stops(*)')
-      .in('carrier_id', carriers.map((c) => c.id)).eq('operational_status', 'COMPLETADA')) as any[];
-    return routes.map((r) => ({ ...r, stops: r.route_stops ?? [] }));
+    const after = (q: any, a: any) => (a == null ? q : q.gt('id', a));
+    return await loadCristianRoutes({
+      async cristianCarrierIds() { return (must(await admin.from('carriers').select('id').eq('report_group', 'CRISTIAN_TORRES').order('id')) as any[]).map((c) => c.id); },
+      async routesAfter(ids: string[], a: any, limit: number) {
+        return must(await after(admin.from('routes').select('id, number, carrier_id, operational_status, published_at, dispatched_at, dispatch_mode, completed_at, version')
+          .in('carrier_id', ids).not('operational_status', 'in', '(BORRADOR,CANCELADA)'), a).order('id', { ascending: true }).limit(limit)) as any[];
+      },
+      async stopsAfter(ids: string[], a: any, limit: number) {
+        return must(await after(admin.from('route_stops').select('*').in('route_id', ids), a).order('id', { ascending: true }).limit(limit)) as any[];
+      },
+      async auditAfter(ids: string[], a: any, limit: number) {
+        return must(await after(admin.from('audit_log').select('id, target_id, at').eq('action', 'ROUTE_PUBLISHED').eq('target_type', 'route').in('target_id', ids), a)
+          .order('id', { ascending: true }).limit(limit)) as any[];
+      }
+    });
   },
   async loadThirdPartyCarriers() {
     const rows = must(await admin.from('carriers').select('id,name,kind,report_group,active').eq('kind', 'EXTERNO').eq('active', true).order('name')) as any[];

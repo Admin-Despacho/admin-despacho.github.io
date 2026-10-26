@@ -30,8 +30,9 @@ export function emailHtml(rep, attachmentName) {
   const table = (head, rows) => '<tr><td style="padding-top:6px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">' + (head ? '<tr>' + head.join('') + '</tr>' : '') + rows.join('') + '</table></td></tr>';
   const card = (label, val, color, sub) => '<td width="33%" valign="top" style="padding:4px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ' + L + ';border-radius:12px;"><tr><td style="' + FONT + 'padding:12px;"><div style="font-size:10px;font-weight:bold;letter-spacing:1px;color:' + M + ';text-transform:uppercase;">' + label + '</div><div style="font-size:23px;font-weight:bold;color:' + color + ';margin-top:4px;">' + val + '</div>' + (sub ? '<div style="font-size:11px;color:' + M + ';">' + sub + '</div>' : '') + '</td></tr></table></td>';
   const badge = st => { const red = st === 'CONTACTAR HOY'; return '<span style="' + FONT + 'font-size:10px;font-weight:bold;padding:5px 8px;border-radius:999px;background:' + (red ? '#fdecec' : '#fff3d6') + ';color:' + (red ? R : '#8b5d00') + ';">' + esc(st) + '</span>'; };
-  const zoneRows = rep.zones.map(z => '<tr>' + td('<b>' + ZONE_LABEL[z.zone] + '</b>') + td(String(z.completed), 'center') + td('<b>' + money(z.income) + '</b>', 'right') + '</tr>')
-    .concat(['<tr>' + td('<b>TOTAL</b>') + td('<b>' + rep.total.completed + '</b>', 'center') + td('<b>' + money(rep.total.income) + '</b>', 'right') + '</tr>']);
+  const v2 = rep.criterion === 'HOJAS_PUBLICADAS', nShip = z => v2 ? z.shipments : z.completed;   // V2: envíos de hojas publicadas
+  const zoneRows = rep.zones.map(z => '<tr>' + td('<b>' + ZONE_LABEL[z.zone] + '</b>') + td(String(nShip(z)), 'center') + td('<b>' + money(z.income) + '</b>', 'right') + '</tr>')
+    .concat(['<tr>' + td('<b>TOTAL</b>') + td('<b>' + nShip(rep.total) + '</b>', 'center') + td('<b>' + money(rep.total.income) + '</b>', 'right') + '</tr>']);
   const cl = (k, v, b, color) => '<tr>' + td(b ? '<b>' + k + '</b>' : k) + '<td align="right" style="' + FONT + 'font-size:12px;padding:10px 8px;border-bottom:1px solid #edf1f3;' + (b ? 'font-weight:bold;' : '') + (color ? 'color:' + color + ';' : '') + '">' + v + '</td></tr>';
   return '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + esc(emailSubject(rep)) + '</title></head>' +
     '<body style="margin:0;padding:0;background:#eef2f4;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f4;"><tr><td align="center" style="padding:24px 8px;">' +
@@ -42,9 +43,9 @@ export function emailHtml(rep, attachmentName) {
     '<div style="' + FONT + 'font-size:13px;color:#cbd6da;">' + esc(periodText(rep)) + '</div><div style="display:none;">INFORME CRISTIAN TORRES · ' + typeLabel(rep) + '</div></td></tr>' +
     '<tr><td style="padding:20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">' +
     '<tr><td style="' + FONT + 'font-size:10px;font-weight:bold;letter-spacing:1px;color:' + M + ';text-transform:uppercase;">Resumen del período</td></tr>' +
-    '<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + card('Envíos completados', rep.summary.completed, G, 'incluye entregas parciales') + card('No entregados', rep.summary.not_delivered, R) + card('Reprogramados', rep.summary.rescheduled, A) + '</tr></table></td></tr>' +
+    '<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + (v2 ? card('Envíos incluidos', rep.summary.shipments, G, 'pendientes ' + rep.summary.pending + ' · entregados ' + rep.summary.delivered) : card('Envíos completados', rep.summary.completed, G, 'incluye entregas parciales')) + card('No entregados', rep.summary.not_delivered, R) + card('Reprogramados', rep.summary.rescheduled, A) + '</tr></table></td></tr>' +
     '<tr><td style="' + FONT + 'font-size:11px;color:' + M + ';">' + esc(rep.summary.note) + (rep.period.cutoff_note ? ' ' + esc(rep.period.cutoff_note) : '') + '</td></tr>' +
-    h2('Envíos e ingresos por zona') + table([th('Zona'), th('Completados', 'center'), th('Ingreso', 'right')], zoneRows) +
+    h2(v2 ? 'Envíos e importes por zona' : 'Envíos e ingresos por zona') + table([th('Zona'), th(v2 ? 'Envíos incluidos' : 'Completados', 'center'), th(v2 ? 'Importe informado' : 'Ingreso', 'right')], zoneRows) +
     h2('¿El transporte se paga solo?') + table(null, [cl('Ingreso Zona Este', money(cov.income_by_zone.ESTE)), cl('Ingreso Alrededores', money(cov.income_by_zone.ALREDEDORES)), cl('Ingreso Centro', money(cov.income_by_zone.CENTRO)),
       cl('Ingreso total de envíos', money(cov.income), true), cl('Costo Cristian del período', money(cov.cost)), cl('Diferencia', (cov.diff >= 0 ? '+' : '-') + money(Math.abs(cov.diff)), true, cov.covers ? G : R)]) +
     '<tr><td style="padding-top:12px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="' + FONT + 'background:' + (cov.covers ? '#e8f7ef' : '#fdecec') + ';border:1px solid ' + (cov.covers ? '#cfead9' : '#f0caca') + ';border-radius:12px;padding:14px;">' +
@@ -61,10 +62,12 @@ export function emailHtml(rep, attachmentName) {
 
 export function emailText(rep, attachmentName) {
   const c = rep.coverage;
+  const v2 = rep.criterion === 'HOJAS_PUBLICADAS', nShip = z => v2 ? z.shipments : z.completed;
   return [
     'OK ACCESORIOS · INFORME CRISTIAN TORRES · ' + typeLabel(rep), periodText(rep), '',
-    'ENVÍOS COMPLETADOS: ' + rep.summary.completed, 'NO ENTREGADOS: ' + rep.summary.not_delivered, 'REPROGRAMADOS: ' + rep.summary.rescheduled, rep.summary.note, '',
-    ...rep.zones.map(z => ZONE_LABEL[z.zone] + ': ' + z.completed + ' · ' + money(z.income)), 'TOTAL: ' + rep.total.completed + ' · ' + money(rep.total.income), '',
+    ...(v2 ? ['ENVÍOS INCLUIDOS (hojas publicadas): ' + rep.summary.shipments, 'PENDIENTES: ' + rep.summary.pending, 'ENTREGADOS: ' + rep.summary.delivered]
+           : ['ENVÍOS COMPLETADOS: ' + rep.summary.completed]), 'NO ENTREGADOS: ' + rep.summary.not_delivered, 'REPROGRAMADOS: ' + rep.summary.rescheduled, rep.summary.note, '',
+    ...rep.zones.map(z => ZONE_LABEL[z.zone] + ': ' + nShip(z) + ' · ' + money(z.income)), 'TOTAL: ' + nShip(rep.total) + ' · ' + money(rep.total.income), '',
     'Costo Cristian del período: ' + money(c.cost), 'Resultado: ' + (c.diff >= 0 ? '+' : '-') + money(Math.abs(c.diff)), c.verdict + ' · ' + c.text, '',
     'DECISIONES', ...rep.decisions.map(d => '• ' + d), '', 'Adjunto: ' + attachmentName
   ].join('\n');

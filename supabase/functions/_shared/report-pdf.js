@@ -24,7 +24,9 @@ export async function reportPdf(rep) {
     y = H - 90;
   };
   const need = h => { if (y - h < 50) newPage(); };
-  const text = (t, o = {}) => { need(o.size ? o.size + 6 : 15); page.drawText(String(t), { x: o.x || M, y, size: o.size || 9.5, font: o.bold ? bold : font, color: o.color || INK }); y -= o.gap || 14; };
+  // texto que no entra en el ancho útil pasa a la línea siguiente (nunca se sale de la página)
+  const text = (t, o = {}) => { const sz = o.size || 9.5, f = o.bold ? bold : font, x = o.x || M, ls = wrap(String(t), W - M - x, sz, f);
+    ls.forEach((ln, i) => { need(sz + 6); page.drawText(ln, { x, y, size: sz, font: f, color: o.color || INK }); y -= i < ls.length - 1 ? sz + 3 : (o.gap || 14); }); };
   const wrap = (t, width, size, f = font) => {
     const words = String(t).split(' '), lines = []; let cur = '';
     for (const w of words) { const n = cur ? cur + ' ' + w : w; if (f.widthOfTextAtSize(n, size) > width && cur) { lines.push(cur); cur = w; } else cur = n; }
@@ -58,22 +60,44 @@ export async function reportPdf(rep) {
   section(1, 'PERÍODO');
   text(rep.period.window ? periodText(rep) + ' · ' + rep.period.days + ' días' : rep.period.label + ' · ' + dmy(rep.period.start) + ' al ' + dmy(rep.period.end) + ' · ' + rep.period.days + ' días');
   if (rep.period.cutoff_note) text(rep.period.cutoff_note, { color: MUTED, size: 8.6 });
-  text('Fecha que manda: finalización real de la hoja (America/Argentina/Mendoza). Solo hojas FINALIZADAS.', { color: MUTED, size: 8.6 });
-
-  section(2, 'COMPLETADOS · NO ENTREGADOS · REPROGRAMADOS');
-  text('ENVÍOS COMPLETADOS: ' + rep.summary.completed + '      NO ENTREGADOS: ' + rep.summary.not_delivered + '      REPROGRAMADOS: ' + rep.summary.rescheduled, { bold: true });
-  text(rep.summary.note, { color: MUTED, size: 8.6 });
-
-  section('3-6', 'ESTE · ALREDEDORES · CENTRO · INGRESOS');
-  const zc = [{ t: 'Zona', w: 150 }, { t: 'Completados', w: 80, right: true }, { t: 'No entregados', w: 85, right: true }, { t: 'Reprogramados', w: 85, right: true }, { t: 'Ingreso envíos', w: 70, right: true }, { t: 'Promedio', w: 45, right: true }];
-  tableRows(zc, rep.zones.map(z => [ZONE_LABEL[z.zone], String(z.completed), String(z.not_delivered), String(z.rescheduled), money(z.income), money(z.avg)])
-    .concat([['TOTAL GENERAL', String(rep.total.completed), String(rep.total.not_delivered), String(rep.total.rescheduled), money(rep.total.income), money(rep.total.avg)]]));
+  // V2 = hojas PUBLICADAS; un informe guardado con la versión 1 se reimprime como se generó (criterio de finalizadas)
+  const v2 = rep.criterion === 'HOJAS_PUBLICADAS';
+  if (v2) {
+    text('Fecha que manda: PUBLICACIÓN de la hoja (America/Argentina/Mendoza). Hojas publicadas: pendientes, en curso o finalizadas. Sin borradores ni canceladas.', { color: MUTED, size: 8.6 });
+    if ((rep.inputs?.missing_publication || []).length) text('Hojas sin fecha de publicación registrada (NO incluidas): ' + rep.inputs.missing_publication.join(', '), { color: ERR, size: 8.6 });
+    section(2, 'ENVÍOS INCLUIDOS Y SU ESTADO');
+    text('ENVÍOS INCLUIDOS: ' + rep.summary.shipments + '      PENDIENTES: ' + rep.summary.pending + '      ENTREGADOS: ' + rep.summary.delivered + '      NO ENTREGADOS: ' + rep.summary.not_delivered + '      REPROGRAMADOS: ' + rep.summary.rescheduled, { bold: true });
+    text(rep.summary.note, { color: MUTED, size: 8.6 });
+    section('3-6', 'ESTE · ALREDEDORES · CENTRO · IMPORTE DE ENVÍO INFORMADO');
+    // columnas = ancho útil exacto (595 − 2×40 = 515): importes grandes entran en una línea
+    const zc = [{ t: 'Zona', w: 95 }, { t: 'Envíos', w: 48, right: true }, { t: 'Pendientes', w: 58, right: true }, { t: 'Entregados', w: 58, right: true }, { t: 'No entreg.', w: 55, right: true }, { t: 'Reprog.', w: 50, right: true }, { t: 'Importe', w: 85, right: true }, { t: 'Promedio', w: 66, right: true }];
+    tableRows(zc, rep.zones.map(z => [ZONE_LABEL[z.zone], String(z.shipments), String(z.pending), String(z.delivered), String(z.not_delivered), String(z.rescheduled), money(z.income), money(z.avg)])
+      .concat([['TOTAL GENERAL', String(rep.total.shipments), String(rep.total.pending), String(rep.total.delivered), String(rep.total.not_delivered), String(rep.total.rescheduled), money(rep.total.income), money(rep.total.avg)]]));
+  } else {
+    text('Fecha que manda: finalización real de la hoja (America/Argentina/Mendoza). Solo hojas FINALIZADAS.', { color: MUTED, size: 8.6 });
+    section(2, 'COMPLETADOS · NO ENTREGADOS · REPROGRAMADOS');
+    text('ENVÍOS COMPLETADOS: ' + rep.summary.completed + '      NO ENTREGADOS: ' + rep.summary.not_delivered + '      REPROGRAMADOS: ' + rep.summary.rescheduled, { bold: true });
+    text(rep.summary.note, { color: MUTED, size: 8.6 });
+    section('3-6', 'ESTE · ALREDEDORES · CENTRO · INGRESOS');
+    const zc = [{ t: 'Zona', w: 150 }, { t: 'Completados', w: 80, right: true }, { t: 'No entregados', w: 85, right: true }, { t: 'Reprogramados', w: 85, right: true }, { t: 'Ingreso envíos', w: 70, right: true }, { t: 'Promedio', w: 45, right: true }];
+    tableRows(zc, rep.zones.map(z => [ZONE_LABEL[z.zone], String(z.completed), String(z.not_delivered), String(z.rescheduled), money(z.income), money(z.avg)])
+      .concat([['TOTAL GENERAL', String(rep.total.completed), String(rep.total.not_delivered), String(rep.total.rescheduled), money(rep.total.income), money(rep.total.avg)]]));
+  }
 
   section('7-8', 'COSTO Y RESULTADO · ¿EL TRANSPORTE SE PAGA SOLO?');
   const c = rep.coverage;
   [['Ingreso Zona Este', money(c.income_by_zone.ESTE)], ['Ingreso Alrededores', money(c.income_by_zone.ALREDEDORES)], ['Ingreso Centro', money(c.income_by_zone.CENTRO)],
-   ['Ingreso total de envíos', money(c.income)], ['Costo Cristian del período', money(c.cost)], ['Diferencia', (c.diff >= 0 ? '+' : '-') + money(Math.abs(c.diff))]]
-    .forEach(([k, v]) => { need(14); page.drawText(k, { x: M, y, size: 9.5, font, color: MUTED }); page.drawText(v, { x: M + 260 - font.widthOfTextAtSize(v, 9.5), y, size: 9.5, font: bold, color: INK }); y -= 14; });
+   [v2 ? 'Importe de envíos informado (no es dinero cobrado)' : 'Ingreso total de envíos', money(c.income)], ['Costo Cristian del período', money(c.cost)], ['Diferencia', (c.diff >= 0 ? '+' : '-') + money(Math.abs(c.diff))]]
+    .forEach(([k, v]) => {
+      // el rótulo usa solo el ancho libre a la izquierda del importe y pasa a otra línea si no entra (nunca lo pisa)
+      const vw = bold.widthOfTextAtSize(v, 9.5), right = M + 330, room = right - vw - 14 - M, lines = [];
+      for (const w of String(k).split(' ')) { const cur = lines.length ? lines[lines.length - 1] : null;
+        if (cur !== null && font.widthOfTextAtSize(cur + ' ' + w, 9.5) <= room) lines[lines.length - 1] = cur + ' ' + w; else lines.push(w); }
+      need(14 * lines.length);
+      page.drawText(v, { x: right - vw, y, size: 9.5, font: bold, color: INK });
+      lines.forEach((ln, i) => page.drawText(ln, { x: M, y: y - i * 12, size: 9.5, font, color: MUTED }));
+      y -= 14 + (lines.length - 1) * 12;
+    });
   y -= 4; text(c.verdict + ' · ' + c.text, { bold: true, size: 12, color: c.covers ? OK : ERR, gap: 18 });
   text('Costo prorrateado por día: cada día vale costo mensual / días de ese mes.', { color: MUTED, size: 8.6 });
 
@@ -81,7 +105,7 @@ export async function reportPdf(rep) {
   if (rep.best_clients.length) tableRows([{ t: 'Cliente', w: 190 }, { t: 'Compras', w: 60, right: true }, { t: 'Frecuencia', w: 90 }, { t: 'Última compra', w: 80 }, { t: 'Facturación*', w: 95, right: true }],
     rep.best_clients.map(b => [b.client, String(b.purchases), b.freq ? 'cada ' + Math.round(b.freq) + ' días' : '—', dmy(b.last), money(b.amount)]));
   else text('Sin compras en el período.', { color: MUTED });
-  text('* Mercadería de entregas completadas en hojas finalizadas. No es rentabilidad ni margen.', { color: MUTED, size: 8 });
+  text(v2 ? '* Mercadería de los envíos de hojas publicadas (compra = envío publicado). No es rentabilidad ni margen.' : '* Mercadería de entregas completadas en hojas finalizadas. No es rentabilidad ni margen.', { color: MUTED, size: 8 });
 
   section(10, 'CLIENTES A RECUPERAR');
   text('Alertas de inactividad: +30 días: ' + rep.alerts.over30 + ' · +60 días: ' + rep.alerts.over60 + ' · +90 días: ' + rep.alerts.over90, { size: 9 });

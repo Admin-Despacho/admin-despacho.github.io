@@ -8,41 +8,45 @@ const at = (date, hhmm) => new Date(atLocal(date, hhmm)).toISOString();
 const stop = (client, zone, outcome, fee, extra = {}) => ({ client_name: client, client_key: client, zone, outcome, shipping_fee: fee, merchandise_amount: 100000, merchandise_collected: 100000, ...extra });
 // Semana del 05 al 10/10/2026
 const ROUTES = [
-  { id: 'a', number: 'CTE-1', carrier_id: 'CT-ESTE', operational_status: 'COMPLETADA', completed_at: at('2026-10-06', '18:00'), stops: [
+  { id: 'a', number: 'CTE-1', carrier_id: 'CT-ESTE', operational_status: 'COMPLETADA', published_at: at('2026-10-06', '08:00'), completed_at: at('2026-10-06', '18:00'), stops: [
     stop('Todo Móvil', 'ESTE', 'ENTREGADO', 13000), stop('Celular Shop', 'ESTE', 'ENTREGA_PARCIAL', 13000), stop('Junín Cell', 'ESTE', 'NO_ENTREGADO', 13000), stop('Palmira', 'ESTE', 'REPROGRAMAR', 13000)] },
-  { id: 'b', number: 'CTA-1', carrier_id: 'CT-ALR', operational_status: 'COMPLETADA', completed_at: at('2026-10-07', '19:00'), stops: [
+  { id: 'b', number: 'CTA-1', carrier_id: 'CT-ALR', operational_status: 'COMPLETADA', published_at: at('2026-10-07', '08:00'), completed_at: at('2026-10-07', '19:00'), stops: [
     stop('Maipú Cell', 'ALREDEDORES', 'ENTREGADO', 9000), stop('Centro Cell', 'CENTRO', 'ENTREGADO', 7000), stop('Plaza Tech', 'CENTRO', 'ENTREGA_PARCIAL', 7000)] },
-  { id: 'p', number: 'CTE-PUB', carrier_id: 'CT-ESTE', operational_status: 'PUBLICADA', completed_at: null, stops: [stop('Publicada SA', 'ESTE', 'ENTREGADO', 13000)] },
-  { id: 'c', number: 'CTA-CUR', carrier_id: 'CT-ALR', operational_status: 'EN_CURSO', completed_at: null, stops: [stop('En Curso SA', 'CENTRO', 'ENTREGADO', 7000)] },
-  // Finalizada el sábado DESPUÉS de las 15:00: va al informe semanal siguiente
-  { id: 'late', number: 'CTE-2', carrier_id: 'CT-ESTE', operational_status: 'COMPLETADA', completed_at: at('2026-10-10', '16:10'), stops: [stop('Tarde SRL', 'ESTE', 'ENTREGADO', 13000)] }
+  // V2: PUBLICADA y EN CURSO entran (con todos sus envíos, aunque estén pendientes)
+  { id: 'p', number: 'CTE-PUB', carrier_id: 'CT-ESTE', operational_status: 'PUBLICADA', published_at: at('2026-10-08', '08:00'), completed_at: null, stops: [stop('Publicada SA', 'ESTE', null, 13000)] },
+  { id: 'c', number: 'CTA-CUR', carrier_id: 'CT-ALR', operational_status: 'EN_CURSO', published_at: at('2026-10-08', '09:00'), completed_at: null, stops: [stop('En Curso SA', 'CENTRO', 'ENTREGADO', 7000)] },
+  // PUBLICADA el sábado DESPUÉS de las 15:00: va al informe semanal siguiente (manda la publicación, no la finalización)
+  { id: 'late', number: 'CTE-2', carrier_id: 'CT-ESTE', operational_status: 'COMPLETADA', published_at: at('2026-10-10', '16:10'), completed_at: at('2026-10-10', '19:00'), stops: [stop('Tarde SRL', 'ESTE', 'ENTREGADO', 13000)] },
+  // borrador y cancelada: nunca entran
+  { id: 'd', number: 'CTE-BOR', carrier_id: 'CT-ESTE', operational_status: 'BORRADOR', published_at: null, stops: [stop('Borrador SA', 'ESTE', null, 13000)] },
+  { id: 'x', number: 'CTE-CAN', carrier_id: 'CT-ESTE', operational_status: 'CANCELADA', published_at: at('2026-10-08', '10:00'), stops: [stop('Cancelada SA', 'ESTE', null, 13000)] }
 ];
 const NOW = atLocal('2026-10-10', '15:00');
 const WEEK = buildReport({ routes: ROUTES, costs: COSTS, sel: { kind: 'WEEKLY', saturday: '2026-10-10' }, now: NOW, type: 'WEEKLY' });
 const z = (rep, k) => rep.zones.find(x => x.zone === k);
 
 describe('Informe Cristian Torres — consolidación', () => {
-  it('REPORT-MAIL-01 hoja PUBLICADA no entra', () => { expect(WEEK.inputs.routes_counted).not.toContain('CTE-PUB'); expect(JSON.stringify(WEEK)).not.toContain('Publicada SA'); });
-  it('REPORT-MAIL-02 hoja EN CURSO no entra', () => { expect(WEEK.inputs.routes_counted).not.toContain('CTA-CUR'); expect(JSON.stringify(WEEK)).not.toContain('En Curso SA'); });
-  it('REPORT-MAIL-03 hoja FINALIZADA entra', () => expect(WEEK.inputs.routes_counted).toEqual(['CTE-1', 'CTA-1']));
-  it('REPORT-MAIL-04 ENTREGA PARCIAL cuenta como completada', () => { expect(z(WEEK, 'ESTE').completed).toBe(2); expect(WEEK.summary.completed).toBe(5); });
-  it('REPORT-MAIL-05 ENTREGA PARCIAL suma ingreso', () => expect(z(WEEK, 'ESTE').income).toBe(26000));
-  it('REPORT-MAIL-06 NO ENTREGADO no suma ingreso', () => { expect(z(WEEK, 'ESTE').not_delivered).toBe(1); expect(WEEK.inputs.fees_used.some(f => f.client === 'Junín Cell')).toBe(false); });
-  it('REPORT-MAIL-07 REPROGRAMAR no suma ingreso', () => { expect(z(WEEK, 'ESTE').rescheduled).toBe(1); expect(WEEK.inputs.fees_used.some(f => f.client === 'Palmira')).toBe(false); });
+  it('REPORT-MAIL-01 (V2) hoja PUBLICADA con su envío PENDIENTE entra', () => { expect(WEEK.inputs.routes_counted).toContain('CTE-PUB'); expect(z(WEEK, 'ESTE').pending).toBe(1); });
+  it('REPORT-MAIL-02 (V2) hoja EN CURSO entra', () => expect(WEEK.inputs.routes_counted).toContain('CTA-CUR'));
+  it('REPORT-MAIL-03 (V2) hojas publicadas del período (finalizadas o no) entran; borrador, cancelada y publicada fuera de ventana no', () => expect(WEEK.inputs.routes_counted).toEqual(['CTE-1', 'CTA-1', 'CTE-PUB', 'CTA-CUR']));
+  it('REPORT-MAIL-04 (V2) ENTREGA PARCIAL cuenta como entregada; todos los envíos cuentan', () => { expect(z(WEEK, 'ESTE').delivered).toBe(2); expect(WEEK.summary).toMatchObject({ shipments: 9, delivered: 6, pending: 1, not_delivered: 1, rescheduled: 1 }); });
+  it('REPORT-MAIL-05 (V2) importe de envío de Este = todos sus envíos publicados', () => expect(z(WEEK, 'ESTE').income).toBe(65000));
+  it('REPORT-MAIL-06 (V2) NO ENTREGADO se informa aparte y su envío publicado cuenta (el estado no cambia el total)', () => { expect(z(WEEK, 'ESTE').not_delivered).toBe(1); expect(WEEK.inputs.fees_used.some(f => f.client === 'Junín Cell' && f.outcome === 'NO_ENTREGADO')).toBe(true); });
+  it('REPORT-MAIL-07 (V2) REPROGRAMAR se informa aparte y su envío publicado cuenta', () => { expect(z(WEEK, 'ESTE').rescheduled).toBe(1); expect(WEEK.inputs.fees_used.some(f => f.client === 'Palmira')).toBe(true); });
   it('REPORT-MAIL-08/09/10 Este, Alrededores y Centro SEPARADOS (nunca Alrededores + Centro)', () => {
-    expect(WEEK.zones.map(x => [x.zone, x.completed, x.income])).toEqual([['ESTE', 2, 26000], ['ALREDEDORES', 1, 9000], ['CENTRO', 2, 14000]]);
-    expect(WEEK.total).toMatchObject({ completed: 5, income: 49000 });
+    expect(WEEK.zones.map(x => [x.zone, x.shipments, x.income])).toEqual([['ESTE', 5, 65000], ['ALREDEDORES', 1, 9000], ['CENTRO', 3, 21000]]);
+    expect(WEEK.total).toMatchObject({ shipments: 9, income: 95000 });
     expect(JSON.stringify(WEEK)).not.toMatch(/ALREDEDORES\s*\+\s*CENTRO|Alrededores \+ Centro/i);
   });
-  it('Finalizada el sábado después de las 15:00 → entra en el informe SIGUIENTE', () => {
+  it('(V2) PUBLICADA el sábado después de las 15:00 → entra en el informe SIGUIENTE', () => {
     expect(WEEK.inputs.routes_counted).not.toContain('CTE-2');
     const next = buildReport({ routes: ROUTES, costs: COSTS, sel: { kind: 'WEEKLY', saturday: '2026-10-17' }, now: atLocal('2026-10-17', '15:00'), type: 'WEEKLY' });
     expect(next.inputs.routes_counted).toContain('CTE-2');
   });
-  it('Fecha que manda = finalización real (no publicación)', () => {
-    const r = [{ ...ROUTES[0], published_at: at('2026-09-20', '08:00') }];
-    expect(buildReport({ routes: r, costs: COSTS, sel: { kind: 'MONTH', year: 2026, month: 10 }, now: NOW }).summary.completed).toBe(2);
-    expect(buildReport({ routes: r, costs: COSTS, sel: { kind: 'MONTH', year: 2026, month: 9 }, now: NOW }).summary.completed).toBe(0);
+  it('(V2) Fecha que manda = PUBLICACIÓN (no finalización)', () => {
+    const r = [{ ...ROUTES[0], published_at: at('2026-09-20', '08:00') }];   // publicada en septiembre, finalizada en octubre
+    expect(buildReport({ routes: r, costs: COSTS, sel: { kind: 'MONTH', year: 2026, month: 9 }, now: NOW }).summary.shipments).toBe(4);
+    expect(buildReport({ routes: r, costs: COSTS, sel: { kind: 'MONTH', year: 2026, month: 10 }, now: NOW }).summary.shipments).toBe(0);
   });
 });
 
@@ -129,7 +133,7 @@ describe('Email del informe', () => {
   });
   it('Encabezado, resumen y nota de entrega parcial', () => {
     // Fase 2A.1: resumen en tarjetas según el modelo de email aprobado
-    ['OK ACCESORIOS · INFORME AUTOMÁTICO', 'Informe semanal · Cristian Torres', 'Envíos completados', '>5<', 'No entregados', '>1<', 'Reprogramados', 'Entrega parcial se contabiliza como completada.'].forEach(t => expect(html).toContain(t));
+    ['OK ACCESORIOS · INFORME AUTOMÁTICO', 'Informe semanal · Cristian Torres', 'Envíos incluidos', '>9<', 'pendientes 1', 'No entregados', '>1<', 'Reprogramados', 'Incluye todos los envíos de hojas publicadas', 'no es dinero cobrado'].forEach(t => expect(html).toContain(t));
   });
   it('Tabla por zona con Este, Alrededores, Centro y TOTAL separados', () => ['Zona Este', 'Alrededores', 'Centro', '<b>TOTAL</b>'].forEach(t => expect(html).toContain(t)));
   it('Email: decisiones, clientes a recuperar con prioridad y adjunto', () => ['Decisiones sugeridas', 'Clientes a recuperar · prioridad', '📎', 'OK Despacho · Informe generado automáticamente'].forEach(t => expect(html).toContain(t)));
@@ -140,11 +144,12 @@ describe('Email del informe', () => {
     expect(h).toContain('Clientes a recuperar'); rep.recover.slice(0, 5).forEach(c => expect(h).toContain(c.client));
     if (rep.recover.length > 5) expect(h).not.toContain('>' + rep.recover[5].client + '<');
   });
-  it('REPORT-MAIL-18 el email contiene los mejores clientes', () => { expect(html).toContain('Mejores clientes'); expect(html).toContain('Todo Móvil'); });
+  // (V2) cada envío publicado es una compra: el ranking cambia; se verifica que el correo muestre el primero del informe
+  it('REPORT-MAIL-18 el email contiene los mejores clientes', () => { expect(html).toContain('Mejores clientes'); expect(WEEK.best_clients.length).toBeGreaterThan(0); expect(html).toContain(WEEK.best_clients[0].client); });
   it('REPORT-MAIL-19 el email contiene zonas a reforzar', () => { expect(html).toContain('Zonas a reforzar'); expect(html).toMatch(/MANTENER|REFORZAR REPARTO|RECUPERAR COMERCIALMENTE/); });
   it('REPORT-MAIL-20 el ingreso de transporte NO incluye cobranzas de mercadería', () => {
-    expect(WEEK.total.income).toBe(49000); // 5 envíos completados; la mercadería cobrada (500.000) no suma
-    expect(html).toContain('$ 49.000'); expect(html).not.toContain('$ 549.000');
+    expect(WEEK.total.income).toBe(95000); // (V2) 9 envíos publicados; la mercadería cobrada (900.000) no suma
+    expect(html).toContain('$ 95.000'); expect(html).not.toContain('$ 995.000');
   });
   it('Email compatible: sin JavaScript, sin fuentes externas, ancho máximo 700 px, adjunto nombrado', () => {
     expect(html).not.toMatch(/<script|@import|fonts\.googleapis|<link /i); expect(html).toContain('max-width:700px'); expect(html).toContain('Informe_Cristian_Torres_Semanal_2026-10-10.pdf');
@@ -173,11 +178,12 @@ describe('Fase 2A.1 — semanal con una sola convención (WEEK) y envío proviso
     const reps = sats.map(sat => buildReport({ routes: all, costs: COSTS, sel: { kind: 'WEEKLY', saturday: sat }, now: atLocal(sat, '15:00'), type: 'WEEKLY' }));
     for (let i = 1; i < reps.length; i++) expect(reps[i].period.from).toBe(reps[i - 1].period.to); // sin huecos
     const counted = reps.flatMap(r => r.inputs.routes_counted); expect(new Set(counted).size).toBe(counted.length); // sin doble conteo
-    const direct = all.filter(r => r.operational_status === 'COMPLETADA' && Date.parse(r.completed_at) >= Date.parse(reps[0].period.from) && Date.parse(r.completed_at) < Date.parse(reps[3].period.to)).length;
+    const pub = r => r.published_at || (r.dispatch_mode === 'EXTERNAL' ? r.dispatched_at : null);   // (V2) manda la publicación
+    const direct = all.filter(r => !['BORRADOR', 'CANCELADA'].includes(r.operational_status) && pub(r) && (r.stops || []).length && Date.parse(pub(r)) >= Date.parse(reps[0].period.from) && Date.parse(pub(r)) < Date.parse(reps[3].period.to)).length;
     expect(counted.length).toBe(direct);
   });
   it('ENV-ON-25 el informe no usa un costo de envío provisorio sin confirmar', () => {
-    const r = [{ id: 'x', number: 'CTA-9', carrier_id: 'CT-ALR', operational_status: 'COMPLETADA', completed_at: at('2026-10-06', '18:00'), stops: [
+    const r = [{ id: 'x', number: 'CTA-9', carrier_id: 'CT-ALR', operational_status: 'COMPLETADA', published_at: at('2026-10-06', '08:00'), completed_at: at('2026-10-06', '18:00'), stops: [
       stop('Moran', 'CENTRO', 'ENTREGADO', 10000, { shipping_fee_source: 'PENDING_CONFIRMATION' }), stop('Otro', 'CENTRO', 'ENTREGADO', 7000, { shipping_fee_source: 'CONFIRMED_FALLBACK' })] }];
     const rep = buildReport({ routes: r, costs: COSTS, sel: { kind: 'WEEKLY', saturday: '2026-10-10' }, now: NOW });
     expect(rep.total.income).toBe(7000); expect(rep.inputs.fees_excluded_pending).toBe(1);

@@ -807,8 +807,14 @@ export class DemoApi {
   // Hojas reales finalizadas de Cristian → informe
   _liveForReport() {
     this._refresh();
-    return (this.db.routes2 || []).filter(r => ['CT-ESTE', 'CT-ALR'].includes(r.carrier_id)).map(r => ({ id: r.id, number: r.number, carrier_id: r.carrier_id, operational_status: r.operational_status, completed_at: r.completed_at,
-      stops: r.stops.map(s => ({ client_name: s.client_name, client_key: s.client_key, zone: s.zone, outcome: s.outcome, shipping_fee: s.shipping_fee, shipping_fee_source: s.shipping_fee_source, merchandise_amount: s.merchandise_amount })) }));
+    // igual que el servidor (V2): hojas de Cristian (report_group CRISTIAN_TORRES) con su fecha de PUBLICACIÓN; si falta, el registro
+    // histórico ROUTE_PUBLISHED de la auditoría. El motor excluye borradores/canceladas y filtra por publicación.
+    const ct = new Set(this._carriers().filter(c => c.report_group === 'CRISTIAN_TORRES').map(c => c.id));
+    const hist = id => { const a = (this.db.audit || []).filter(x => x.action === 'ROUTE_PUBLISHED' && x.target_id === id).map(x => x.at).sort()[0]; return a || null; };
+    return (this.db.routes2 || []).filter(r => ct.has(r.carrier_id)).map(r => ({ id: r.id, number: r.number, carrier_id: r.carrier_id, operational_status: r.operational_status,
+      published_at: r.published_at || null, dispatched_at: r.dispatched_at || null, dispatch_mode: r.dispatch_mode || null, completed_at: r.completed_at, version: r.version || 1,
+      published_at_hist: r.published_at ? null : hist(r.id),
+      stops: r.stops.map(s => ({ id: s.id, stop_type: s.stop_type || 'PEDIDO', client_name: s.client_name, client_key: s.client_key, zone: s.zone, outcome: s.outcome, shipping_fee: s.shipping_fee, shipping_fee_source: s.shipping_fee_source, merchandise_amount: s.merchandise_amount })) }));
   }
 
   // Confirmación de envío provisorio (equivale a confirm_shipping_amount del servidor)

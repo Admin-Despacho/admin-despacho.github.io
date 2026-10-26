@@ -34,13 +34,23 @@ async function exportCristianExcel(rep, filename) {
   ws.addRow(['INFORME CRISTIAN TORRES']);
   ws.addRow(['Período', rep.period.label, 'Desde', rep.period.start, 'Hasta', rep.period.end, 'Días', rep.period.days]);
   ws.addRow([]);
-  ws.addRow(['ZONA','COMPLETADOS','INGRESO ENVÍOS','PROMEDIO']);
-  (rep.zones || []).forEach(z => ws.addRow([ZONE_LABEL[z.zone] || z.zone, z.completed, z.income, z.avg]));
-  ws.addRow(['TOTAL', rep.total?.completed || 0, rep.total?.income || 0, rep.total?.avg || 0]);
+  // V2 (hojas publicadas): mismos números que la pantalla. Informes guardados con la versión 1 se exportan como se generaron.
+  const v2 = rep.criterion === 'HOJAS_PUBLICADAS';
+  if (v2) {
+    ws.addRow(['Criterio', 'Hojas PUBLICADAS (pendientes, en curso o finalizadas) por fecha de publicación, hora de Mendoza. Sin borradores ni canceladas. Importe = envío informado, no dinero cobrado.']);
+    ws.addRow(['ZONA','ENVÍOS INCLUIDOS','PENDIENTES','ENTREGADOS','NO ENTREGADOS','REPROGRAMADOS','IMPORTE DE ENVÍO INFORMADO','PROMEDIO POR ENVÍO']);
+    (rep.zones || []).forEach(z => ws.addRow([ZONE_LABEL[z.zone] || z.zone, z.shipments, z.pending, z.delivered, z.not_delivered, z.rescheduled, z.income, z.avg]));
+    ws.addRow(['TOTAL', rep.total?.shipments || 0, rep.total?.pending || 0, rep.total?.delivered || 0, rep.total?.not_delivered || 0, rep.total?.rescheduled || 0, rep.total?.income || 0, rep.total?.avg || 0]);
+    if ((rep.inputs?.missing_publication || []).length) ws.addRow(['Hojas sin fecha de publicación (no incluidas)', rep.inputs.missing_publication.join(', ')]);
+  } else {
+    ws.addRow(['ZONA','COMPLETADOS','INGRESO ENVÍOS','PROMEDIO']);
+    (rep.zones || []).forEach(z => ws.addRow([ZONE_LABEL[z.zone] || z.zone, z.completed, z.income, z.avg]));
+    ws.addRow(['TOTAL', rep.total?.completed || 0, rep.total?.income || 0, rep.total?.avg || 0]);
+  }
   ws.addRow([]);
   ws.addRow(['COBERTURA DE COSTO']);
   ws.addRow(['Costo Cristian', rep.coverage?.cost || 0]);
-  ws.addRow(['Ingreso total', rep.coverage?.income || 0]);
+  ws.addRow([v2 ? 'Importe de envíos informado' : 'Ingreso total', rep.coverage?.income || 0]);
   ws.addRow(['Diferencia', rep.coverage?.diff || 0]);
   ws.addRow(['Cubre costo', rep.coverage?.covers ? 'SÍ' : 'NO']);
   const best = wb.addWorksheet('Mejores clientes');
@@ -50,8 +60,8 @@ async function exportCristianExcel(rep, filename) {
   rec.addRow(['CLIENTE','ZONA','ÚLTIMA COMPRA','DÍAS SIN COMPRAR','FRECUENCIA','COMPRAS 90 DÍAS','DESVÍO','ESTADO','ACCIÓN']);
   (rep.recover || []).forEach(x => rec.addRow([x.client, ZONE_LABEL[x.zone] || x.zone, x.last, x.days_since, x.freq, x.purchases_90, x.deviation, x.status, x.action]));
   const zon = wb.addWorksheet('Zonas');
-  zon.addRow(['ZONA','COMPLETADOS','NO ENTREGADOS','REPROGRAMADOS','INGRESO','TENDENCIA %','CLIENTES ACTIVOS','INACTIVOS','FRECUENCIA','CARGA DÍA','CONCLUSIÓN','POR QUÉ']);
-  (rep.reinforce || []).forEach(x => zon.addRow([ZONE_LABEL[x.zone] || x.zone, x.completed, x.not_delivered, x.rescheduled, x.income, x.growth, x.active_clients, x.inactive_clients, x.avg_freq, x.load_per_day, x.decision, x.why]));
+  zon.addRow(['ZONA', v2 ? 'ENVÍOS INCLUIDOS' : 'COMPLETADOS'].concat(v2 ? ['PENDIENTES', 'ENTREGADOS'] : []).concat(['NO ENTREGADOS','REPROGRAMADOS', v2 ? 'IMPORTE INFORMADO' : 'INGRESO','TENDENCIA %','CLIENTES ACTIVOS','INACTIVOS','FRECUENCIA','CARGA DÍA','CONCLUSIÓN','POR QUÉ']));
+  (rep.reinforce || []).forEach(x => zon.addRow([ZONE_LABEL[x.zone] || x.zone, v2 ? x.shipments : x.completed].concat(v2 ? [x.pending, x.delivered] : []).concat([x.not_delivered, x.rescheduled, x.income, x.growth, x.active_clients, x.inactive_clients, x.avg_freq, x.load_per_day, x.decision, x.why])));
   [ws,best,rec,zon].forEach(s => { s.getRow(1).font = { bold: true }; s.columns.forEach(col => { col.width = Math.min(45, Math.max(12, ...col.values.slice(1).map(v => String(v ?? '').length + 2))); }); });
   await saveWorkbook(wb, filename);
 }
@@ -151,30 +161,36 @@ export class ReportsPanel {
     else rep = (await this.call('preview', { sel: this.sel })).report;
     const step = (n, title, inner, small) => '<section class="step rp-step" id="rpStep' + n + '"><h2><span class="n">' + n + '</span>' + title + (small ? '<small>' + small + '</small>' : '') + '</h2>' + inner + '</section>';
     const c = rep.coverage;
-    const zoneCard = z => '<div class="rp-zone"><b>' + ZONE_LABEL[z.zone].toUpperCase() + '</b><div class="rp-zn"><span>Envíos completados</span><strong>' + z.completed + '</strong></div><div class="rp-zn"><span>Ingreso por envíos</span><strong>' + money(z.income) + '</strong></div><div class="rp-zn"><span>Promedio por envío</span><strong>' + money(z.avg) + '</strong></div></div>';
+    // V2 = hojas PUBLICADAS (criterio vigente). Un informe guardado con la versión 1 (solo finalizadas) se muestra como se generó.
+    const v2 = rep.criterion === 'HOJAS_PUBLICADAS', miss = (rep.inputs && rep.inputs.missing_publication) || [];
+    const nShip = z => v2 ? z.shipments : z.completed;
+    const zoneCard = z => '<div class="rp-zone"><b>' + ZONE_LABEL[z.zone].toUpperCase() + '</b><div class="rp-zn"><span>' + (v2 ? 'Envíos incluidos' : 'Envíos completados') + '</span><strong>' + nShip(z) + '</strong></div><div class="rp-zn"><span>' + (v2 ? 'Importe de envío' : 'Ingreso por envíos') + '</span><strong>' + money(z.income) + '</strong></div><div class="rp-zn"><span>Promedio por envío</span><strong>' + money(z.avg) + '</strong></div></div>';
     const tbl = (heads, rows, empty) => rows.length ? '<div class="utable-wrap"><table class="utable rp-table"><thead><tr>' + heads.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>' : '<p class="rp-empty">' + empty + '</p>';
     body.innerHTML =
       (saved ? '<div class="up-msg ok" id="rpSaved">INFORME GUARDADO · ' + TYPE[saved.report_type] + ' · versión ' + saved.version + ' · generado ' + new Date(saved.generated_at).toLocaleString('es-AR') + ' · costo usado ' + money(c.cost) + '. No se recalcula. <button class="linkbtn" type="button" id="rpBack">Volver al informe actual</button></div>' : '') +
       step(1, 'PERÍODO A ANALIZAR', (saved ? '' : this.periodControls()) + '<p class="rp-plabel" id="rpPeriod"><b>' + esc(rep.period.label) + '</b>' + (rep.period.window ? '' : ' · ' + dmy(rep.period.start) + ' al ' + dmy(rep.period.end)) + ' · <b id="rpDays">' + rep.period.days + ' días</b>' + (rep.period.cutoff_note ? '<br><span>' + esc(rep.period.cutoff_note) + '</span>' : '') + '</p>' +
-        '<div class="rp-meta"><span>Período: <b>' + esc(rep.period.label) + '</b></span><span>Hojas finalizadas: <b id="rpRoutes">' + rep.inputs.routes_counted.length + '</b></span><span>Días: <b>' + rep.period.days + '</b></span></div>' +
-        '<p class="rp-note">Solo hojas FINALIZADAS por Cristian, por fecha real de finalización (hora de Mendoza). Entrega parcial cuenta como completada.</p>', '') +
-      step(2, 'CUANTIFICACIÓN POR ZONA · ENVÍOS + INGRESOS', '<div class="rp-money"><div class="rp-mhead">Resultado consolidado de hojas finalizadas</div><div class="rp-zrow head"><div>Zona</div><div>Completados</div><div>Ingreso envíos</div><div>Promedio por envío</div></div>' +
-        rep.zones.map(z => '<div class="rp-zrow"><div><b>' + ZONE_LABEL[z.zone].toUpperCase() + '</b></div><div>' + z.completed + '</div><div>' + money(z.income) + '</div><div>' + money(z.avg) + '</div></div>').join('') + '</div>' +
-        '<div class="rp-total" id="rpTotal"><span>TOTAL GENERAL</span><b>' + rep.total.completed + ' envíos</b><b>' + money(rep.total.income) + '</b><span>promedio ' + money(rep.total.avg) + '</span></div>' +
-        '<p class="rp-note">No entregados: ' + rep.summary.not_delivered + ' · Reprogramados: ' + rep.summary.rescheduled + ' (no suman ingreso).</p>') +
+        '<div class="rp-meta"><span>Período: <b>' + esc(rep.period.label) + '</b></span><span>' + (v2 ? 'Hojas publicadas' : 'Hojas finalizadas') + ': <b id="rpRoutes">' + rep.inputs.routes_counted.length + '</b></span><span>Días: <b>' + rep.period.days + '</b></span></div>' +
+        (v2 ? '<p class="rp-note" id="rpCriterion">Hojas PUBLICADAS de Cristian (pendientes, en curso o finalizadas), por fecha de publicación (hora de Mendoza). Sin borradores ni canceladas. No hace falta que Cristian marque ENTREGADO ni complete la hoja.</p>' +
+          (miss.length ? '<p class="rp-note warn" id="rpMissing">' + miss.length + ' hoja(s) sin fecha de publicación registrada NO están incluidas: ' + esc(miss.join(', ')) + '.</p>' : '')
+          : '<p class="rp-note">Informe guardado con el criterio anterior: solo hojas FINALIZADAS por Cristian, por fecha real de finalización (hora de Mendoza). Entrega parcial cuenta como completada.</p>'), '') +
+      step(2, 'CUANTIFICACIÓN POR ZONA · ENVÍOS + ' + (v2 ? 'IMPORTES' : 'INGRESOS'), '<div class="rp-money"><div class="rp-mhead">' + (v2 ? 'Envíos incluidos de hojas publicadas' : 'Resultado consolidado de hojas finalizadas') + '</div><div class="rp-zrow head"><div>Zona</div><div>' + (v2 ? 'Envíos incluidos' : 'Completados') + '</div><div>' + (v2 ? 'Importe de envío informado' : 'Ingreso envíos') + '</div><div>Promedio por envío</div></div>' +
+        rep.zones.map(z => '<div class="rp-zrow"><div><b>' + ZONE_LABEL[z.zone].toUpperCase() + '</b></div><div>' + nShip(z) + '</div><div>' + money(z.income) + '</div><div>' + money(z.avg) + '</div></div>').join('') + '</div>' +
+        '<div class="rp-total" id="rpTotal"><span>TOTAL GENERAL</span><b>' + nShip(rep.total) + ' envíos</b><b>' + money(rep.total.income) + '</b><span>promedio ' + money(rep.total.avg) + '</span></div>' +
+        (v2 ? '<p class="rp-note" id="rpStates">Estado de esos envíos (no cambia los totales): pendientes ' + rep.summary.pending + ' · entregados ' + rep.summary.delivered + ' · no entregados ' + rep.summary.not_delivered + ' · reprogramados ' + rep.summary.rescheduled + '. El importe es el envío informado en la hoja: no es dinero cobrado.</p>'
+          : '<p class="rp-note">No entregados: ' + rep.summary.not_delivered + ' · Reprogramados: ' + rep.summary.rescheduled + ' (no suman ingreso).</p>')) +
       step(3, '¿EL TRANSPORTE SE PAGA SOLO?', '<div class="rp-cards">' +
         [['Ingreso Zona Este', money(c.income_by_zone.ESTE)], ['Ingreso Alrededores', money(c.income_by_zone.ALREDEDORES)], ['Ingreso Centro', money(c.income_by_zone.CENTRO)], ['Costo Cristian', money(c.cost)],
-         ['Ingreso total de envíos', money(c.income)], ['Diferencia', (c.diff >= 0 ? '+' : '-') + money(Math.abs(c.diff)), c.covers ? 'good' : 'bad'], ['¿Cubre el costo?', c.covers ? 'SÍ' : 'NO', c.covers ? 'good' : 'bad'], ['Hojas finalizadas', String(rep.inputs.routes_counted.length)]]
+         [v2 ? 'Importe de envíos informado' : 'Ingreso total de envíos', money(c.income)], ['Diferencia', (c.diff >= 0 ? '+' : '-') + money(Math.abs(c.diff)), c.covers ? 'good' : 'bad'], ['¿Cubre el costo?', c.covers ? 'SÍ' : 'NO', c.covers ? 'good' : 'bad'], [v2 ? 'Hojas publicadas' : 'Hojas finalizadas', String(rep.inputs.routes_counted.length)]]
           .map(([k, v, cl]) => '<div class="rp-card"><span>' + k + '</span><b class="' + (cl || '') + '">' + v + '</b></div>').join('') + '</div>' +
         '<div class="rp-verdict ' + (c.covers ? 'yes' : 'no') + '" id="rpVerdict"><b>' + c.verdict + '</b><span>' + esc(c.text) + '</span></div>', 'Ingreso solo por servicio de envío') +
       step(4, 'MEJORES CLIENTES', '<div class="rp-best">' + rep.best_clients.slice(0, 3).map((b, i) => '<div class="rp-card"><div class="rp-rankline"><i>' + (i + 1) + '</i><div><b>' + esc(b.client) + '</b><small>' + b.purchases + ' compras · frecuencia ' + days(b.freq) + '</small></div></div><b>' + money(b.amount) + '</b></div>').join('') + '</div>' +
         tbl(['CLIENTE', 'COMPRAS', 'FRECUENCIA PROMEDIO', 'ÚLTIMA COMPRA', 'FACTURACIÓN*'], rep.best_clients.slice(3).map(b => '<tr><td><b>' + esc(b.client) + '</b></td><td>' + b.purchases + '</td><td>' + days(b.freq) + '</td><td>' + dmy(b.last) + '</td><td>' + money(b.amount) + '</td></tr>'), rep.best_clients.length ? '' : 'Sin compras en el período.') +
-        '<p class="rp-note">* Mercadería de entregas completadas en hojas finalizadas. No es margen ni rentabilidad.</p>') +
+        '<p class="rp-note">' + (v2 ? '* Mercadería de los envíos de hojas publicadas (compra = envío publicado).' : '* Mercadería de entregas completadas en hojas finalizadas.') + ' No es margen ni rentabilidad.</p>') +
       step(5, 'CLIENTES A RECUPERAR', '<div class="rp-alerts"><span>+30 días sin comprar: <b>' + rep.alerts.over30 + '</b></span><span>+60 días: <b>' + rep.alerts.over60 + '</b></span><span>+90 días: <b>' + rep.alerts.over90 + '</b></span></div>' +
         tbl(['CLIENTE', 'ZONA', 'ÚLTIMA COMPRA', 'DÍAS SIN COMPRAR', 'FRECUENCIA', 'COMPRAS 90 DÍAS', 'DESVÍO', 'ESTADO', 'ACCIÓN'], rep.recover.map(r => '<tr><td><b>' + esc(r.client) + '</b></td><td>' + ZONE_LABEL[r.zone] + '</td><td>' + dmy(r.last) + '</td><td>' + r.days_since + '</td><td>' + days(r.freq) + '</td><td>' + r.purchases_90 + '</td><td>+' + Math.round(r.deviation) + ' días</td><td><span class="rp-st ' + r.status.replace(' ', '_') + '">' + r.status + '</span></td><td>' + esc(r.action) + '</td></tr>'), 'Ningún cliente fuera de su frecuencia habitual.') +
         '<p class="rp-note">La prioridad compara los días sin comprar contra la frecuencia habitual de cada cliente.</p>') +
-      step(6, 'ZONAS A REFORZAR', '<div class="rp-best">' + rep.reinforce.map(z => '<div class="rp-card rp-zc ' + (z.decision === 'REFORZAR REPARTO' ? 'high' : z.decision === 'RECUPERAR COMERCIALMENTE' ? 'med' : '') + '"><span>' + ZONE_LABEL[z.zone] + '</span><b>' + z.decision.split(' ')[0] + '</b><small>' + esc(z.why) + '</small></div>').join('') + '</div>' + tbl(['ZONA', 'COMPLETADOS', 'NO ENTREG.', 'REPROG.', 'INGRESO', 'TENDENCIA', 'CLIENTES ACTIVOS', 'INACTIVOS', 'FRECUENCIA', 'CARGA/DÍA', 'CONCLUSIÓN', 'POR QUÉ'],
-        rep.reinforce.map(z => '<tr><td><b>' + ZONE_LABEL[z.zone] + '</b></td><td>' + z.completed + '</td><td>' + z.not_delivered + '</td><td>' + z.rescheduled + '</td><td>' + money(z.income) + '</td><td>' + (z.growth >= 0 ? '+' : '') + Math.round(z.growth) + '%</td><td>' + z.active_clients + '</td><td>' + z.inactive_clients + '</td><td>' + days(z.avg_freq) + '</td><td>' + z.load_per_day + '</td><td><b>' + z.decision + '</b></td><td>' + esc(z.why) + '</td></tr>'), '') +
+      step(6, 'ZONAS A REFORZAR', '<div class="rp-best">' + rep.reinforce.map(z => '<div class="rp-card rp-zc ' + (z.decision === 'REFORZAR REPARTO' ? 'high' : z.decision === 'RECUPERAR COMERCIALMENTE' ? 'med' : '') + '"><span>' + ZONE_LABEL[z.zone] + '</span><b>' + z.decision.split(' ')[0] + '</b><small>' + esc(z.why) + '</small></div>').join('') + '</div>' + tbl(['ZONA', v2 ? 'ENVÍOS' : 'COMPLETADOS', 'NO ENTREG.', 'REPROG.', 'INGRESO', 'TENDENCIA', 'CLIENTES ACTIVOS', 'INACTIVOS', 'FRECUENCIA', 'CARGA/DÍA', 'CONCLUSIÓN', 'POR QUÉ'],
+        rep.reinforce.map(z => '<tr><td><b>' + ZONE_LABEL[z.zone] + '</b></td><td>' + nShip(z) + '</td><td>' + z.not_delivered + '</td><td>' + z.rescheduled + '</td><td>' + money(z.income) + '</td><td>' + (z.growth >= 0 ? '+' : '') + Math.round(z.growth) + '%</td><td>' + z.active_clients + '</td><td>' + z.inactive_clients + '</td><td>' + days(z.avg_freq) + '</td><td>' + z.load_per_day + '</td><td><b>' + z.decision + '</b></td><td>' + esc(z.why) + '</td></tr>'), '') +
         '<ul class="rp-dec">' + rep.decisions.map(d => '<li>' + esc(d) + '</li>').join('') + '</ul>') +
       '<div class="rp-actions"><button class="btn soft" type="button" id="rpExcel">DESCARGAR EXCEL</button>' +
         (!saved && this.canManage() ? '<button class="btn go" type="button" id="rpGenerate">GENERAR INFORME Y PDF</button><span class="rp-note">Queda guardado en el historial con estos números (no se recalcula).</span>' : '') + '</div>';
