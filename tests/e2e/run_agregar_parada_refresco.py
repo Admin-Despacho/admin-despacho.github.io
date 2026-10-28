@@ -1,6 +1,6 @@
 """E2E (modo demo, Chromium) · la pantalla del chofer NO cierra ni borra un formulario abierto ("+ AGREGAR PARADA" o resultado de una parada)
 cuando llega una actualización automática; y sin formulario abierto sigue actualizándose. Datos ficticios. Exit 0 PASS · 1 FAIL · 2 error."""
-import asyncio, subprocess, sys, time, json
+import asyncio, subprocess, sys, time, json, os
 from playwright.async_api import async_playwright
 DIST = sys.argv[1] if len(sys.argv) > 1 else 'dist-demo'; PORT = 4391; K = 'okd_online_demo_v2'
 async def login(pg, email):
@@ -18,7 +18,7 @@ async def main():
     srv = subprocess.Popen([sys.executable,'-m','http.server',str(PORT),'--bind','127.0.0.1'], cwd=DIST, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1.2)
     try:
       async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium-1194/chrome-linux/chrome')
+        b = await p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or None)
         ctx = await b.new_context(viewport={'width':390,'height':844}, geolocation={'latitude':-32.89,'longitude':-68.84}, permissions=['geolocation']); pg = await ctx.new_page()
         pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
         await pg.goto(f'http://127.0.0.1:{PORT}/'); await pg.evaluate('()=>localStorage.clear()')
