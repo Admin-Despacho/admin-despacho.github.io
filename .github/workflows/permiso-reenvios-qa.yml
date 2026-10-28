@@ -24,6 +24,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Install PDF test dependency
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: npm ci
       - run: npx vitest run tests/unit/permiso-asignacion.test.js tests/unit/report-reenvios.test.js tests/unit/report-cristian-pdf.test.js tests/unit/report-loader.test.js tests/unit/report-cristian-publicadas.test.js
       - uses: actions/setup-python@v5
