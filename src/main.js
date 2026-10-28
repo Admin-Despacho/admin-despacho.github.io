@@ -9,6 +9,7 @@ import { esc } from './online/util.js';
 import { hasPerm, ROLE_LABEL } from '../supabase/functions/_shared/rules.js';
 import { ensurePinGate, startPinLockWatcher } from './online/session-pin.js';
 import { initPushNotifications, revokePushOnLogout } from './online/push-notifications.js';
+import { canSwitch, viewMode, switchTo, switcherHtml, wireSwitcher, checkRevoked, watchRevocation } from './online/role-view.js';
 
 const api = createApi();
 const $ = s => document.querySelector(s);
@@ -90,7 +91,10 @@ const MODULE_ROUTES = {
   '#/conciliacion-noc': { ok: me => hasPerm(me, 'credit_notes.manage'), open: async me => (await adminUi()).openNocRecon(api, me) },
   '#/auditoria': { ok: me => hasPerm(me, 'audit.view'), open: async me => (await adminUi()).openAudit(api, me) },
   '#/backup': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'backup.manage'), open: async me => (await adminUi()).openBackup(api, me) },
-  '#/mis-hojas': { ok: me => hasPerm(me, 'routes.view_assigned'), open: () => closeOverlay() }
+  // transportistas: su pantalla sin panel (igual que antes). Usuario habilitado con "Permitir asignación de hojas de ruta":
+  // la URL lo lleva a la vista Transportista (Mis rutas) con el selector; sin el permiso → 403 (y el servidor rechaza igual).
+  '#/mis-hojas': { ok: me => hasPerm(me, 'routes.view_assigned') || hasPerm(me, 'routes.receive_internal'), open: async me => { closeOverlay(); if (canSwitch(me) && viewMode(me) !== 'TRANSPORTISTA') await switchTo(me, 'TRANSPORTISTA'); } },
+  '#/mis-rutas': { ok: me => canSwitch(me), open: async me => { closeOverlay(); if (viewMode(me) !== 'TRANSPORTISTA') await switchTo(me, 'TRANSPORTISTA'); } }
 };
 // Integra el constructor legacy dentro del shell visual RC4 sin tocar su lógica operativa.
 async function mountLegacyRc4(me, active = '#/despacho') {
@@ -106,9 +110,9 @@ async function mountLegacyRc4(me, active = '#/despacho') {
     shell = document.createElement('div'); shell.className = 'rc4app rc4legacy-shell';
     shell.innerHTML =
       '<aside class="rc4side"><div class="brand"><img class="logo" src="/icons/icon-192.png" alt="OK"><div><b>DESPACHO</b><small>' + esc(ROLE_LABEL[me.role] || me.role) + '</small></div><button class="rc4menu" type="button" aria-expanded="false" aria-label="Abrir menú"><span></span>MENÚ</button></div>' +
-      '<nav class="nav" id="rc4LegacyNav"></nav><nav class="mnav" id="rc4LegacyMNav" aria-label="Menú"></nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b><span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<div class="footer"></div></aside>' +
+      '<nav class="nav" id="rc4LegacyNav"></nav><nav class="mnav" id="rc4LegacyMNav" aria-label="Menú"></nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b>' + switcherHtml(me) + '<span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<div class="footer"></div></aside>' +
       '<main class="rc4main"><div class="topbar"><div class="title"><h1>Despacho</h1><p>Preparación de hojas de ruta</p></div>' +
-      '<div class="topact"><div class="userchip"><b>' + esc(me.full_name) + ' · ' + esc(ROLE_LABEL[me.role] || me.role) + '</b><br><span>' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span></div>' +
+      '<div class="topact"><div class="userchip"><b>' + esc(me.full_name) + ' · ' + esc(ROLE_LABEL[me.role] || me.role) + '</b>' + switcherHtml(me) + '<br><span>' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span></div>' +
       '<button class="tbtn" type="button" id="legacyRc4Logout">Cerrar sesión</button></div></div><div class="rc4legacy-body"></div></main>';
     shell.querySelector('.rc4legacy-body').appendChild(legacy);
     op.appendChild(shell);
@@ -233,6 +237,16 @@ async function route() {
     });
   }
   ME = me; window.OKD_ME = { id: me.id, allDrafts: hasPerm(me, 'routes.manage_all_drafts') };
+  wireSwitcher(() => ME); watchRevocation(api, () => ME, v => { ME = v; });   // permiso quitado con la sesión abierta
+  // Vista "Transportista" (⇄ Cambiar rol): Mis rutas con el recorrido del Transportista Interno. No cambia el rol ni los permisos.
+  if (viewMode(me) === 'TRANSPORTISTA') {
+    show('#noPanel'); const tt = document.querySelector('#noPanel .ttl span'); if (tt) tt.textContent = 'Mis rutas';
+    const { DriverApp } = await import('./online/driver-ui.js');
+    new DriverApp(api, me, logout, { assignedOnly: true, onForbidden: () => checkRevoked(api, me) }).start();
+    const chip = document.getElementById('np-who'); if (chip && !document.querySelector('#noPanel [data-rolesw-box]')) chip.insertAdjacentHTML('afterend', switcherHtml(me));
+    if (location.hash !== '#/mis-rutas') history.replaceState(null, '', location.pathname + '#/mis-rutas');
+    return;
+  }
   if (hasPerm(me, 'routes.create')) {
     show('#operario');
     try { await loadLegacy(); } catch (e) { alert(e.message); }

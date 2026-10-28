@@ -164,7 +164,14 @@ export class UsersPanel {
     let eff = []; try { eff = await this.api.userEffectivePermissions(u.id); } catch (e) { this.say(e.message, true); await this.reload(); return; }
     const base = new Set(ROLE_PERMISSIONS[u.role] || []), effSet = new Set(eff), admin = this.me.role === 'ADMIN';
     const sup = this.users.find(x => x.id === u.supervisor_user_id);
-    const body = '<p class="permhead" id="permHead"><b>' + esc(u.full_name) + '</b> · ' + esc(ROLE_LABEL[u.role] || u.role) + ' · Superior: ' + esc(sup ? sup.full_name : '—') + '</p>' +
+    // hojas pendientes de las que es responsable SIN el permiso de asignación (p. ej. se lo quitaron): se muestran para reasignarlas
+    // con el flujo existente (no se reasignan solas)
+    const isDriver = ['TRANSPORTISTA', 'TRANSPORTISTA_INTERNO'].includes(u.role), pendTxt = async () => {
+      if (isDriver || !this.api.pendingAssignedRoutes) return ''; let l = []; try { l = await this.api.pendingAssignedRoutes(u.id); } catch (e) { return ''; }
+      return l.length ? l.length + ' hoja(s) pendiente(s) asignada(s) a ' + u.full_name + ': ' + l.map(x => x.number + ' (' + x.operational_status.replace('_', ' ').toLowerCase() + ')').join(', ') +
+        '. Reasignalas desde Hojas publicadas → Reasignar (no se reasignan solas).' : ''; };
+    const pend0 = effSet.has('routes.receive_internal') ? '' : await pendTxt();
+    const body = (pend0 ? '<p class="msg warn" id="permPending">' + esc(pend0) + ' <a href="#/historial">Ir a Hojas publicadas</a></p>' : '') + '<p class="permhead" id="permHead"><b>' + esc(u.full_name) + '</b> · ' + esc(ROLE_LABEL[u.role] || u.role) + ' · Superior: ' + esc(sup ? sup.full_name : '—') + '</p>' +
       '<p style="margin:0 0 8px;font-size:12px;color:var(--muted)">Tildado = permiso efectivo. <i>(rol)</i> = incluido en el rol. Los sensibles solo los otorga Admin General. Nadie modifica sus propios permisos.</p>' +
       PERM_GROUPS.map(([g, ps]) => '<fieldset class="permgrp"><legend>' + esc(g) + '</legend>' + ps.map(p => '<label class="chk permchk"><input type="checkbox" data-perm="' + p + '"' + (effSet.has(p) ? ' checked' : '') +
         (!admin && SENSITIVE_PERMISSIONS.includes(p) && !effSet.has(p) ? ' disabled' : '') + '> ' + esc(PERM_LABEL[p] || p) + (base.has(p) ? ' <i>(rol)</i>' : '') + (SENSITIVE_PERMISSIONS.includes(p) ? ' <small>· sensible</small>' : '') + '</label>').join('') + '</fieldset>').join('') +
@@ -174,7 +181,8 @@ export class UsersPanel {
       mm.querySelectorAll('[data-perm]').forEach(i => { const p = i.dataset.perm, on = i.checked; if (on === effSet.has(p)) return;
         changes.push([p, on ? (base.has(p) ? 'ROLE' : 'GRANT') : (base.has(p) ? 'REVOKE' : 'ROLE')]); });
       for (const [p, st] of changes) await this.api.setUserPermission(u.id, p, st, why);
-      this.say(changes.length ? 'Permisos de ' + u.full_name + ' actualizados (' + changes.length + ' cambio' + (changes.length > 1 ? 's' : '') + ', auditados).' : 'Sin cambios.');
+      const revokedAssign = changes.some(([p, st]) => p === 'routes.receive_internal' && st !== 'GRANT'), pend = revokedAssign ? await pendTxt() : '';
+      this.say((changes.length ? 'Permisos de ' + u.full_name + ' actualizados (' + changes.length + ' cambio' + (changes.length > 1 ? 's' : '') + ', auditados).' : 'Sin cambios.') + (pend ? ' ATENCIÓN: ' + pend : ''), !!pend);
       await this.reload();
     }, 'GUARDAR PERMISOS');
     m.id = 'permModal';

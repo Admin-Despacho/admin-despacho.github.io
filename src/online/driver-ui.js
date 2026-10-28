@@ -1,5 +1,6 @@
 // Celular del transportista (Fase 2B.1): MIS HOJAS PUBLICADAS → ver → iniciar → resultados → finalizar.
 // Offline básico: cambios locales + cola con op_id (el servidor ignora un op_id repetido) + sincronización al volver.
+import { canSwitch, switcherHtml } from './role-view.js';
 import { esc } from './util.js';
 import { ROLE_LABEL } from '../../supabase/functions/_shared/rules.js';
 import { openAccount } from './account-ui.js';
@@ -98,7 +99,7 @@ const kb = n => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, M
 
 export class DriverApp {
   constructor(api, me, onLogout, opts = {}) {
-    this.api = api; this.me = me; this.onLogout = onLogout; this.readOnly = !!opts.readOnly; // SOLO_LECTURA: ve hojas, no ejecuta nada
+    this.api = api; this.me = me; this.onLogout = onLogout; this.opts = opts; this.readOnly = !!opts.readOnly; // SOLO_LECTURA: ve hojas, no ejecuta nada
     this.kC = 'okd_drv_cache:' + me.id; this.kQ = 'okd_drv_queue:' + me.id;
     this.routes = this._ls(this.kC) || []; this.queue = this._ls(this.kQ) || [];
     this.tab = 'HOY'; this.openId = null; this.conn = 'live'; this.known = new Set(this.routes.map(r => r.id));
@@ -121,6 +122,8 @@ export class DriverApp {
     const top = document.querySelector('#noPanel .top');
     const chip = document.getElementById('np-who');
     chip.innerHTML = esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b>';
+    // ⇄ Cambiar rol (usuarios habilitados para su perfil habitual y para Transportista): debajo del nombre
+    if (canSwitch(this.me) && !document.querySelector('#noPanel [data-rolesw-box]')) chip.insertAdjacentHTML('afterend', switcherHtml(this.me));
     chip.onclick = () => openAccount(this.api, this.me, this.onLogout);
     document.getElementById('np-logout').onclick = this.onLogout;
     if (!document.getElementById('drvLive')) {
@@ -153,8 +156,12 @@ export class DriverApp {
       if (nuevas.length && silent !== 'boot') this.toast('NUEVA HOJA PUBLICADA · Hoja ' + nuevas.map(r => r.number).join(', '));
       if (this.conn !== 'sync') this.setConn(this.queue.length ? 'off' : 'live');
     } catch (e) { if (offline(e)) this.setConn('off'); }
-    // No redibujar si el transportista está escribiendo una observación o un motivo
-    if (silent === true && (document.querySelector('#drv .drv-form:not([hidden])') || [...document.querySelectorAll('#drvKm, #drvKmIni, #drvSearch')].some(i => i.value || document.activeElement === i))) return; // no pisar lo que se está escribiendo
+    // No redibujar si el transportista está usando un formulario: resultado de una parada, "+ AGREGAR PARADA" (#drvAdd), km o búsqueda.
+    // Vale para los avisos en tiempo real/periódicos (silent = true) Y para el fin de la carga inicial ('boot'): antes, un aviso que
+    // llegaba con "Agregar parada" abierto lo cerraba y borraba lo escrito (falla intermitente). Los datos ya quedaron actualizados;
+    // el redibujo se hace en la próxima carga o al guardar/cerrar el formulario.
+    const busy = document.querySelector('#drv .drv-form:not([hidden]), #drvAdd:not([hidden])') || [...document.querySelectorAll('#drvKm, #drvKmIni, #drvSearch')].some(i => i.value || document.activeElement === i);
+    if ((silent === true || silent === 'boot') && busy) return; // no pisar lo que se está escribiendo
     this.render();
   }
   async reconnect() {
@@ -175,6 +182,8 @@ export class DriverApp {
         // Nunca descartar una operación que el servidor NO confirmó.
         this.setConn('off');
         if (!offline(e)) this.toast(/VERSION_CONFLICT/.test(e.message) ? 'Conflicto al sincronizar: se conservó el cambio pendiente. Avisá a Administración.' : 'No se pudo sincronizar: el cambio sigue guardado en este celular. ' + e.message);
+        // rechazo por permiso (p. ej. se quitó con la app abierta): la operación QUEDA en la cola; se verifica y se vuelve al perfil
+        if (!offline(e) && this.opts && this.opts.onForbidden && /FORBIDDEN|42501/.test(String(e.code || e.message || ''))) this.opts.onForbidden();
         return;
       }
       this.queue.shift(); this._sv(this.kQ, this.queue);
@@ -226,7 +235,10 @@ export class DriverApp {
     try { await this._send(op); this._applyLocal(op); this._sv(this.kC, this.routes); await this.load(); return true; }
     catch (e) {
       if (offline(e)) { this.setConn('off'); return this._enqueue(op); }
-      this.toast(e.message); return false;
+      this.toast(e.message);
+      // vista Transportista: si el servidor rechaza (p. ej. se quitó el permiso con la app abierta), se verifica y se vuelve al perfil
+      if (this.opts && this.opts.onForbidden && /FORBIDDEN|42501/.test(String(e.code || e.message || ''))) this.opts.onForbidden();
+      return false;
     }
   }
   toast(t) { let el = document.getElementById('drvToast'); if (!el) { el = document.createElement('div'); el.id = 'drvToast'; el.className = 'drv-toast'; document.body.appendChild(el); } el.textContent = t; el.hidden = false; clearTimeout(this._tt); this._tt = setTimeout(() => { el.hidden = true; }, 4000); }
@@ -246,7 +258,7 @@ export class DriverApp {
     const list = this.routes.filter(r => this.tab === 'HOY' ? (day(r.published_at) === today || !['COMPLETADA', 'CANCELADA'].includes(r.operational_status)) : (day(r.published_at) !== today && ['COMPLETADA', 'CANCELADA'].includes(r.operational_status)))
       .filter(r => !q || String(r.number).toLowerCase().includes(q) || r.stops.some(st => String(st.client_name).toLowerCase().includes(q)));
     const pkOffer = this.me.role === 'TRANSPORTISTA_INTERNO' && passkeysSupported() && !localStorage.getItem('okd_pk_hint');
-    el.innerHTML = (pkOffer ? '<div class="drv-pk"><span>Entrá más rápido con huella o Face ID.</span><button class="btn go" type="button" id="drvPk">ACTIVAR INGRESO RÁPIDO</button></div>' : '') + '<div class="drv-title">' + (this.readOnly ? 'HOJAS · SOLO LECTURA' : 'MIS HOJAS PUBLICADAS') + '</div>' +
+    el.innerHTML = (pkOffer ? '<div class="drv-pk"><span>Entrá más rápido con huella o Face ID.</span><button class="btn go" type="button" id="drvPk">ACTIVAR INGRESO RÁPIDO</button></div>' : '') + '<div class="drv-title">' + (this.readOnly ? 'HOJAS · SOLO LECTURA' : '' + (this.opts && this.opts.assignedOnly ? 'MIS RUTAS' : 'MIS HOJAS PUBLICADAS') + '') + '</div>' +
       (this.queue.length ? '<div class="drv-q">' + this.queue.length + ' cambio(s) guardados en el celular · se envían al volver la conexión</div>' : '') +
       '<input class="ed drv-search" id="drvSearch" placeholder="Buscar hoja o cliente" value="' + esc(this.q || '') + '">' +
       '<div class="drv-tabs"><button type="button" data-t="HOY" class="' + (this.tab === 'HOY' ? 'on' : '') + '">HOY</button><button type="button" data-t="ANT" class="' + (this.tab === 'ANT' ? 'on' : '') + '">ANTERIORES</button></div>' +

@@ -104,7 +104,7 @@ export function costForPeriod(costs, start, end) {
   return r2(total);
 }
 
-export const REPORT_VERSION = 2;
+export const REPORT_VERSION = 3;   // 3: reenvíos — el envío se cuenta una vez por pedido, en su primera publicación
 const EXCLUDED = new Set(['BORRADOR', 'CANCELADA']);
 const isShipment = s => !s.stop_type || s.stop_type === 'PEDIDO';   // TAREA y ubicaciones internas no son envíos
 // Fecha de PUBLICACIÓN de una hoja y su origen (null si no hay una fuente confiable)
@@ -115,20 +115,67 @@ export function publication(r) {
   return null;
 }
 // Envíos de hojas PUBLICADAS dentro de [fromTs, toTs) por fecha de publicación. Sin duplicados (hoja + parada).
-export function consolidatedStops(routes, fromTs, toTs) {
-  const out = [], seen = new Set();
+// REENVÍOS (V3): un pedido puede tener varios INTENTOS (cliente ausente, reprogramado) en distintas hojas. El ENVÍO se cuenta UNA
+// vez, en su PRIMERA publicación válida (hora de Mendoza), con la zona, el importe y el cliente de esa primera parada.
+//  · Clave = número de pedido comercial COMPLETO (order_numbers de la parada), nunca la parada, la hoja ni el cliente.
+//  · Se recorre TODO el historial en orden de publicación ANTES de filtrar por período (un reintento en otro período no vuelve a sumar).
+//  · Una parada es ORIGEN de un envío si trae al menos un pedido nunca publicado antes; si todos sus pedidos ya salieron, es un
+//    INTENTO (no suma cantidad ni importe) y queda en la trazabilidad de los envíos de esos pedidos.
+//  · Resultado del envío = el del ÚLTIMO intento (uno solo). Todos los intentos se conservan (hoja, fecha, resultado).
+//  · Paradas sin número de pedido (datos anteriores): clave hoja + parada, como antes.
+const normOrder = o => String(o == null ? '' : o).trim();
+const LINEAGE = new WeakMap();
+const DELIV = new Set(['ENTREGADO', 'ENTREGA_PARCIAL']);
+// Estado del envío a partir del ÚLTIMO resultado de CADA pedido (un grupo puede dividirse en varios intentos)
+function shipmentOutcome(e) {
+  if (!e.orders.length) return e.attempts[e.attempts.length - 1].outcome;
+  const outs = e.orders.map(o => e.order_outcomes[o] || 'PENDIENTE');
+  if (outs.every(o => DELIV.has(o))) return outs.every(o => o === 'ENTREGADO') ? 'ENTREGADO' : 'ENTREGA_PARCIAL';
+  if (outs.some(o => o === 'PENDIENTE')) return 'PENDIENTE';
+  if (outs.some(o => DELIV.has(o))) return 'ENTREGA_PARCIAL';   // una parte entregada y el resto no
+  return outs.includes('REPROGRAMAR') ? 'REPROGRAMAR' : 'NO_ENTREGADO';
+}
+export function shipmentLineage(routes) {
+  if (routes && LINEAGE.has(routes)) return LINEAGE.get(routes);
+  const cand = [];
   for (const r of routes || []) {
     if (EXCLUDED.has(r.operational_status)) continue;
     const pub = publication(r); if (!pub) continue;
     const t = Date.parse(pub.at);
-    if (!(t >= fromTs && t < toTs)) continue;
-    (r.stops || []).forEach((s, i) => {
-      if (!isShipment(s)) return;
-      // un envío = hoja + parada (id real; si no lo hay, su posición dentro de la hoja). Nunca se suma dos veces.
-      const k = r.id + '|' + (s.id != null ? 'id:' + s.id : '#' + i);
-      if (seen.has(k)) return; seen.add(k);
-      out.push({ ...s, route_id: r.id, route_number: r.number, published_at: pub.at, publication_source: pub.source, day: localDate(t) });
-    });
+    (r.stops || []).forEach((s, i) => { if (isShipment(s)) cand.push({ r, s, i, t, pub }); });
+  }
+  cand.sort((a, b) => a.t - b.t || String(a.r.number).localeCompare(String(b.r.number)) || (a.s.seq ?? a.i) - (b.s.seq ?? b.i));
+  const envios = [], byOrder = new Map(), seenStop = new Set();
+  for (const c of cand) {
+    const sk = c.r.id + '|' + (c.s.id != null ? 'id:' + c.s.id : '#' + c.i);
+    if (seenStop.has(sk)) continue; seenStop.add(sk);   // la misma hoja cargada dos veces: una sola parada
+    const orders = [...new Set((c.s.order_numbers || []).map(normOrder).filter(Boolean))];
+    const fresh = orders.filter(o => !byOrder.has(o)), retried = orders.filter(o => byOrder.has(o));
+    const attempt = { route_id: c.r.id, route_number: c.r.number, stop_id: c.s.id ?? null, published_at: c.pub.at, outcome: c.s.outcome || 'PENDIENTE', orders, t: c.t };
+    // el intento actualiza el resultado de CADA pedido que lleva, en su envío
+    const mark = (e, os) => { if (!e.attempts.includes(attempt)) e.attempts.push(attempt); os.forEach(o => { e.order_outcomes[o] = attempt.outcome; }); };
+    if (!orders.length || fresh.length) {   // ORIGEN de un envío nuevo: SOLO los pedidos nuevos le pertenecen
+      const e = { key: orders.length ? 'P:' + fresh.join('+') : 'S:' + sk, orders: fresh, origin: c, attempts: [], order_outcomes: {},
+        // la parada mezcla pedidos ya publicados con nuevos: su mercadería/envío es UNO por parada (no hay importe por pedido) → no separable
+        mixed: retried.length ? { retried, stop_merchandise: Number(c.s.merchandise_amount) || 0, stop_fee: Number(c.s.shipping_fee) || 0 } : null };
+      envios.push(e); fresh.forEach(o => byOrder.set(o, e)); mark(e, fresh);
+      [...new Set(retried.map(o => byOrder.get(o)))].forEach(prev => mark(prev, retried.filter(o => byOrder.get(o) === prev)));
+    } else {                                 // INTENTO de envíos ya publicados
+      [...new Set(orders.map(o => byOrder.get(o)))].forEach(e => mark(e, orders.filter(o => byOrder.get(o) === e)));
+    }
+  }
+  if (routes) LINEAGE.set(routes, envios);
+  return envios;
+}
+export function consolidatedStops(routes, fromTs, toTs) {
+  const out = [];
+  for (const e of shipmentLineage(routes)) {
+    const c = e.origin; if (!(c.t >= fromTs && c.t < toTs)) continue;   // el período lo define la PRIMERA publicación
+    const row = { ...c.s, outcome: shipmentOutcome(e), route_id: c.r.id, route_number: c.r.number, published_at: c.pub.at, publication_source: c.pub.source, day: localDate(c.t),
+      shipment_key: e.key, order_numbers: e.orders, order_outcomes: { ...e.order_outcomes }, attempts: e.attempts.map(({ t, ...a }) => a) };
+    // importe NO SEPARABLE: el envío se cuenta, pero no se suma la mercadería ni el envío de una parada que incluye pedidos ya contados
+    if (e.mixed) Object.assign(row, { merchandise_amount: null, merchandise_collected: null, shipping_fee: null, unsplittable: { ...e.mixed, new_orders: e.orders } });
+    out.push(row);
   }
   return out;
 }
@@ -141,7 +188,7 @@ export const pendingFee = s => s.shipping_fee_source === 'PENDING_CONFIRMATION' 
 // "delivered" = ENTREGADO o ENTREGA PARCIAL; "pending" = sin resultado todavía (nunca se presenta como entregado).
 // "completed" se mantiene como sinónimo de "delivered" solo por compatibilidad de lectura.
 function zoneTotals(stops) {
-  const blank = k => ({ zone: k, shipments: 0, delivered: 0, pending: 0, not_delivered: 0, rescheduled: 0, income: 0, priced: 0, fee_pending: 0 });
+  const blank = k => ({ zone: k, shipments: 0, delivered: 0, pending: 0, not_delivered: 0, rescheduled: 0, income: 0, priced: 0, fee_pending: 0, unsplit: 0 });
   const z = Object.fromEntries(ZONES.map(k => [k, blank(k)]));
   for (const s of stops) {
     const t = z[s.zone]; if (!t) continue;
@@ -150,11 +197,13 @@ function zoneTotals(stops) {
     else if (s.outcome === 'NO_ENTREGADO') t.not_delivered++;
     else if (s.outcome === 'REPROGRAMAR') t.rescheduled++;
     else t.pending++;
-    if (pendingFee(s)) t.fee_pending++; else { t.income += Number(s.shipping_fee) || 0; t.priced++; }
+    if (pendingFee(s)) t.fee_pending++;
+    else if (s.unsplittable) t.unsplit++;   // parada que mezcla pedidos ya contados: el importe no se puede separar → no suma ni promedia
+    else { t.income += Number(s.shipping_fee) || 0; t.priced++; }
   }
   const fin = x => ({ ...x, income: r2(x.income), avg: x.priced ? r2(x.income / x.priced) : 0, completed: x.delivered });
   const rows = ZONES.map(k => fin(z[k]));
-  const total = fin(rows.reduce((a, x) => { for (const k of ['shipments', 'delivered', 'pending', 'not_delivered', 'rescheduled', 'income', 'priced', 'fee_pending']) a[k] += x[k]; return a; }, blank('TOTAL')));
+  const total = fin(rows.reduce((a, x) => { for (const k of ['shipments', 'delivered', 'pending', 'not_delivered', 'rescheduled', 'income', 'priced', 'fee_pending', 'unsplit']) a[k] += x[k]; return a; }, blank('TOTAL')));
   return { rows, total };
 }
 
@@ -277,10 +326,17 @@ export function buildReport({ routes, costs, sel, now = Date.now(), type = 'SCRE
     // Lo que se usó para calcular (queda congelado en el histórico)
     inputs: { costs_used: (costs || []).map(c => ({ ...c })), routes_counted: [...new Set(stops.map(s => s.route_number))], stops_counted: stops.length,
       fees_excluded_pending: stops.filter(s => pendingFee(s)).length,
-      fees_used: stops.filter(s => !pendingFee(s)).map(s => ({ route: s.route_number, client: s.client_name, zone: s.zone, fee: Number(s.shipping_fee) || 0, outcome: s.outcome || 'PENDIENTE' })),
+      fees_used: stops.filter(s => !pendingFee(s) && !s.unsplittable).map(s => ({ route: s.route_number, client: s.client_name, zone: s.zone, fee: Number(s.shipping_fee) || 0, outcome: s.outcome || 'PENDIENTE' })),
       // hojas publicadas sin fecha de publicación confiable: NO incluidas (no se inventa la fecha ni se usa la de finalización)
       missing_publication: missingPublication(routes),
-      publication_sources: stops.reduce((a, s) => { a[s.publication_source] = (a[s.publication_source] || 0) + 1; return a; }, {}) }
+      publication_sources: stops.reduce((a, s) => { a[s.publication_source] = (a[s.publication_source] || 0) + 1; return a; }, {}),
+      // trazabilidad de reenvíos: envíos del período con más de un intento (cada intento con su hoja, fecha y resultado)
+      retries: stops.filter(s => (s.attempts || []).length > 1).map(s => ({ orders: s.order_numbers, client: s.client_name, route: s.route_number, attempts: s.attempts, order_outcomes: s.order_outcomes })),
+      extra_attempts: stops.reduce((n, s) => n + Math.max(0, (s.attempts || []).length - 1), 0),
+      // LIMITACIÓN de datos: la hoja guarda UN importe de mercadería y UN envío por parada (no por pedido). Si una parada junta pedidos
+      // ya contados con pedidos nuevos, su importe no se puede separar sin inventar un prorrateo: el envío nuevo se cuenta, su importe NO.
+      unsplittable: stops.filter(s => s.unsplittable).map(s => ({ route: s.route_number, client: s.client_name, new_orders: s.unsplittable.new_orders,
+        retried_orders: s.unsplittable.retried, stop_merchandise: s.unsplittable.stop_merchandise, stop_fee: s.unsplittable.stop_fee })) }
   };
 }
 

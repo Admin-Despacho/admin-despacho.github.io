@@ -161,6 +161,7 @@ export const DemoAdmin = {
   },
   _ns() { return this.db.notifSettings = this.db.notifSettings || { on_the_way_enabled: true, delivered_enabled: true, sheet_email_enabled: false, sheet_email_time: '18:00', sheet_email_recipients: [], provider: 'RESEND', max_retries: 5 }; },
   async notificationSettings() { this._refresh(); return { ...this._ns() }; },
+  async pendingAssignedRoutes(userId) { this._refresh(); return (this.db.routes2 || []).filter(r => r.responsable_id === userId && ['PUBLICADA', 'EN_CURSO'].includes(r.operational_status)).map(r => ({ id: r.id, number: r.number, operational_status: r.operational_status, carrier_id: r.carrier_id })); },
   async setNotificationSettings(p) {
     this._refresh(); const me = await this.me(); this._need(me, 'settings.manage');
     if (p.sheet_email_time && !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(p.sheet_email_time)) throw err('Horario inválido (HH:MM).', 'BAD_TIME', 400);

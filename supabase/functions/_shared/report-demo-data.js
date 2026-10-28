@@ -52,7 +52,7 @@ export function demoRoutes({ from = '2026-07-01', to = '2026-10-10', seed = 7 } 
   }
   // Hojas que NO deben entrar al informe
   const mk = (status, num, zone) => ({ id: 'rt-' + num, number: num, carrier_id: zone === 'ESTE' ? 'CT-ESTE' : 'CT-ALR', operational_status: status, published_at: new Date(atLocal(to, '08:00')).toISOString(), completed_at: null,
-    stops: [{ seq: 1, client_name: 'Cliente Hoja ' + status, client_key: 'X:' + num, zone, outcome: 'ENTREGADO', shipping_fee: DEMO_FEES[zone], merchandise_amount: 999999, order_numbers: ['99999'] }] });
+    stops: [{ seq: 1, client_name: 'Cliente Hoja ' + status, client_key: 'X:' + num, zone, outcome: 'ENTREGADO', shipping_fee: DEMO_FEES[zone], merchandise_amount: 999999, order_numbers: ['99999-' + num] }] });   // un pedido distinto por hoja (no es un reintento)
   routes.push(mk('PUBLICADA', 'CTE-PUB', 'ESTE'), mk('EN_CURSO', 'CTA-CUR', 'CENTRO'));
   return routes;
 }

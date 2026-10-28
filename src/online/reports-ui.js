@@ -27,6 +27,7 @@ async function saveWorkbook(wb, filename) {
   a.download = filename.endsWith('.xlsx') ? filename : filename + '.xlsx';
   document.body.appendChild(a); a.click(); a.remove();
 }
+const dmyAr = t => t ? new Date(t).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Mendoza' }) : '';
 async function exportCristianExcel(rep, filename) {
   await loadExcelJs();
   const wb = new window.ExcelJS.Workbook();
@@ -42,6 +43,12 @@ async function exportCristianExcel(rep, filename) {
     (rep.zones || []).forEach(z => ws.addRow([ZONE_LABEL[z.zone] || z.zone, z.shipments, z.pending, z.delivered, z.not_delivered, z.rescheduled, z.income, z.avg]));
     ws.addRow(['TOTAL', rep.total?.shipments || 0, rep.total?.pending || 0, rep.total?.delivered || 0, rep.total?.not_delivered || 0, rep.total?.rescheduled || 0, rep.total?.income || 0, rep.total?.avg || 0]);
     if ((rep.inputs?.missing_publication || []).length) ws.addRow(['Hojas sin fecha de publicación (no incluidas)', rep.inputs.missing_publication.join(', ')]);
+    if ((rep.inputs?.unsplittable || []).length) ws.addRow(['Importe no separable', (x => 'Importe no separable: ' + x.map(u => 'hoja ' + u.route + ' junta el/los pedido(s) ' + u.retried_orders.join('+') + ' (ya contado/s) con ' + u.new_orders.join('+') + ' (nuevo/s): mercadería ' + money(u.stop_merchandise) + ' y envío ' + money(u.stop_fee) + ' de esa parada NO se suman').join('; ') + '. La hoja guarda un importe por parada, no por pedido: el importe propio del pedido nuevo no se puede conocer sin inventar un prorrateo.')(rep.inputs.unsplittable)]);
+    if (rep.inputs?.extra_attempts) {   // reenvíos: el envío se cuenta una vez; los intentos quedan detallados
+      ws.addRow([]); ws.addRow(['Reenvíos', rep.inputs.extra_attempts + ' intento(s) adicional(es) de ' + rep.inputs.retries.length + ' envío(s): cada envío se cuenta UNA vez, en su primera publicación']);
+      const rx = wb.addWorksheet('Reintentos'); rx.addRow(['PEDIDO(S)', 'CLIENTE', 'HOJA DE ORIGEN', 'INTENTO', 'HOJA', 'FECHA DE PUBLICACIÓN', 'RESULTADO']);
+      rep.inputs.retries.forEach(x => x.attempts.forEach((a, i) => rx.addRow([x.orders.join(' + '), x.client, x.route, i + 1, a.route_number, dmyAr(a.published_at), ({NO_ENTREGADO:'no entregado',REPROGRAMAR:'reprogramado',ENTREGADO:'entregado',ENTREGA_PARCIAL:'entrega parcial',PENDIENTE:'pendiente'}[a.outcome] || a.outcome)])));
+    }
   } else {
     ws.addRow(['ZONA','COMPLETADOS','INGRESO ENVÍOS','PROMEDIO']);
     (rep.zones || []).forEach(z => ws.addRow([ZONE_LABEL[z.zone] || z.zone, z.completed, z.income, z.avg]));
@@ -171,6 +178,9 @@ export class ReportsPanel {
       step(1, 'PERÍODO A ANALIZAR', (saved ? '' : this.periodControls()) + '<p class="rp-plabel" id="rpPeriod"><b>' + esc(rep.period.label) + '</b>' + (rep.period.window ? '' : ' · ' + dmy(rep.period.start) + ' al ' + dmy(rep.period.end)) + ' · <b id="rpDays">' + rep.period.days + ' días</b>' + (rep.period.cutoff_note ? '<br><span>' + esc(rep.period.cutoff_note) + '</span>' : '') + '</p>' +
         '<div class="rp-meta"><span>Período: <b>' + esc(rep.period.label) + '</b></span><span>' + (v2 ? 'Hojas publicadas' : 'Hojas finalizadas') + ': <b id="rpRoutes">' + rep.inputs.routes_counted.length + '</b></span><span>Días: <b>' + rep.period.days + '</b></span></div>' +
         (v2 ? '<p class="rp-note" id="rpCriterion">Hojas PUBLICADAS de Cristian (pendientes, en curso o finalizadas), por fecha de publicación (hora de Mendoza). Sin borradores ni canceladas. No hace falta que Cristian marque ENTREGADO ni complete la hoja.</p>' +
+          ((rep.inputs && rep.inputs.extra_attempts) ? '<p class="rp-note" id="rpRetries">Reenvíos: ' + rep.inputs.extra_attempts + ' intento(s) adicional(es) de ' + rep.inputs.retries.length +
+            ' envío(s). Cada envío se cuenta UNA vez, en su primera publicación: ' + esc(rep.inputs.retries.map(x => 'pedido ' + x.orders.join('+') + ' (' + x.attempts.map(a => 'hoja ' + a.route_number + ' ' + dmyAr(a.published_at) + ' ' + ({NO_ENTREGADO:'no entregado',REPROGRAMAR:'reprogramado',ENTREGADO:'entregado',ENTREGA_PARCIAL:'entrega parcial',PENDIENTE:'pendiente'}[a.outcome] || a.outcome)).join(' → ') + ')').join('; ')) + '.</p>' : '') +
+          ((rep.inputs && (rep.inputs.unsplittable || []).length) ? (x => '<p class="rp-note warn" id="rpUnsplit">' + esc('Importe no separable: ' + x.map(u => 'hoja ' + u.route + ' junta el/los pedido(s) ' + u.retried_orders.join('+') + ' (ya contado/s) con ' + u.new_orders.join('+') + ' (nuevo/s): mercadería ' + money(u.stop_merchandise) + ' y envío ' + money(u.stop_fee) + ' de esa parada NO se suman').join('; ') + '. La hoja guarda un importe por parada, no por pedido: el importe propio del pedido nuevo no se puede conocer sin inventar un prorrateo.') + '</p>')(rep.inputs.unsplittable) : '') +
           (miss.length ? '<p class="rp-note warn" id="rpMissing">' + miss.length + ' hoja(s) sin fecha de publicación registrada NO están incluidas: ' + esc(miss.join(', ')) + '.</p>' : '')
           : '<p class="rp-note">Informe guardado con el criterio anterior: solo hojas FINALIZADAS por Cristian, por fecha real de finalización (hora de Mendoza). Entrega parcial cuenta como completada.</p>'), '') +
       step(2, 'CUANTIFICACIÓN POR ZONA · ENVÍOS + ' + (v2 ? 'IMPORTES' : 'INGRESOS'), '<div class="rp-money"><div class="rp-mhead">' + (v2 ? 'Envíos incluidos de hojas publicadas' : 'Resultado consolidado de hojas finalizadas') + '</div><div class="rp-zrow head"><div>Zona</div><div>' + (v2 ? 'Envíos incluidos' : 'Completados') + '</div><div>' + (v2 ? 'Importe de envío informado' : 'Ingreso envíos') + '</div><div>Promedio por envío</div></div>' +

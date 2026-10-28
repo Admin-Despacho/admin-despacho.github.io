@@ -50,6 +50,11 @@ export const SupabaseAdmin = {
   async financialRules() { const r = await sel(this.sb.from('financial_rules').select('*').order('version', { ascending: false }).limit(1)); return r && r[0] ? r[0] : { version: 0, rules: DEFAULT_RULES }; },
   async setFinancialRules(rules) { return this._rpc('set_financial_rules', { p_rules: rules }); },
   async notificationSettings() { return (await sel(this.sb.from('notification_settings').select('*').eq('id', 'DEFAULT').maybeSingle())) || {}; },
+  // hojas PENDIENTES (publicadas o en curso) de las que el usuario es responsable: para reasignarlas con el flujo existente
+  async pendingAssignedRoutes(userId) {
+    const r = await this.sb.from('routes').select('id, number, operational_status, carrier_id').eq('responsable_id', userId).in('operational_status', ['PUBLICADA', 'EN_CURSO']).order('number');
+    if (r.error) throw r.error; return r.data || [];
+  },
   async setNotificationSettings(p) { return this._rpc('set_notification_settings', { p }); },
   async listLocations() { return sel(this.sb.from('client_locations').select('*').order('client_key')); },
   async saveLocation(p) { return this._rpc('upsert_client_location', { p }); },

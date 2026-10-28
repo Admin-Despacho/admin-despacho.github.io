@@ -43,7 +43,7 @@ export function emailHtml(rep, attachmentName) {
     '<div style="' + FONT + 'font-size:13px;color:#cbd6da;">' + esc(periodText(rep)) + '</div><div style="display:none;">INFORME CRISTIAN TORRES · ' + typeLabel(rep) + '</div></td></tr>' +
     '<tr><td style="padding:20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">' +
     '<tr><td style="' + FONT + 'font-size:10px;font-weight:bold;letter-spacing:1px;color:' + M + ';text-transform:uppercase;">Resumen del período</td></tr>' +
-    '<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + (v2 ? card('Envíos incluidos', rep.summary.shipments, G, 'pendientes ' + rep.summary.pending + ' · entregados ' + rep.summary.delivered) : card('Envíos completados', rep.summary.completed, G, 'incluye entregas parciales')) + card('No entregados', rep.summary.not_delivered, R) + card('Reprogramados', rep.summary.rescheduled, A) + '</tr></table></td></tr>' +
+    '<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + (v2 ? card('Envíos incluidos', rep.summary.shipments, G, 'pendientes ' + rep.summary.pending + ' · entregados ' + rep.summary.delivered + (rep.inputs && rep.inputs.extra_attempts ? ' · ' + rep.inputs.extra_attempts + ' reintento(s) sin sumar' : '')) : card('Envíos completados', rep.summary.completed, G, 'incluye entregas parciales')) + card('No entregados', rep.summary.not_delivered, R) + card('Reprogramados', rep.summary.rescheduled, A) + '</tr></table></td></tr>' +
     '<tr><td style="' + FONT + 'font-size:11px;color:' + M + ';">' + esc(rep.summary.note) + (rep.period.cutoff_note ? ' ' + esc(rep.period.cutoff_note) : '') + '</td></tr>' +
     h2(v2 ? 'Envíos e importes por zona' : 'Envíos e ingresos por zona') + table([th('Zona'), th(v2 ? 'Envíos incluidos' : 'Completados', 'center'), th(v2 ? 'Importe informado' : 'Ingreso', 'right')], zoneRows) +
     h2('¿El transporte se paga solo?') + table(null, [cl('Ingreso Zona Este', money(cov.income_by_zone.ESTE)), cl('Ingreso Alrededores', money(cov.income_by_zone.ALREDEDORES)), cl('Ingreso Centro', money(cov.income_by_zone.CENTRO)),
@@ -66,6 +66,8 @@ export function emailText(rep, attachmentName) {
   return [
     'OK ACCESORIOS · INFORME CRISTIAN TORRES · ' + typeLabel(rep), periodText(rep), '',
     ...(v2 ? ['ENVÍOS INCLUIDOS (hojas publicadas): ' + rep.summary.shipments, 'PENDIENTES: ' + rep.summary.pending, 'ENTREGADOS: ' + rep.summary.delivered]
+      .concat(rep.inputs && rep.inputs.extra_attempts ? ['REENVÍOS: ' + rep.inputs.extra_attempts + ' intento(s) adicional(es) de ' + rep.inputs.retries.length + ' envío(s) (cada envío se cuenta una vez)'] : [])
+      .concat(rep.inputs && (rep.inputs.unsplittable || []).length ? ['IMPORTE NO SEPARABLE: ' + rep.inputs.unsplittable.length + ' parada(s) que juntan pedidos ya contados con nuevos (su importe no se suma; ver el informe)'] : [])
            : ['ENVÍOS COMPLETADOS: ' + rep.summary.completed]), 'NO ENTREGADOS: ' + rep.summary.not_delivered, 'REPROGRAMADOS: ' + rep.summary.rescheduled, rep.summary.note, '',
     ...rep.zones.map(z => ZONE_LABEL[z.zone] + ': ' + nShip(z) + ' · ' + money(z.income)), 'TOTAL: ' + nShip(rep.total) + ' · ' + money(rep.total.income), '',
     'Costo Cristian del período: ' + money(c.cost), 'Resultado: ' + (c.diff >= 0 ? '+' : '-') + money(Math.abs(c.diff)), c.verdict + ' · ' + c.text, '',

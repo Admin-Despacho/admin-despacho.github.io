@@ -1,5 +1,6 @@
 // RC2 · Administración: navegación clara + DASHBOARD, BORRADORES, HOJAS PUBLICADAS / HISTORIAL, CONFIGURACIÓN, AUDITORÍA y BACKUP.
 // Misma estética (negro, blanco, cyan). Toda acción la valida el servidor; la interfaz solo muestra lo autorizado.
+import { switcherHtml } from './role-view.js';
 import { esc } from './util.js';
 import { hasPerm, ROLE_LABEL } from '../../supabase/functions/_shared/rules.js';
 import { DEFAULT_COLUMNS, moduleOfAction } from './demo-admin.js';
@@ -33,7 +34,7 @@ function frame(me, title, active) {
   if (isRc4(me)) return appFrame(me, title, active);   // RC4: menú lateral (diseño V4 / V2 aprobado)
   const el = document.getElementById('usersPanel'); el.hidden = false;
   el.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>' + esc(title) + '</span></div><div class="sp"></div>' +
-    '<span class="who-chip">' + esc(me.full_name) + ' · <b>' + esc(ROLE_LABEL[me.role] || me.role) + '</b></span><button class="tbtn" type="button" id="adLogout">Cerrar sesión</button></header>' + navHtml(me, active) + '<div class="up-wrap ad-wrap" id="adBody"></div>';
+    '<span class="who-chip">' + esc(me.full_name) + ' · <b>' + esc(ROLE_LABEL[me.role] || me.role) + '</b></span>' + switcherHtml(me) + '<button class="tbtn" type="button" id="adLogout">Cerrar sesión</button></header>' + navHtml(me, active) + '<div class="up-wrap ad-wrap" id="adBody"></div>';
   el.querySelector('#adLogout').onclick = () => window.OKD_LOGOUT && window.OKD_LOGOUT();
   return el.querySelector('#adBody');
 }

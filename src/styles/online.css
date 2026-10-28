@@ -797,3 +797,29 @@ tr.main-row.flash{outline:3px solid #16d6e5}
 /* Foto del DNI (V4.16): estado del procesamiento y vista previa CONTENIDA (antes se mostraba a 1600 px y desbordaba la pantalla) */
 #drv .drv-dnist{display:block;font-size:12.5px;font-weight:700;color:#0b6b52;margin-top:4px}
 #drv .drv-dniprev{display:block;max-width:100%;width:auto;max-height:150px;object-fit:contain;border-radius:10px;border:1px solid #dbe4e8;margin:6px 0 2px;background:#fff}
+/* ⇄ Cambiar rol: vista activa + selector (debajo del nombre: menú lateral en computadora, encabezado en celular) */
+.rolesw{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:6px 0 2px;font-size:11.5px;letter-spacing:.02em}
+.rolesw-now{color:inherit;opacity:.85}
+.rolesw-now b{color:#0aa5bd;font-weight:800}
+.rolesw-btn{appearance:none;border:1px solid #22c4dc;background:#e9fbfe;color:#063a43;border-radius:999px;padding:5px 11px;font:700 11.5px/1.1 inherit;cursor:pointer;min-height:30px}
+.rolesw-btn:hover{background:#d4f6fb}
+.rolesw-menu{position:absolute;z-index:60;top:100%;left:0;margin-top:4px;min-width:220px;background:#fff;border:1px solid #dbe4e8;border-radius:12px;box-shadow:0 10px 28px rgba(0,0,0,.18);padding:6px;display:grid;gap:4px}
+.rolesw-menu button{appearance:none;border:0;background:#f3f7f8;color:#0b1418;text-align:left;border-radius:9px;padding:11px 12px;font:700 13.5px/1.2 inherit;cursor:pointer;min-height:44px}
+.rolesw-menu button[aria-current="true"]{background:#0b1418;color:#fff}
+.rolesw-menu small{font-weight:600;opacity:.7}
+#noPanel .rolesw{color:#fff}
+/* ⇄ Cambiar rol — ubicación (solo usuarios habilitados; el resto queda igual):
+   computadora: bloque del nombre en el MENÚ LATERAL con el selector (el del chip superior se oculta);
+   celular: el chip con el nombre y el selector queda visible en el encabezado, así la vista activa se ve siempre */
+@media(min-width:1001px){
+ .rc4side .rc4who:has([data-rolesw-box]){display:grid;grid-template-columns:1fr;gap:2px;margin:12px 10px 0;padding:12px 14px;border-radius:12px;background:#0d2630}
+ .rc4side .rc4who:has([data-rolesw-box]) b{color:#fff;font-size:14px}
+ .rc4side .rc4who:has([data-rolesw-box]) span{color:#9db0b8;font-size:12px}
+ .rc4side .rc4who:has([data-rolesw-box]) .rc4logout{display:none}
+ .rc4side .rc4who .rolesw{color:#fff}
+ .rc4main .userchip .rolesw{display:none}
+}
+@media(max-width:1000px){
+ .rc4main .topact .userchip:has([data-rolesw-box]){display:block}
+ .rc4side .rc4who .rolesw{display:none}
+}

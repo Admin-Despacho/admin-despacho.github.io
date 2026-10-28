@@ -17,6 +17,9 @@ export const ROLE_LABEL = {
 export const PERMISSIONS = [
   'users.view', 'users.manage',
   'routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'routes.view_assigned',
+  // "Permitir asignación de hojas de ruta": el usuario (cualquier rol) puede ser responsable de hojas del Transporte Interno y
+  // realizarlas con el recorrido del Transportista Interno. SOLO sus hojas asignadas; no amplía ningún otro permiso. Sin rol por defecto.
+  'routes.receive_internal',
   'deliveries.update', 'deliveries.capture_signature',
   'internal_routes.use', 'internal_routes.manage',
   'locations.view', 'locations.manage',
@@ -37,7 +40,7 @@ export const SENSITIVE_PERMISSIONS = ['users.manage', 'users.manage_permissions'
   'identity_docs.view', 'can_manage_commercial_transport_reports', 'routes.manage_all_drafts', 'columns.apply_global'];
 
 export const ROLE_PERMISSIONS = {
-  ADMIN: PERMISSIONS.slice(),
+  ADMIN: PERMISSIONS.filter(p => p !== 'routes.receive_internal'),   // la asignación de hojas se habilita a la persona, nunca por rol
   // RC4.1: el Superior ve SU EQUIPO por defecto (routes.view_team); "todas las hojas" (routes.view_all) solo por permiso individual de Admin
   SUPERVISOR_DESPACHO: ['routes.create', 'routes.edit', 'routes.publish', 'routes.cancel', 'routes.assign', 'routes.reassign', 'routes.view_team', 'routes.view_own',
     'internal_routes.manage', 'locations.view', 'signatures.view', 'collections.manage', 'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team',
@@ -91,8 +94,19 @@ export function hasPerm(user, perm) {
 export function canBeResponsable(user, carrier) {
   if (!user || !carrier || carrier.active === false) return false;
   if (user.status !== 'ACTIVO') return false;
-  if (carrier.kind === 'INTERNO') return user.role === 'TRANSPORTISTA_INTERNO';
+  if (carrier.kind === 'INTERNO') return user.role === 'TRANSPORTISTA_INTERNO' || hasPerm(user, 'routes.receive_internal');
   return (user.role === 'TRANSPORTISTA' || user.role === 'TRANSPORTISTA_INTERNO') && (user.carriers || []).includes(carrier.id);
+}
+
+// ¿Tiene acceso a la pantalla de sus hojas asignadas? (transportistas, o el permiso "Permitir asignación de hojas de ruta")
+export const hasDriverAccess = me => hasPerm(me, 'routes.view_assigned') || hasPerm(me, 'routes.receive_internal');
+// ¿Puede REALIZAR esta hoja? Solo si es SUYA; con el permiso nuevo, además, solo del Transporte Interno (igual que el servidor)
+// Igual que el servidor (_my_route): Transporte Interno → Transportista Interno O el permiso habilitado (aunque el rol tenga
+// routes.view_assigned, p. ej. Admin, sin el permiso NO opera como chofer); transportista externo → routes.view_assigned, como antes.
+export function canOperateAssigned(me, route, carrierKind) {
+  if (!me || !route || route.responsable_id !== me.id) return false;
+  if (carrierKind === 'INTERNO') return (me.role === 'TRANSPORTISTA_INTERNO' && hasPerm(me, 'routes.view_assigned')) || hasPerm(me, 'routes.receive_internal');
+  return hasPerm(me, 'routes.view_assigned');
 }
 
 export function compatibleResponsables(users, carrier) {

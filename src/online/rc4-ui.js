@@ -1,6 +1,7 @@
 // RC4 · Interfaz por rol. Diseño tomado de los HTML aprobados:
 //   OK_Despacho_Dashboard_Admin_General_V4.html y OK_Despacho_Dashboard_Superior_Despacho_V2.html
 // La pantalla solo muestra lo autorizado; el servidor valida cada acción igual (RLS + RPC).
+import { switcherHtml } from './role-view.js';
 import { esc } from './util.js';
 import { hasPerm, ROLE_LABEL } from '../../supabase/functions/_shared/rules.js';
 
@@ -88,9 +89,9 @@ export function appFrame(me, title, active, sub) {
   const foot = { ADMIN: 'OK Despacho · Administración<br>Configuración global exclusiva Admin', SUPERVISOR_DESPACHO: 'Rol operativo de supervisión<br>Sin acceso a configuración global', OPERARIO_DEPOSITO: 'Operario Depósito<br>Preparación de hojas' }[me.role];
   const newBtn = me.role !== 'ADMIN' && hasPerm(me, 'routes.create') ? '<a class="btn primary" href="#/nueva-hoja" id="newRouteTop">+ NUEVA HOJA DE RUTA</a>' : '';
   el.innerHTML = '<div class="rc4app"><aside class="rc4side"><div class="brand"><img class="logo" src="/icons/icon-192.png" alt="OK"><div><b>DESPACHO</b><small>' + esc(ROLE_LABEL[me.role] || me.role) + '</small></div><button class="rc4menu" type="button" aria-expanded="false" aria-label="Abrir menú"><span></span>MENÚ</button></div>' +
-    '<nav class="nav" id="adNav">' + navLinks(me, active) + '</nav><nav class="mnav" aria-label="Menú">' + mobileNav(me, active) + '</nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b><span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<div class="footer">' + foot + '</div></aside>' +
+    '<nav class="nav" id="adNav">' + navLinks(me, active) + '</nav><nav class="mnav" aria-label="Menú">' + mobileNav(me, active) + '</nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b>' + switcherHtml(me) + '<span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<div class="footer">' + foot + '</div></aside>' +
     '<main class="rc4main"><div class="topbar"><div class="title"><h1>' + esc(title) + '</h1>' + (sub ? '<p>' + esc(sub) + '</p>' : '') + '</div>' +
-    '<div class="topact">' + newBtn + '<div class="userchip"><b>' + esc(me.full_name) + ' · ' + esc(ROLE_LABEL[me.role] || me.role) + '</b><br><span>' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span></div>' +
+    '<div class="topact">' + newBtn + '<div class="userchip"><b>' + esc(me.full_name) + ' · ' + esc(ROLE_LABEL[me.role] || me.role) + '</b>' + switcherHtml(me) + '<br><span>' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span></div>' +
     '<button class="tbtn" type="button" id="adLogout">Cerrar sesión</button></div></div><div id="adBody" class="rc4body"></div></main></div>';
   el.querySelector('#adLogout').onclick = () => window.OKD_LOGOUT && window.OKD_LOGOUT();
   return el.querySelector('#adBody');
@@ -355,7 +356,7 @@ export async function openOperationalConfig(api, me, frame, plantillasSection) {
 
 // ===================== PERMISOS DE UN USUARIO (Admin) =====================
 export const PERM_GROUPS = [
-  ['Hojas', ['routes.create', 'routes.edit', 'routes.publish', 'routes.cancel', 'routes.assign', 'routes.reassign', 'routes.view_all', 'routes.view_team', 'routes.view_own', 'routes.manage_all_drafts']],
+  ['Hojas', ['routes.create', 'routes.edit', 'routes.publish', 'routes.cancel', 'routes.assign', 'routes.reassign', 'routes.view_all', 'routes.view_team', 'routes.view_own', 'routes.receive_internal', 'routes.manage_all_drafts']],
   ['Borradores', ['drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team']],
   ['Solicitudes / aprobaciones', ['requests.create', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team', 'requests.reassign', 'can_approve_internal_route_changes']],
   ['Columnas', ['columns.view', 'columns.manage_defaults', 'columns.manage_templates', 'columns.apply_global']],
@@ -366,7 +367,7 @@ export const PERM_GROUPS = [
 ];
 export const PERM_LABEL = {
   'routes.create': 'Crear / preparar hojas', 'routes.edit': 'Editar hojas', 'routes.publish': 'Publicar hojas', 'routes.cancel': 'Cancelar hojas', 'routes.assign': 'Asignar transportista / responsable / vehículo',
-  'routes.reassign': 'Reasignar', 'routes.view_all': 'Ver todas las hojas', 'routes.view_team': 'Ver hojas del equipo', 'routes.view_own': 'Ver hojas propias', 'routes.manage_all_drafts': 'Gestionar TODOS los borradores',
+  'routes.reassign': 'Reasignar', 'routes.view_all': 'Ver todas las hojas', 'routes.view_team': 'Ver hojas del equipo', 'routes.view_own': 'Ver hojas propias', 'routes.receive_internal': 'Permitir asignación de hojas de ruta', 'routes.manage_all_drafts': 'Gestionar TODOS los borradores',
   'drafts.create': 'Crear borradores', 'drafts.view_own': 'Ver borradores propios', 'drafts.view_team': 'Ver borradores del equipo', 'drafts.manage_team': 'Gestionar borradores del equipo',
   'requests.create': 'Solicitar autorización', 'requests.view_team': 'Ver solicitudes del equipo', 'requests.approve_team': 'Aprobar solicitudes del equipo', 'requests.reject_team': 'Rechazar solicitudes del equipo',
   'requests.observe_team': 'Observar solicitudes del equipo', 'requests.reassign': 'Reasignar solicitudes', 'can_approve_internal_route_changes': 'Aprobar cambios de ruta interna',

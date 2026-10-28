@@ -26,6 +26,7 @@ export const DemoRC4 = {
     if (!me || !r) return false;
     if (hasPerm(me, 'routes.view_all')) return true;
     if (r.responsable_id === me.id && hasPerm(me, 'routes.view_assigned')) return true;
+    if (r.responsable_id === me.id && hasPerm(me, 'routes.receive_internal') && ((this._carriers ? this._carriers() : []).find(c => c.id === r.carrier_id) || {}).kind === 'INTERNO') return true;   // permiso de asignación: solo su hoja interna
     if ((hasPerm(me, 'routes.view_own') || hasPerm(me, 'routes.view_team')) && this._routeBelongsTo(r, me.id)) return true;
     return hasPerm(me, 'routes.view_team') && [...this._teamOf(me.id)].some(u => this._routeBelongsTo(r, u));
   },

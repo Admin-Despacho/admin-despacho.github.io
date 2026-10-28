@@ -1,6 +1,6 @@
 // MODO DEMO: sin servidor. Mismo contrato que SupabaseApi y MISMAS reglas (rules.js).
 // Sirve para aceptación visual y pruebas automáticas cuando no hay proyecto Supabase configurado.
-import { validateUserAction, compatibleResponsables, hasPerm, canBeResponsable, userModules } from '../../supabase/functions/_shared/rules.js';
+import { validateUserAction, compatibleResponsables, hasPerm, canBeResponsable, userModules, canOperateAssigned } from '../../supabase/functions/_shared/rules.js';
 import { reorderError, applyReorder, currentStop, approvalRecipients, sendQueuedEmails, routeDiff } from '../../supabase/functions/_shared/internal-route.js';
 import { sendCustomerEmails } from '../../supabase/functions/_shared/customer-email.js';
 import { DemoAdmin } from './demo-admin.js';
@@ -106,7 +106,8 @@ export class DemoApi {
     await this.acceptInvite();
   }
   takeRevokedNotice() { const v = this.revokedNotice || !!this._get('revoked_notice'); this.revokedNotice = false; this._set('revoked_notice', null); return v; }
-  async me() { const s = await this.getSession(); if (!s) return null; const u = this._user(s.userId); return u ? { ...u, carriers: [...u.carriers] } : null; }
+  // igual que el servidor: devuelve el usuario ACTUAL (relee el estado; p. ej. un permiso quitado por un administrador)
+  async me() { const s = await this.getSession(); if (!s) return null; this._refresh(); const u = this._user(s.userId); return u ? { ...u, carriers: [...u.carriers] } : null; }
   // Autogestión: el usuario cambia SU contraseña (no rol, ni permisos, ni carriers)
   // ===== Contraseñas por enlace (demo de lo que hace Supabase Auth): invitación y recuperación =====
   _authMail(u, type) {
@@ -365,7 +366,10 @@ export class DemoApi {
   }
   async driverInternalLocations() {
     this._refresh(); const me = await this.me();
-    if (!['internal_routes.use', 'routes.create', 'locations.view'].some(p => hasPerm(me, p))) return [];
+    // igual que el servidor: con "Permitir asignación de hojas de ruta", solo mientras tenga una hoja interna propia pendiente o en curso
+    const ownInternal = hasPerm(me, 'routes.receive_internal') && (this.db.routes2 || []).some(r => r.responsable_id === me.id && ['PUBLICADA', 'EN_CURSO'].includes(r.operational_status)
+      && ((this._carriers().find(c => c.id === r.carrier_id) || {}).kind === 'INTERNO'));
+    if (!['internal_routes.use', 'routes.create', 'locations.view'].some(p => hasPerm(me, p)) && !ownInternal) return [];
     return (this.db.internalLocations || []).filter(l => l.active !== false).map(l => ({ location_key: l.location_key, name: l.name, address: l.address, radius_m: l.radius_m })).sort((a, b) => a.name.localeCompare(b.name));
   }
   _canReadG2(me) { return ['settings.manage', 'locations.manage', 'locations.view', 'routes.create'].some(p => hasPerm(me, p)); }
@@ -403,8 +407,22 @@ export class DemoApi {
     return d;
   }
   // Reserva de pedidos (equivale a reserve_orders / release_orders del servidor)
+  // REENVÍOS (igual que la propuesta de servidor reserve_orders): la reserva PUBLICADA de un pedido pasa a la hoja nueva SOLO si en su
+  // hoja anterior todas sus paradas quedaron NO_ENTREGADO/REPROGRAMAR, o esa hoja fue cancelada. Se guarda en el historial.
+  _retryable(o, routeId) {
+    const r = (this.db.routes2 || []).find(x => x.id === routeId); if (!r) return false;
+    if (r.operational_status === 'CANCELADA') return true;
+    const st = (r.stops || []).filter(s => (s.order_numbers || []).map(String).includes(o));
+    return st.length > 0 && st.every(s => ['NO_ENTREGADO', 'REPROGRAMAR'].includes(s.outcome));
+  }
   _reserve(sheetKey, orders, me) {
     const RS = this.db.reservations = this.db.reservations || {};
+    orders.filter(o => o && RS[o] && RS[o].sheet_key !== sheetKey && RS[o].status === 'PUBLICADA' && RS[o].route_id && this._retryable(o, RS[o].route_id)).forEach(o => {
+      const r = (this.db.routes2 || []).find(x => x.id === RS[o].route_id) || {};
+      (this.db.reservationHistory = this.db.reservationHistory || []).push({ order_id: o, ...RS[o], released_at: new Date().toISOString(), released_by: me.id, released_to_sheet: sheetKey,
+        reason: r.operational_status === 'CANCELADA' ? 'HOJA_CANCELADA' : 'REINTENTO_NO_ENTREGADO_O_REPROGRAMADO' });
+      delete RS[o];
+    });
     const bad = orders.filter(o => o && RS[o] && RS[o].sheet_key !== sheetKey);
     const details = bad.map(o => { const d = (this.db.drafts || {})[RS[o].sheet_key] || {}, u = this._user(RS[o].reserved_by) || {};
       return { order: o, sheet_key: RS[o].sheet_key, draft_name: d.name || null, owner_id: RS[o].reserved_by, owner: u.full_name || '', route_number: RS[o].number || null, published: !!RS[o].number }; });
@@ -425,7 +443,7 @@ export class DemoApi {
     this._save();
   }
   async routeStatus(id) { this._refresh(); const r = (this.db.routes2 || []).find(x => x.id === id); return r ? { ...r } : null; }
-  _mine(id) { const me = this._user(this.session && this.session.userId); const r = (this.db.routes2 || []).find(x => x.id === id); if (!r || !me || r.responsable_id !== me.id || !hasPerm(me, 'routes.view_assigned')) throw err('FORBIDDEN', 'FORBIDDEN', 403); return { r, me }; }
+  _mine(id) { const me = this._user(this.session && this.session.userId); const r = (this.db.routes2 || []).find(x => x.id === id); if (!r || !me || !canOperateAssigned(me, r, ((this._carriers().find(c => c.id === r.carrier_id) || {}).kind))) throw err('FORBIDDEN', 'FORBIDDEN', 403); return { r, me }; }   // igual que _my_route
   async myRoutes() {
     this._net(); this._refresh(); const me = await this.me(); if (!me) throw err('Sesión inválida.', 'NO_AUTH', 401);
     const cs = this._carriers(), cfg = id => cs.find(c => c.id === id) || DEMO_CARRIERS.find(c => c.id === id) || {};
@@ -814,7 +832,7 @@ export class DemoApi {
     return (this.db.routes2 || []).filter(r => ct.has(r.carrier_id)).map(r => ({ id: r.id, number: r.number, carrier_id: r.carrier_id, operational_status: r.operational_status,
       published_at: r.published_at || null, dispatched_at: r.dispatched_at || null, dispatch_mode: r.dispatch_mode || null, completed_at: r.completed_at, version: r.version || 1,
       published_at_hist: r.published_at ? null : hist(r.id),
-      stops: r.stops.map(s => ({ id: s.id, stop_type: s.stop_type || 'PEDIDO', client_name: s.client_name, client_key: s.client_key, zone: s.zone, outcome: s.outcome, shipping_fee: s.shipping_fee, shipping_fee_source: s.shipping_fee_source, merchandise_amount: s.merchandise_amount })) }));
+      stops: r.stops.map(s => ({ id: s.id, seq: s.seq, order_numbers: (s.order_numbers || []).map(String), stop_type: s.stop_type || 'PEDIDO', client_name: s.client_name, client_key: s.client_key, zone: s.zone, outcome: s.outcome, shipping_fee: s.shipping_fee, shipping_fee_source: s.shipping_fee_source, merchandise_amount: s.merchandise_amount })) }));
   }
 
   // Confirmación de envío provisorio (equivale a confirm_shipping_amount del servidor)
