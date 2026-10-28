@@ -56,3 +56,8 @@ select tst.res('RE-SQL-09 publicado el reintento, la reserva queda PUBLICADA en 
 begin; select tst.u(:'S'); set local role authenticated;
 select tst.expect('RE-SQL-10 ya publicado y pendiente en la hoja nueva: tampoco se puede cargar en una tercera hoja', $q$ select public.reserve_orders('RE-H6', array['RE81001']) $q$, 'PEDIDO_YA_EN_OTRA_HOJA%');
 commit;
+
+select tst.res('RE-ACL-01 authenticated can read history, subject to RLS', has_table_privilege('authenticated','public.order_reservation_history','SELECT'), '');
+select tst.res('RE-ACL-02 authenticated cannot mutate or truncate history', not has_table_privilege('authenticated','public.order_reservation_history','INSERT,UPDATE,DELETE,TRUNCATE'), '');
+select tst.res('RE-ACL-03 anon cannot access history', not has_table_privilege('anon','public.order_reservation_history','SELECT,INSERT,UPDATE,DELETE,TRUNCATE'), '');
+select tst.res('PERM-ACL-01 Storage helper executable by authenticated only', has_function_privilege('authenticated','public._auth_receives_internal()','EXECUTE') and not has_function_privilege('anon','public._auth_receives_internal()','EXECUTE'), '');

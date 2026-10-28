@@ -57,3 +57,8 @@ begin
    where r.order_id = any(p_orders) and r.sheet_key <> p_sheet_key;
   if msg is not null then raise exception 'PEDIDO_YA_EN_OTRA_HOJA: %', msg using errcode = '23505', detail = det::text; end if;
 end; $$;
+
+-- Do not inherit project default table privileges (notably TRUNCATE, which bypasses RLS).
+revoke all on public.order_reservation_history from public, anon, authenticated;
+grant select on public.order_reservation_history to authenticated;
+grant all on public.order_reservation_history to service_role;

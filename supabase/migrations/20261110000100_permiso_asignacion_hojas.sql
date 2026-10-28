@@ -93,3 +93,7 @@ drop policy if exists identity_docs_upload on storage.objects;
 create policy identity_docs_upload on storage.objects for insert to authenticated
   with check (bucket_id = 'identity-docs' and (public.auth_has_perm('deliveries.capture_signature') or public._auth_receives_internal())
               and name ~ '^[0-9]{11}/[0-9a-f-]{36}\.(jpg|png)$');
+
+-- Explicit execution privileges for the helper used by the Storage policy.
+revoke execute on function public._auth_receives_internal() from public, anon;
+grant execute on function public._auth_receives_internal() to authenticated, service_role;
