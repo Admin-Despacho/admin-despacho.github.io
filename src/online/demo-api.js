@@ -107,7 +107,9 @@ export class DemoApi {
   }
   takeRevokedNotice() { const v = this.revokedNotice || !!this._get('revoked_notice'); this.revokedNotice = false; this._set('revoked_notice', null); return v; }
   // igual que el servidor: devuelve el usuario ACTUAL (relee el estado; p. ej. un permiso quitado por un administrador)
-  async me() { const s = await this.getSession(); if (!s) return null; this._refresh(); const u = this._user(s.userId); return u ? { ...u, carriers: [...u.carriers] } : null; }
+  async me() { const s = await this.getSession(); if (!s) return null; this._refresh();
+    try { if (localStorage.getItem('okd_demo_fail_perms') === '1') throw Object.assign(new Error('No se pudieron cargar tus permisos (simulado).'), { code: 'PERMISSIONS_UNAVAILABLE' }); } catch (e) { if (e.code === 'PERMISSIONS_UNAVAILABLE') throw e; }
+    const u = this._user(s.userId); return u ? { ...u, carriers: [...u.carriers] } : null; }
   // Autogestión: el usuario cambia SU contraseña (no rol, ni permisos, ni carriers)
   // ===== Contraseñas por enlace (demo de lo que hace Supabase Auth): invitación y recuperación =====
   _authMail(u, type) {

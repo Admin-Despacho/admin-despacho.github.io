@@ -280,29 +280,146 @@ export async function mileageBlock(api, me, host, again) {
     catch (e) { again({ err: true, text: e.message }); }
   };
 }
+// Lo escrito en la pantalla de vehículos (formulario, km por vehículo, resolución por alerta)
+function captureVehInputs(doc) {
+  const out = { form: {}, km: {}, note: {}, formCtx: null };
+  const f = doc.querySelector('#vehForm'); if (f) out.formCtx = f.dataset.ctx || null;   // 'new' o 'edit:<id>': los valores SOLO valen para ese contexto
+  doc.querySelectorAll('#vehForm input').forEach(i => { if (i.id) out.form[i.id] = i.value; });
+  doc.querySelectorAll('#vehTable tr[data-vid] [data-km]').forEach(i => { if (i.value) out.km[i.closest('tr').dataset.vid] = i.value; });
+  doc.querySelectorAll('#kmAlerts tr[data-aid] [data-note]').forEach(i => { if (i.value) out.note[i.closest('tr').dataset.aid] = i.value; });
+  return out;
+}
+// Lo escrito en Vehículos se GUARDA antes de evaluar la ruta (p. ej. si se revoca todo el acceso), en sessionStorage de esta pestaña y con
+// clave POR USUARIO: solo lo escrito y el id del vehículo en edición. Se recupera si vuelve el permiso y se borra al cerrar sesión.
+const VD = uid => 'okd_veh_draft:' + uid;
+// combinar respaldos: lo de 'top' (lo que está escrito AHORA en pantalla) tiene prioridad sobre 'base' (lo pendiente)
+// el formulario se combina SOLO si es el mismo contexto (misma alta o edición del mismo vehículo); si no, manda el de 'top' (lo visible)
+const mergeVals = (base, top) => {
+  const tf = top && Object.keys(top.form || {}).length, bc = base && base.formCtx, tc = top && top.formCtx;
+  const form = !tf ? Object.assign({}, base && base.form) : (bc && tc && bc !== tc) ? Object.assign({}, top.form) : Object.assign({}, base && base.form, top.form);
+  return { form, formCtx: tf ? tc : (bc || null), km: Object.assign({}, base && base.km, top && top.km), note: Object.assign({}, base && base.note, top && top.note) };
+};
+const formCtxOf = form => form ? (form.v ? 'edit:' + form.v.id : 'new') : null;
+const emptyVals = v => !v || (!Object.keys(v.form || {}).length && !Object.keys(v.km || {}).length && !Object.keys(v.note || {}).length);
+const readDraft = uid => { try { return JSON.parse(sessionStorage.getItem(VD(uid)) || 'null'); } catch (e) { return null; } };
+export function stashVehDraft(uid) {
+  if (!uid || !document.getElementById('vehTable') && !document.getElementById('vehForm')) return false;
+  const prev = readDraft(uid), st = window.__okdVehState || {};
+  const vals = mergeVals(prev && prev.vals, captureVehInputs(document));   // no pisa lo pendiente que no está en pantalla (p. ej. alertas que no cargaron)
+  const form = st.form ? { mode: st.form.v ? 'edit' : 'new', vid: st.form.v ? st.form.v.id : null } : null;
+  if (!form && !Object.keys(vals.km).length && !Object.keys(vals.note).length) return false;
+  try { sessionStorage.setItem(VD(uid), JSON.stringify({ tab: st.tab || 'ACTIVOS', form, vals })); return true; } catch (e) { return false; }
+}
+export function clearVehDrafts() { try { Object.keys(sessionStorage).filter(k => k.startsWith('okd_veh_draft:')).forEach(k => sessionStorage.removeItem(k)); } catch (e) { } }
 export async function openVehicles(api, me, frame) {
+  // Redibujo por CAMBIO DE PERMISOS (window.__okdKeepState): se conservan pestaña, formulario abierto y TODO lo escrito
+  const keep = window.__okdKeepState === true; window.__okdKeepState = false;
+  const saved = readDraft(me.id);   // solo lo de ESTE usuario
+  const st = keep && window.__okdVehState ? window.__okdVehState
+    : saved ? { tab: saved.tab || 'ACTIVOS', form: saved.form ? { v: saved.form.mode === 'edit' ? { id: saved.form.vid, pending: true } : null } : null } : { tab: 'ACTIVOS', form: null };
+  let kept = keep ? captureVehInputs(document) : null;   // antes de que frame() reemplace la pantalla
+  if (saved) kept = mergeVals(saved.vals, kept);   // vuelve el acceso: lo guardado + lo que esté en pantalla (que tiene prioridad)
+  window.__okdVehState = st;
   const w = frame(me, isRc4(me) && me.role !== 'ADMIN' ? 'Vehículos y kilometraje' : 'Kilometraje de vehículos', '#/vehiculos');
-  const draw = async m => {
-    let vs = [], alerts = [];
-    try { vs = await (api.vehicleStatus ? api.vehicleStatus() : api.listVehicles()); } catch (e) { vs = []; }
-    try { alerts = await api.listMileageAlerts(); } catch (e) { alerts = []; }
+  const draw = async (m, drop) => {
+    // TODO redibujo conserva lo escrito en pantalla (tiene prioridad sobre el respaldo): abrir el formulario, cambiar de pestaña, REINTENTAR,
+    // guardar otra cosa… Solo se descarta lo que una acción ACABA de guardar con éxito ('drop': km de un vehículo / resolución de una alerta).
+    const live = captureVehInputs(w);
+    if (drop && drop.form) { live.form = {}; live.formCtx = null; if (kept) { kept.form = {}; kept.formCtx = null; } }   // descarte CONFIRMADO
+    if (drop && drop.km) delete live.km[drop.km];
+    if (drop && drop.note) delete live.note[drop.note];
+    if (kept && drop) { if (drop.km) delete kept.km[drop.km]; if (drop.note) delete kept.note[drop.note]; }
+    if (!emptyVals(live)) kept = mergeVals(kept, live);
+    // Un fallo al consultar NO se muestra como "Sin vehículos"/"Sin alertas": se informa con REINTENTAR
+    let vs = [], alerts = [], vErr = null, aErr = null;
+    try { vs = await (api.vehicleStatus ? api.vehicleStatus() : api.listVehicles()); if (!Array.isArray(vs)) throw new Error('respuesta inválida'); } catch (e) { vErr = e.message || String(e); vs = []; }
+    try { alerts = await api.listMileageAlerts(); if (!Array.isArray(alerts)) throw new Error('respuesta inválida'); } catch (e) { aErr = e.message || String(e); alerts = []; }
     const canEnter = hasPerm(me, 'vehicle_mileage.enter'), canManageVehicles = hasPerm(me, 'vehicles.manage'), canService = hasPerm(me, 'vehicles.service_manage') || canManageVehicles, canEdit = hasPerm(me, 'vehicle_mileage.edit') || canManageVehicles, canResolve = hasPerm(me, 'vehicle_mileage.resolve_alerts');
+    if (st.form && st.form.v && st.form.v.pending) { const real = vs.find(x => x.id === st.form.v.id); st.form = real ? { v: real } : (vErr ? st.form : null); }   // EDITAR recuperado
+    const tab = st.form && st.form.v && st.form.v.pending ? st.tab : st.tab, form = st.form && st.form.v && st.form.v.pending ? null : st.form, K = kept || { form: {}, km: {}, note: {} };
+    const act = vs.filter(v => v.active !== false), ina = vs.filter(v => v.active === false), list = tab === 'INACTIVOS' ? ina : act;
+    const errBox = (id, what, e) => '<div class="msg err" id="' + id + '">No se pudieron cargar ' + what + ': ' + esc(e) + ' <button class="btn soft" type="button" data-retry>REINTENTAR</button></div>';
+    const tagTxt = [canManageVehicles && 'Administrás vehículos', canEnter && 'Podés cargar km'].filter(Boolean).join(' · ') || 'Solo lectura';
+    const fv = form && form.v;
+    const RO = fv ? ['vfBrand', 'vfModel', 'vfType', 'vfYear'] : [];   // el servidor no actualiza estos campos al EDITAR (solo en el alta)
+    const ctx = formCtxOf(form), KF = K.formCtx === ctx ? K.form : {};   // NUNCA se vuelcan valores de otro vehículo ni de un alta
+    const formHtml = form ? '<div class="card" id="vehForm" data-ctx="' + esc(ctx) + '" style="margin:10px 0"><h3>' + (fv ? 'Editar vehículo · ' + esc(fv.plate || '') : 'Nuevo vehículo') + '</h3>' +
+      (canManageVehicles ? '' : '<p class="msg warn" id="vfNoPerm">Se quitó tu permiso para administrar vehículos: este formulario no se puede guardar. Lo que escribiste se conserva; podés copiarlo o tocar CANCELAR.</p>') +
+      '<div class="row-form">' +
+      [['vfName', 'Modelo / nombre (obligatorio)', fv ? fv.name : ''], ['vfPlate', 'Patente (obligatoria)', fv ? fv.plate : ''], ['vfBrand', 'Marca', fv ? fv.brand || '' : ''], ['vfModel', 'Modelo', fv ? fv.model || '' : ''],
+       ['vfType', 'Tipo', fv ? fv.type || '' : ''], ['vfYear', 'Año', fv ? (fv.year || '') : ''], ['vfInterval', 'Intervalo de service (km)', fv ? String(fv.service_interval_km || 10000) : '10000']]
+        .concat(fv ? [] : [['vfKm', 'Kilometraje inicial', '0']]).concat([['vfNotes', 'Observaciones', fv ? fv.notes || '' : '']])
+        .map(([id, l, val]) => '<label>' + l + ' <input class="ed" id="' + id + '" data-orig="' + esc(String(val)) + '" value="' + esc(String(KF[id] != null && !RO.includes(id) ? KF[id] : val)) + '"' + (/Year|Interval|Km/.test(id) ? ' inputmode="numeric"' : '') +
+          (RO.includes(id) ? ' readonly aria-readonly="true" data-ro' : '') + '></label>').join('') +
+      '</div>' + (fv ? '<p class="rp-note" id="vfRoNote">Marca, modelo, tipo y año no se pueden cambiar al editar: el servidor no guarda esos cambios (solo se cargan en el alta).</p>' : '') +
+      '<div class="uact"><button class="btn dark" type="button" id="vfSave"' + (canManageVehicles ? '' : ' disabled') + '>' + (fv ? 'GUARDAR CAMBIOS' : 'DAR DE ALTA') + '</button><button class="btn soft" type="button" id="vfCancel">CANCELAR</button></div>' +
+      (fv ? '' : '<p class="rp-note">El vehículo nuevo queda ACTIVO. Los vehículos existentes nunca se activan solos.</p>') + '</div>' : '';
+    const row = v => { const on = v.active !== false;
+      return '<tr data-vid="' + v.id + '"' + (on ? '' : ' class="veh-off"') + '><td><b>' + esc(v.name) + '</b>' + (v.habitual_driver_id === me.id ? ' <small>(asignado)</small>' : '') + (on ? '' : ' ' + pill('warn', 'Inactivo')) + '</td><td>' + esc(v.plate) + '</td><td>' + n0(v.current_km) + '</td><td>' + (v.next_service_km ? n0(v.next_service_km) : '—') + '</td><td>' +
+        (on ? (v.service_due ? pill('bad', 'Service requerido') : pill('ok', 'OK')) : pill('warn', 'Fuera de uso')) + '</td><td><div class="uact">' +
+        // un vehículo INACTIVO no recibe km, service ni correcciones; solo se edita o se activa (con administración)
+        (on && canEnter ? '<input class="ed" data-km placeholder="Km actual" inputmode="numeric" value="' + esc(K.km[v.id] || '') + '"><button class="btn soft" type="button" data-rec>CARGAR KM</button>'
+          : K.km[v.id] ? '<input class="ed" data-km value="' + esc(K.km[v.id]) + '" disabled><small class="msg warn" data-kmnoperm>Sin permiso para cargar km: lo escrito se conserva.</small>' : '') +
+        (on && canService ? '<button class="btn soft" type="button" data-service>REGISTRAR SERVICE</button>' : '') +
+        (canManageVehicles ? '<button class="btn soft" type="button" data-vedit>EDITAR</button>' + (on ? '<button class="btn soft" type="button" data-voff>DESACTIVAR</button>' : '<button class="btn dark" type="button" data-von>ACTIVAR</button>') : '') +
+        (on ? (canEdit ? '<button class="btn soft" type="button" data-fix>CORREGIR KM</button>' : hasPerm(me, 'requests.create') ? '<button class="btn soft" type="button" data-askfix>SOLICITAR CORRECCIÓN</button>' : '') : '') + '</div></td></tr>'; };
+    const empty = tab === 'INACTIVOS' ? 'No hay vehículos inactivos.' : 'No hay vehículos activos.' + (ina.length ? ' Hay ' + ina.length + ' inactivo(s): mirá INACTIVOS.' : '');
     w.innerHTML = '<div class="grid"><section class="card span12" id="kmRules"></section>' +
-      '<section class="card span12"><div class="section-title"><h2>Vehículos</h2><span class="tag">' + (canEnter ? 'Podés cargar km' : 'Solo lectura') + '</span></div><div class="tscroll"><table class="table" id="vehTable"><thead><tr><th>Vehículo</th><th>Patente</th><th>Último km</th><th>Próximo service</th><th>Estado</th><th></th></tr></thead><tbody>' +
-      (vs.filter(v => v.active !== false).map(v => '<tr data-vid="' + v.id + '"><td><b>' + esc(v.name) + '</b>' + (v.habitual_driver_id === me.id ? ' <small>(asignado)</small>' : '') + '</td><td>' + esc(v.plate) + '</td><td>' + n0(v.current_km) + '</td><td>' + (v.next_service_km ? n0(v.next_service_km) : '—') + '</td><td>' +
-        (v.service_due ? pill('bad', 'Service requerido') : pill('ok', 'OK')) + '</td><td><div class="uact">' +
-        (canEnter ? '<input class="ed" data-km placeholder="Km actual" inputmode="numeric"><button class="btn soft" type="button" data-rec>CARGAR KM</button>' : '') +
-        (canService ? '<button class="btn soft" type="button" data-service>REGISTRAR SERVICE</button>' : '') +
-        (canManageVehicles ? '<button class="btn soft" type="button" data-vedit>EDITAR VEHÍCULO</button>' : '') +
-        (canEdit ? '<button class="btn soft" type="button" data-fix>CORREGIR KM</button>' : hasPerm(me, 'requests.create') ? '<button class="btn soft" type="button" data-askfix>SOLICITAR CORRECCIÓN</button>' : '') + '</div></td></tr>').join('') || '<tr><td colspan="6">Sin vehículos.</td></tr>') + '</tbody></table></div></section>' +
-      '<section class="card span12"><div class="section-title"><h2>Alertas de kilometraje</h2><span class="tag">' + (canResolve ? 'Podés resolverlas' : 'Solo lectura') + '</span></div><div class="tscroll"><table class="table" id="kmAlerts"><thead><tr><th>Fecha</th><th>Vehículo</th><th>Tipo</th><th>Km</th><th>Estado</th><th></th></tr></thead><tbody>' +
+      '<section class="card span12"><div class="section-title"><h2>Vehículos</h2><span class="tag">' + esc(tagTxt) + '</span></div>' +
+      (vErr ? errBox('vehErr', 'los vehículos', vErr) :
+        '<div class="uact" id="vehTabs"><button class="btn ' + (tab === 'ACTIVOS' ? 'dark' : 'soft') + '" type="button" data-vtab="ACTIVOS">ACTIVOS (' + act.length + ')</button><button class="btn ' + (tab === 'INACTIVOS' ? 'dark' : 'soft') + '" type="button" data-vtab="INACTIVOS">INACTIVOS (' + ina.length + ')</button>' +
+        (canManageVehicles ? '<button class="btn go" type="button" id="vehNew">+ NUEVO VEHÍCULO</button>' : '') + '</div>' + formHtml +
+        '<div class="tscroll"><table class="table" id="vehTable"><thead><tr><th>Vehículo</th><th>Patente</th><th>Último km</th><th>Próximo service</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' +
+        (list.map(row).join('') || '<tr><td colspan="6" id="vehEmpty">' + esc(empty) + '</td></tr>') + '</tbody></table></div>') + '</section>' +
+      '<section class="card span12"><div class="section-title"><h2>Alertas de kilometraje</h2><span class="tag">' + (canResolve ? 'Podés resolverlas' : 'Solo lectura') + '</span></div>' +
+      (aErr ? errBox('kmAlertsErr', 'las alertas', aErr) : '<div class="tscroll"><table class="table" id="kmAlerts"><thead><tr><th>Fecha</th><th>Vehículo</th><th>Tipo</th><th>Km</th><th>Estado</th><th></th></tr></thead><tbody>' +
       (alerts.map(a => '<tr data-aid="' + a.id + '"><td>' + esc(dt(a.created_at)) + '</td><td>' + esc(a.plate || '') + '</td><td>' + esc({ LOWER_THAN_LAST: 'Km menor que el último registrado', TRIP_OUT_OF_RANGE: 'Recorrido fuera de rango', INCONSISTENT: 'Diferencia inconsistente' }[a.kind] || a.kind) + '</td><td>' +
         n0(a.km_from) + ' → ' + n0(a.km_to) + '</td><td>' + (a.status === 'OPEN' ? pill('warn', 'Abierta') : pill('ok', 'Resuelta')) + (a.resolution_note ? '<br><small>' + esc(a.resolution_note) + '</small>' : '') + '</td><td>' +
-        (a.status === 'OPEN' && canResolve ? '<div class="uact"><input class="ed" data-note placeholder="Resolución"><button class="btn soft" type="button" data-res>RESOLVER</button></div>' : '') + '</td></tr>').join('') || '<tr><td colspan="6">Sin alertas.</td></tr>') + '</tbody></table></div></section></div>';
+        (a.status === 'OPEN' && canResolve ? '<div class="uact"><input class="ed" data-note placeholder="Resolución" value="' + esc(K.note[a.id] || '') + '"><button class="btn soft" type="button" data-res>RESOLVER</button></div>'
+          : K.note[a.id] ? '<div class="uact"><input class="ed" data-note value="' + esc(K.note[a.id]) + '" disabled><small class="msg warn">Sin permiso para resolver: lo escrito se conserva.</small></div>' : '') + '</td></tr>').join('') || '<tr><td colspan="6">Sin alertas.</td></tr>') + '</tbody></table></div>') + '</section></div>';
+    // Cada parte del respaldo se descarta SOLO si quedó a la vista con su valor (formulario, km por vehículo, resolución por alerta).
+    // Lo que no se pudo mostrar (p. ej. falló solo la consulta de alertas) se CONSERVA en memoria y en el respaldo del usuario.
+    if (kept) {
+      if (!st.form || (kept.formCtx && kept.formCtx !== formCtxOf(st.form) && w.querySelector('#vehForm'))) { kept.form = {}; kept.formCtx = null; }
+      else if (w.querySelector('#vehForm') && Object.keys(kept.form).every(id => { const i = w.querySelector('#' + id); return !i || i.readOnly || i.value === kept.form[id]; })) { kept.form = {}; kept.formCtx = null; }
+      for (const [vid, val] of Object.entries(kept.km)) { const i = w.querySelector('tr[data-vid="' + vid + '"] [data-km]'); if (i && i.value === val) delete kept.km[vid]; }
+      for (const [aid, val] of Object.entries(kept.note)) { const i = w.querySelector('tr[data-aid="' + aid + '"] [data-note]'); if (i && i.value === val) delete kept.note[aid]; }
+      if (emptyVals(kept)) { kept = null; try { sessionStorage.removeItem(VD(me.id)); } catch (e) { } }
+      else { try { sessionStorage.setItem(VD(me.id), JSON.stringify({ tab: st.tab, form: st.form ? { mode: st.form.v ? 'edit' : 'new', vid: st.form.v ? st.form.v.id : null } : null, vals: kept })); } catch (e) { } }
+    }
+    w.querySelectorAll('[data-retry]').forEach(b => b.onclick = () => { b.disabled = true; draw(); });
+    // ¿el formulario abierto tiene cambios sin guardar? (algún campo distinto de su valor original)
+    const dirty = () => [...w.querySelectorAll('#vehForm input[data-orig]')].some(i => !i.readOnly && i.value !== i.dataset.orig);
+    const ctxLabel = () => st.form && st.form.v ? 'la edición de ' + (st.form.v.name || '') + ' (' + (st.form.v.plate || '') + ')' : 'el alta de un vehículo nuevo';
+    // cambiar de contexto con cambios pendientes: aviso con opción de CANCELAR; aceptar descarta esos cambios (nunca se transfieren)
+    const leaveForm = target => !st.form || !dirty() || confirm('Tenés cambios sin guardar en ' + ctxLabel() + '. Si ' + target + ', esos cambios se descartan (no se pasan a otro formulario). ¿Continuar?');
+    w.querySelectorAll('[data-vtab]').forEach(b => b.onclick = () => { if (!leaveForm('cambiás de pestaña')) return; st.tab = b.dataset.vtab; st.form = null; draw(undefined, { form: true }); });
+    const nb = w.querySelector('#vehNew'); if (nb) nb.onclick = () => { if (st.form && !st.form.v) return;   // ya está abierta el alta
+      if (!leaveForm('abrís NUEVO VEHÍCULO')) return; st.form = { v: null }; draw(undefined, { form: true }); };
+    const cc = w.querySelector('#vfCancel'); if (cc) cc.onclick = () => { if (!leaveForm('cancelás')) return; st.form = null; draw(undefined, { form: true }); };
+    const sv = w.querySelector('#vfSave'); if (sv) sv.onclick = async () => {
+      if (!hasPerm(me, 'vehicles.manage')) { msg(w, { err: true, text: 'Sin permiso para administrar vehículos: no se guardó. Lo escrito se conserva.' }); return; }
+      const g = id => (w.querySelector('#' + id) || {}).value || '', v = st.form.v;
+      const p = { name: g('vfName').trim(), plate: g('vfPlate').trim(), service_interval_km: Number(g('vfInterval')) || 10000, notes: g('vfNotes'), habitual_driver_id: v ? v.habitual_driver_id || '' : '' };
+      // editar NO cambia el estado activo/inactivo ni envía marca/modelo/tipo/año (el servidor no los actualiza en la edición)
+      if (v) Object.assign(p, { id: v.id, active: v.active !== false });
+      else Object.assign(p, { brand: g('vfBrand').trim(), model: g('vfModel').trim(), type: g('vfType').trim(), year: g('vfYear').trim(), current_km: Number(g('vfKm')) || 0 });
+      sv.disabled = true;
+      try { await api.saveVehicle(p); st.form = null; draw({ text: v ? 'Vehículo actualizado (auditado): modelo/nombre, patente, intervalo de service y observaciones.' : 'Vehículo dado de alta (activo).' }, { form: true }); }
+      catch (e) { sv.disabled = false; msg(w, { err: true, text: e.message }); }
+    };
+    w.querySelectorAll('[data-vedit]').forEach(b => b.onclick = () => { const v = vs.find(x => x.id === b.closest('tr').dataset.vid); if (!v) return;
+      if (st.form && st.form.v && st.form.v.id === v.id) return;   // ya se está editando ese vehículo
+      if (!leaveForm('abrís la edición de ' + v.name + ' (' + v.plate + ')')) return; st.form = { v }; draw(undefined, { form: true }); });
+    const setActive = (b, on) => b.onclick = async () => { const v = vs.find(x => x.id === b.closest('tr').dataset.vid); if (!v) return;
+      if (!confirm((on ? '¿ACTIVAR' : '¿DESACTIVAR') + ' el vehículo ' + v.name + ' (' + v.plate + ')?' + (on ? '' : ' No se podrá asignar a hojas ni cargarle km.'))) return;
+      try { await api.saveVehicle({ id: v.id, name: v.name, plate: v.plate, habitual_driver_id: v.habitual_driver_id || '', service_interval_km: v.service_interval_km || 10000, notes: v.notes || '', active: on });
+        draw({ text: 'Vehículo ' + (on ? 'activado' : 'desactivado') + ' (auditado).' }); } catch (e) { draw({ err: true, text: e.message }); } };
+    w.querySelectorAll('[data-von]').forEach(b => setActive(b, true)); w.querySelectorAll('[data-voff]').forEach(b => setActive(b, false));
     msg(w, m);
     await mileageBlock(api, me, w.querySelector('#kmRules'), draw);
     w.querySelectorAll('[data-rec]').forEach(b => b.onclick = async () => { const tr = b.closest('tr'), km = Number(tr.querySelector('[data-km]').value);
-      try { const r = await api.recordVehicleKm(tr.dataset.vid, km, 'Carga desde OK Despacho'); draw(r.ok === false ? { err: true, text: r.message } : { text: 'Kilometraje cargado: ' + n0(r.current_km) + ' km.' }); } catch (e) { draw({ err: true, text: e.message }); } });
+      try { const r = await api.recordVehicleKm(tr.dataset.vid, km, 'Carga desde OK Despacho'); draw(r.ok === false ? { err: true, text: r.message } : { text: 'Kilometraje cargado: ' + n0(r.current_km) + ' km.' }, r.ok === false ? null : { km: tr.dataset.vid }); } catch (e) { draw({ err: true, text: e.message }); } });
     w.querySelectorAll('[data-service]').forEach(b => b.onclick = async () => {
       const tr = b.closest('tr'), v = vs.find(x => x.id === tr.dataset.vid);
       const km = prompt('Kilometraje al momento del service', String(v && v.current_km != null ? v.current_km : '')); if (km == null) return;
@@ -311,20 +428,12 @@ export async function openVehicles(api, me, frame) {
       try { await api.registerServiceDone(tr.dataset.vid, Number(km), date, note); if (api.sendServiceAlerts) api.sendServiceAlerts().catch(() => null); draw({ text: 'Service registrado. Se recalculó el próximo service y comenzó un nuevo ciclo.' }); }
       catch (e) { draw({ err: true, text: e.message }); }
     });
-    w.querySelectorAll('[data-vedit]').forEach(b => b.onclick = async () => {
-      const tr = b.closest('tr'), v = vs.find(x => x.id === tr.dataset.vid); if (!v) return;
-      const name = prompt('Modelo / nombre del vehículo', v.name || ''); if (name == null) return;
-      const plate = prompt('Patente', v.plate || ''); if (plate == null) return;
-      const interval = prompt('Intervalo de service en km', String(v.service_interval_km || 10000)); if (interval == null) return;
-      try { await api.saveVehicle({ id: v.id, name: name.trim(), plate: plate.trim(), habitual_driver_id: v.habitual_driver_id || '', service_interval_km: Number(interval), active: v.active !== false, notes: v.notes || '' }); draw({ text: 'Vehículo actualizado (auditado).' }); }
-      catch (e) { draw({ err: true, text: e.message }); }
-    });
     w.querySelectorAll('[data-fix]').forEach(b => b.onclick = async () => { const tr = b.closest('tr'), km = prompt('Kilometraje correcto'); if (km == null) return; const why = prompt('Motivo de la corrección (obligatorio)'); if (!why) return;
       try { await api.correctVehicleKm(tr.dataset.vid, Number(km), why); draw({ text: 'Kilometraje corregido (auditado).' }); } catch (e) { draw({ err: true, text: e.message }); } });
     w.querySelectorAll('[data-askfix]').forEach(b => b.onclick = async () => { const tr = b.closest('tr'), km = prompt('Kilometraje correcto'); if (km == null) return; const why = prompt('Motivo (obligatorio)'); if (!why) return;
       try { await api.createOperationalRequest({ request_type: 'CORRECCION_KM', reason: why, payload: { vehicle_id: tr.dataset.vid, km: Number(km) }, op_id: 'km-' + me.id + '-' + Date.now() }); draw({ text: 'Corrección solicitada a tu superior.' }); } catch (e) { draw({ err: true, text: e.message }); } });
     w.querySelectorAll('[data-res]').forEach(b => b.onclick = async () => { const tr = b.closest('tr');
-      try { await api.resolveMileageAlert(tr.dataset.aid, tr.querySelector('[data-note]').value); draw({ text: 'Alerta resuelta (auditada).' }); } catch (e) { draw({ err: true, text: e.message }); } });
+      try { await api.resolveMileageAlert(tr.dataset.aid, tr.querySelector('[data-note]').value); draw({ text: 'Alerta resuelta (auditada).' }, { note: tr.dataset.aid }); } catch (e) { draw({ err: true, text: e.message }); } });
   };
   await draw();
 }

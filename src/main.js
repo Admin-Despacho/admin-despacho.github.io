@@ -157,6 +157,25 @@ function show403() {
   p.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Acceso</span></div></header><div class="up-wrap"><div class="auth-card" id="e403"><h3>403 · ACCESO NO AUTORIZADO</h3><p>Tu usuario no tiene permiso para este módulo.</p><button class="btn dark" type="button" id="b403">VOLVER</button></div></div>';
   p.querySelector('#b403').onclick = () => { history.replaceState(null, '', location.pathname); closeOverlay(); };
 }
+// Error al cargar los permisos del usuario: aviso claro con REINTENTAR (misma sesión), sin panel ni acciones habilitadas
+// Acceso a Vehículos quitado con la sesión abierta: no se muestra ni se puede modificar ningún vehículo. Lo escrito quedó guardado SOLO para
+// este usuario en esta sesión y vuelve si se restituye el permiso (la ruta queda en #/vehiculos para recuperarlo).
+function showVehBlocked(saved) {
+  const p = $('#usersPanel'); if (!p) return; p.hidden = false;
+  p.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Vehículos</span></div></header>' +
+    '<div class="up-wrap"><div class="card" id="vehBlocked"><h3>SE QUITÓ TU ACCESO A VEHÍCULOS</h3><p class="msg warn">Ya no podés consultar ni modificar vehículos.' +
+    (saved ? ' Lo que estabas escribiendo quedó guardado solo en esta sesión y se recupera si te devuelven el permiso.' : '') +
+    '</p><button class="btn dark" type="button" id="vehBlockedBack">VOLVER AL INICIO</button></div></div>';
+  $('#vehBlockedBack').onclick = () => { location.hash = '#/'; };
+}
+function showPermError(text) {
+  show('#noPanel'); $('#operario').hidden = true; const up = $('#usersPanel'); if (up) up.hidden = true;
+  const card = document.querySelector('#noPanel .auth-card');
+  if (card) card.innerHTML = '<h3>NO SE PUDIERON CARGAR TUS PERMISOS</h3><p id="np-msg" class="msg err">' + esc(text || 'Error al consultar el servidor.') +
+    ' Por seguridad no se habilita ninguna acción hasta confirmarlos.</p><button class="btn dark" type="button" id="permRetry">REINTENTAR</button> <button class="btn soft" type="button" id="permLogout">CERRAR SESIÓN</button>';
+  const r = $('#permRetry'); if (r) r.onclick = () => { r.disabled = true; r.textContent = 'REINTENTANDO…'; route(); };
+  const l = $('#permLogout'); if (l) l.onclick = () => logout();
+}
 async function openRoute() {
   const h = location.hash.split('?')[0], r = MODULE_ROUTES[h];
   if (!r || !ME) return;
@@ -185,7 +204,8 @@ async function addHeaderControls(me) {
   out.addEventListener('click', logout);
   top.appendChild(out);
 }
-async function logout() { if (stopPinWatcher) { stopPinWatcher(); stopPinWatcher = null; } await revokePushOnLogout(api); await api.signOut(); location.hash = ''; location.reload(); }
+async function logout() { try { Object.keys(sessionStorage).filter(k => k.startsWith('okd_veh_draft:')).forEach(k => sessionStorage.removeItem(k)); } catch (e) { }   // lo escrito en Vehículos no queda para el próximo usuario
+  if (stopPinWatcher) { stopPinWatcher(); stopPinWatcher = null; } await revokePushOnLogout(api); await api.signOut(); location.hash = ''; location.reload(); }
 
 async function route() {
   // Enlace de nueva contraseña (recuperación o invitación): antes de cualquier otra cosa
@@ -202,7 +222,12 @@ async function route() {
   }
   const session = await api.getSession();
   if (!session) { showLogin(); return; }
-  const me = await api.me();
+  let me;
+  try { me = await api.me(); }
+  catch (e) {   // permisos no confirmados por el servidor: NO se abre ningún panel ni se habilita ninguna acción
+    if (e && e.code === 'PERMISSIONS_UNAVAILABLE') { showPermError(e.message); return; }
+    throw e;
+  }
   if (!me) { showLogin(); return; }
   // Invitado que YA tiene contraseña (acaba de entrar con ella o con passkey): no se le pide crearla de nuevo
   // (Supabase rechazaría la misma con "should be different"): se activa la invitación. Si falla, ve el error y puede reintentar.
@@ -237,7 +262,27 @@ async function route() {
     });
   }
   ME = me; window.OKD_ME = { id: me.id, allDrafts: hasPerm(me, 'routes.manage_all_drafts') };
-  wireSwitcher(() => ME); watchRevocation(api, () => ME, v => { ME = v; });   // permiso quitado con la sesión abierta
+  wireSwitcher(() => ME); watchRevocation(api, () => ME, v => { ME = v; });   // permisos cambiados con la sesión abierta
+  // Permisos cambiados con la sesión abierta, SIN perder lo escrito:
+  //  · Vehículos: se redibuja conservando pestaña, formulario abierto y lo escrito (window.__okdKeepState); lo revocado queda deshabilitado.
+  //  · Otras pantallas: no se reconstruyen solas; aviso con ACTUALIZAR PANTALLA (el servidor rechaza igual lo no autorizado).
+  window.OKD_ON_PERMS_CHANGED = () => {
+    const h = location.hash.split('?')[0]; if (!MODULE_ROUTES[h]) return;
+    if (h === '#/vehiculos') {
+      // 1) guardar lo escrito ANTES de evaluar la ruta (si se perdió el acceso, openRoute no llega a la pantalla)
+      import('./online/rc4-ui.js').then(m => {
+        const had = m.stashVehDraft(ME && ME.id);
+        if (!MODULE_ROUTES[h].ok(ME)) { showVehBlocked(had); return; }   // 2) sin acceso: bloqueado, sin datos protegidos
+        window.__okdKeepState = true; openRoute();                       // 3) con acceso: se redibuja conservando (o recuperando) lo escrito
+      });
+      return;
+    }
+    if (document.getElementById('permChanged')) return;
+    const n = document.createElement('div'); n.id = 'permChanged'; n.className = 'msg warn perm-changed';
+    n.innerHTML = 'Tus permisos cambiaron. Guardá lo que estés haciendo y actualizá la pantalla. <button class="btn soft" type="button">ACTUALIZAR PANTALLA</button>';
+    n.querySelector('button').onclick = () => { n.remove(); openRoute(); };
+    ($('#usersPanel') && !$('#usersPanel').hidden ? $('#usersPanel') : document.body).prepend(n);
+  };
   // Vista "Transportista" (⇄ Cambiar rol): Mis rutas con el recorrido del Transportista Interno. No cambia el rol ni los permisos.
   if (viewMode(me) === 'TRANSPORTISTA') {
     show('#noPanel'); const tt = document.querySelector('#noPanel .ttl span'); if (tt) tt.textContent = 'Mis rutas';

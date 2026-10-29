@@ -131,9 +131,11 @@ export const DemoAdmin = {
     if (!String(p.name || '').trim() || !String(p.plate || '').trim()) throw err('Modelo y patente obligatorios.', 'BAD_VEHICLE', 400);
     const V = this.db.vehicles = this.db.vehicles || []; const plate = p.plate.toUpperCase().trim();
     if (V.some(v => v.plate === plate && v.id !== p.id)) throw err('Ya existe esa patente.', 'DUPLICATE', 409);
-    let v = V.find(x => x.id === p.id);
+    let v = V.find(x => x.id === p.id); const isNew = !v;
     if (!v) { const km = Number(p.current_km) || 0; v = { id: 'vh-' + (++this.db.seq), current_km: km, last_service_km: p.last_service_km !== '' && p.last_service_km != null ? Number(p.last_service_km) : km, last_service_date: null, active: true }; V.push(v); }
     Object.assign(v, { name: p.name, plate, active: p.active !== false, notes: p.notes || '', service_interval_km: Number(p.service_interval_km) || 10000, habitual_driver_id: p.habitual_driver_id || null });
+    // igual que el servidor (upsert_vehicle): marca, modelo, tipo y año SOLO se cargan en el ALTA; la edición los ignora
+    if (isNew) { ['brand', 'model', 'type'].forEach(k => { if (p[k] != null) v[k] = p[k]; }); if (p.year !== undefined) v.year = p.year === '' ? null : Number(p.year); }
     this._audit(me, 'VEHICLE_SAVED', v.id, null, { plate }); this._serviceCheck(v); this._save(); return v;
   },
   _serviceCheck(v) {

@@ -106,12 +106,19 @@ export async function checkRevoked(api, me, fresh) {
 // trabajo en curso. El servidor sigue rechazando cualquier operación no autorizada.
 export function watchRevocation(api, getMe, setMe) {
   if (window.__okdRevWatch) return; window.__okdRevWatch = true; let busy = false;
+  // firma de los permisos efectivos (online: los del servidor; demo: rol + permisos individuales + módulos)
+  const sig = u => JSON.stringify(Array.isArray(u.effective_permissions) ? u.effective_permissions.slice().sort() : [u.role, u.permission_overrides || {}, u.disabled_modules || []]);
   const check = async () => {
-    const me = getMe(); if (!me || busy || !hasPerm(me, 'routes.receive_internal')) return;
+    const me = getMe(); if (!me || busy) return;
     busy = true;
     try {
-      let fresh; try { fresh = await api.me(); } catch (e) { return; }
-      if (!fresh || canSwitch(fresh)) return;
+      let fresh; try { fresh = await api.me(); } catch (e) { return; }   // sin conexión o permisos no disponibles: se conserva lo confirmado (no se amplía)
+      if (!fresh) return;
+      if (!hasPerm(me, 'routes.receive_internal') || canSwitch(fresh)) {   // cambios que no son la revocación del permiso de asignación
+        if (sig(fresh) !== sig(me)) { setMe(fresh); if (!canSwitch(fresh)) document.querySelectorAll('[data-rolesw-box]').forEach(b => b.remove());
+          if (viewMode(me) !== 'TRANSPORTISTA' && window.OKD_ON_PERMS_CHANGED) window.OKD_ON_PERMS_CHANGED(fresh); }
+        return;
+      }
       if (viewMode(me) === 'TRANSPORTISTA') { await checkRevoked(api, me, fresh); return; }
       setMe(fresh); closeMenu(); document.querySelectorAll('[data-rolesw-box]').forEach(b => b.remove());
       const n = pendingQueue(me);

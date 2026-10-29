@@ -114,7 +114,11 @@ export class SupabaseApi {
     // Sesiones cerradas por Administración: el token actual quedó sin permisos en el servidor; acá se cierra también en pantalla.
     if (p.sessions_revoked_at && s.iat && s.iat * 1000 < Date.parse(p.sessions_revoked_at)) { this.revokedNotice = true; try { sessionStorage.setItem('okd_revoked', '1'); } catch (e) { } await this.signOut(); return null; }
     const { data: uc } = await this.sb.from('user_carriers').select('carrier_id').eq('user_id', s.userId);
-    return { ...p, carriers: (uc || []).map(x => x.carrier_id) };
+    // Permisos EFECTIVOS del usuario según el servidor (rol + permisos individuales otorgados/revocados + módulos restringidos).
+    // Si no se pueden obtener, NO se devuelve un usuario con permisos supuestos: la app muestra el error con REINTENTAR.
+    const ep = await this.sb.rpc('user_effective_permissions', { p_user: s.userId });
+    if (ep.error || !Array.isArray(ep.data)) throw Object.assign(new Error('No se pudieron cargar tus permisos' + (ep.error && ep.error.message ? ': ' + ep.error.message : '.')), { code: 'PERMISSIONS_UNAVAILABLE' });
+    return { ...p, carriers: (uc || []).map(x => x.carrier_id), effective_permissions: ep.data.slice() };
   }
   async listCarriers() { const { data, error } = await this.sb.from('carriers').select('*').order('name'); if (error) throw error; return data; }
   // Sesión estable (RC2): antes de llamar se renueva el token si está por vencer; ante 401 se renueva y se reintenta una vez;

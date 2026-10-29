@@ -77,6 +77,9 @@ export const userModules = user => (user && user.status === 'ACTIVO') ? MODULES.
 // Permiso efectivo = (rol + otorgados) − quitados − módulos restringidos (igual que public.user_has_perm)
 export function hasPerm(user, perm) {
   if (!user || user.status !== 'ACTIVO') return false;
+  // Modo online: permisos EFECTIVOS calculados por el servidor (rol + otorgados + revocados + módulos restringidos). Se usan tal cual:
+  // nunca se amplían con los permisos por rol de la app.
+  if (Array.isArray(user.effective_permissions)) return user.effective_permissions.includes(perm);
   const ov = (user.permission_overrides || {})[perm];
   if (ov === false) return false;
   if (ov !== true && !(ROLE_PERMISSIONS[user.role] || []).includes(perm)) return false;

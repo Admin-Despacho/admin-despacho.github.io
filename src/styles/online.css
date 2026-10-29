@@ -823,3 +823,6 @@ tr.main-row.flash{outline:3px solid #16d6e5}
  .rc4main .topact .userchip:has([data-rolesw-box]){display:block}
  .rc4side .rc4who .rolesw{display:none}
 }
+/* aviso: permisos cambiados con la sesión abierta (no se reconstruye la pantalla sola) */
+.perm-changed{position:sticky;top:0;z-index:50;margin:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#vehForm input[data-ro]{background:#f1f4f5;color:#5b6b72;cursor:not-allowed}
