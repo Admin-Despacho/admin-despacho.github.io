@@ -10,6 +10,12 @@ function fakeSb({ profile, acceptFails = false, iat = 2000000000 }) {
   });
   return {
     state,
+    // me() consulta los permisos efectivos incluso durante la activación de una invitación.
+    rpc: async (name, args) => {
+      expect(name).toBe('user_effective_permissions');
+      expect(args).toEqual({ p_user: profile.id });
+      return { data: [], error: null };
+    },
     auth: {
       getSession: async () => ({ data: { session: state.signedOut ? null : { user: { id: profile.id }, access_token: token } } }),
       updateUser: async ({ password }) => { state.password = password; return { error: null }; },

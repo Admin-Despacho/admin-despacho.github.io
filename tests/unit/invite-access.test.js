@@ -9,6 +9,12 @@ function fakeAuth({ status = 'INVITACION_PENDIENTE', stored = null, acceptFails 
   const st = { profile: { id: 'u-1', email: 'invitado@example.invalid', role: 'OPERARIO_DEPOSITO', status }, password: stored, session: true, accepts: 0, signOuts: [] };
   const sb = {
     st,
+    // Permisos confirmados, sin otorgamientos: la activación no depende de permisos de operación.
+    rpc: async (name, args) => {
+      expect(name).toBe('user_effective_permissions');
+      expect(args).toEqual({ p_user: st.profile.id });
+      return { data: [], error: null };
+    },
     auth: {
       getSession: async () => ({ data: { session: st.session ? { user: { id: 'u-1' }, access_token: token } : null } }),
       updateUser: async ({ password }) => {
