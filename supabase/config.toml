@@ -7,3 +7,15 @@ verify_jwt = true
 # Geocodificación de G2: exige sesión (además el handler valida permiso de administrar ubicaciones)
 [functions.geocode-location]
 verify_jwt = true
+
+# Comunicaciones internas (NO desplegadas). OAuth: Google vuelve con un GET sin sesión (las acciones de usuario validan JWT y permiso
+# dentro de la función). Despachador: lo invoca pg_cron con el encabezado secreto x-comm-cron (lo valida la función).
+[functions.comm-gmail-oauth]
+verify_jwt = false
+
+[functions.comm-dispatcher]
+verify_jwt = false
+
+# Comunicaciones · registro de adjuntos validado en el servidor (exige sesión; el permiso se valida adentro)
+[functions.comm-attachments]
+verify_jwt = true

@@ -20,6 +20,8 @@ export const PERMISSIONS = [
   // "Permitir asignación de hojas de ruta": el usuario (cualquier rol) puede ser responsable de hojas del Transporte Interno y
   // realizarlas con el recorrido del Transportista Interno. SOLO sus hojas asignadas; no amplía ningún otro permiso. Sin rol por defecto.
   'routes.receive_internal',
+  // Comunicaciones internas: consultar, colaboradores, redactar, programar/cancelar, enviar pruebas y conexión Gmail (Admin por rol; a otros, individualmente)
+  'comms.view', 'comms.collaborators_manage', 'comms.compose', 'comms.schedule', 'comms.test_send', 'comms.gmail_manage',
   'deliveries.update', 'deliveries.capture_signature',
   'internal_routes.use', 'internal_routes.manage',
   'locations.view', 'locations.manage',

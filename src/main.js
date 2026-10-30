@@ -90,6 +90,8 @@ const MODULE_ROUTES = {
   '#/informes': { ok: me => hasPerm(me, 'can_view_commercial_transport_reports') || hasPerm(me, 'can_manage_commercial_transport_reports'), open: async me => { const { ReportsPanel } = await import('./online/reports-ui.js'); await new ReportsPanel(api, me, logout).open(); await withNav(me, '#/informes'); } },
   '#/conciliacion-noc': { ok: me => hasPerm(me, 'credit_notes.manage'), open: async me => (await adminUi()).openNocRecon(api, me) },
   '#/auditoria': { ok: me => hasPerm(me, 'audit.view'), open: async me => (await adminUi()).openAudit(api, me) },
+  // Comunicaciones internas (módulo separado): el servidor valida cada operación; el menú solo refleja los permisos efectivos
+  '#/comunicaciones': { ok: me => hasPerm(me, 'comms.view'), open: async me => { const [a, c] = await Promise.all([adminUi(), import('./online/comms-ui.js')]); return c.openComms(api, me, a.frameFor); } },
   '#/backup': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'backup.manage'), open: async me => (await adminUi()).openBackup(api, me) },
   // transportistas: su pantalla sin panel (igual que antes). Usuario habilitado con "Permitir asignación de hojas de ruta":
   // la URL lo lleva a la vista Transportista (Mis rutas) con el selector; sin el permiso → 403 (y el servidor rechaza igual).

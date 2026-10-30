@@ -46,3 +46,4 @@
 20261108000100_v4_17_set_stop_outcome.sql
 20261110000100_permiso_asignacion_hojas.sql
 20261111000100_reenvios_reintento_pedido.sql
+20261112000100_comunicaciones.sql

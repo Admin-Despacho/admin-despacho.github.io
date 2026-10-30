@@ -826,3 +826,21 @@ tr.main-row.flash{outline:3px solid #16d6e5}
 /* aviso: permisos cambiados con la sesión abierta (no se reconstruye la pantalla sola) */
 .perm-changed{position:sticky;top:0;z-index:50;margin:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 #vehForm input[data-ro]{background:#f1f4f5;color:#5b6b72;cursor:not-allowed}
+/* ===== Comunicaciones internas (módulo separado; misma estética del panel) ===== */
+.comms .comms-tabs{margin:6px 0 12px}
+.comms-list{display:grid;gap:12px}
+.comms-item h3{margin:0;font-size:16px}
+.comms-body{min-height:160px;border:1px solid #dbe4e8;border-radius:12px;padding:12px;background:#fff;line-height:1.5;overflow:auto}
+.comms-body:focus{outline:2px solid #22c4dc}
+.comms-toolbar .btn{min-height:34px;padding:6px 10px}
+.comms-sel{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin:6px 0}
+.comms-sel .chk,.comms .chk{display:inline-flex;gap:6px;align-items:center;font-weight:500}
+.comms-final ul,.comms-modal ul{margin:6px 0 0 18px;padding:0}
+.comms-final{max-height:260px;overflow:auto}
+.comms-preview{width:100%;min-height:280px;border:1px solid #dbe4e8;border-radius:12px;background:#fff}
+.comms-wa{white-space:pre-wrap;font:14px/1.45 system-ui,Arial,sans-serif;background:#f3f7f8;border-radius:10px;padding:10px;width:100%;box-sizing:border-box}
+.btn.wa{background:#1fa855;color:#fff;border-color:#1fa855}
+.btn.wa:hover{background:#178a45}
+.udialog.wide{width:min(820px,100%)}
+.comms-run summary{cursor:pointer;line-height:1.8}
+@media(max-width:700px){.comms .row-form{grid-template-columns:1fr}.comms-tabs .btn{flex:1 1 100%}.comms-item .uact .btn{flex:1 1 calc(50% - 6px)}}

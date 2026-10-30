@@ -23,22 +23,25 @@ export function roleNav(me) {
     ['#/solicitudes', 'Solicitudes', [['#/aprobaciones', 'Aprobaciones de ruta interna']]],
     ['#/conciliacion-noc', 'NOC'],
     ['#/informes', 'Informes'],
+    hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones'],
     ['#/auditoria', 'Auditoría'],
     ['#/usuarios', 'Usuarios y permisos'],
     // Transportistas, Vehículos, Emails y Backup son secciones de Configuración: van agrupados dentro de ella
     ['#/configuracion', 'Configuración', [['#/configuracion?sec=transportistas', 'Transportistas'], ['#/configuracion?sec=vehiculos', 'Vehículos / Service'],
-      ['#/configuracion?sec=emails', 'Emails'], ['#/backup', 'Backup / Archivo']]]];
+      ['#/configuracion?sec=emails', 'Emails'], ['#/backup', 'Backup / Archivo']]]].filter(Boolean);
   if (me.role === 'SUPERVISOR_DESPACHO') return [
     ['#/dashboard', 'Dashboard'], ['#/nueva-hoja', 'Nueva hoja de ruta'], ['#/despacho', 'Despacho'], ['#/borradores', 'Borradores del equipo'],
     (hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team')) && ['#/historial', 'Hojas publicadas'], canRequests(me) && ['#/solicitudes', 'Solicitudes / Aprobaciones'], ['#/notificaciones', 'Notificaciones'],
     (hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/vehiculos', 'Vehículos'],
-    (hasPerm(me, 'columns.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/config-operativa', 'Configuración operativa']].filter(Boolean);
+    (hasPerm(me, 'columns.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/config-operativa', 'Configuración operativa'],
+    hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones']].filter(Boolean);
   return [
     ['#/dashboard', 'Dashboard'], ['#/nueva-hoja', 'Nueva hoja / Preparar hoja'], ['#/despacho', 'Despacho'], ['#/borradores', hasPerm(me, 'drafts.manage_all') ? 'Borradores de despacho' : 'Mis borradores'],
     (hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team')) ? ['#/historial', 'Hojas publicadas'] : hasPerm(me, 'routes.view_own') && ['#/historial', 'Mis hojas publicadas'], ['#/notificaciones', 'Notificaciones'], canRequests(me) && ['#/solicitudes', 'Solicitudes'],
     hasPerm(me, 'carriers.manage') && ['#/configuracion?sec=transportistas', 'Transportistas'],
     (hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/vehiculos', 'Vehículos / Kilometraje / Service'],
-    hasPerm(me, 'columns.view') && ['#/config-operativa', 'Columnas predeterminadas']].filter(Boolean);
+    hasPerm(me, 'columns.view') && ['#/config-operativa', 'Columnas predeterminadas'],
+    hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones']].filter(Boolean);
 }
 export const ROUTE_OF = h => h.split('?')[0];
 const NAV_MATCH = (target, active) => {
@@ -465,6 +468,7 @@ export async function openOperationalConfig(api, me, frame, plantillasSection) {
 
 // ===================== PERMISOS DE UN USUARIO (Admin) =====================
 export const PERM_GROUPS = [
+  ['Comunicaciones', ['comms.view', 'comms.collaborators_manage', 'comms.compose', 'comms.schedule', 'comms.test_send', 'comms.gmail_manage']],
   ['Hojas', ['routes.create', 'routes.edit', 'routes.publish', 'routes.cancel', 'routes.assign', 'routes.reassign', 'routes.view_all', 'routes.view_team', 'routes.view_own', 'routes.receive_internal', 'routes.manage_all_drafts']],
   ['Borradores', ['drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team']],
   ['Solicitudes / aprobaciones', ['requests.create', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team', 'requests.reassign', 'can_approve_internal_route_changes']],
@@ -476,7 +480,7 @@ export const PERM_GROUPS = [
 ];
 export const PERM_LABEL = {
   'routes.create': 'Crear / preparar hojas', 'routes.edit': 'Editar hojas', 'routes.publish': 'Publicar hojas', 'routes.cancel': 'Cancelar hojas', 'routes.assign': 'Asignar transportista / responsable / vehículo',
-  'routes.reassign': 'Reasignar', 'routes.view_all': 'Ver todas las hojas', 'routes.view_team': 'Ver hojas del equipo', 'routes.view_own': 'Ver hojas propias', 'routes.receive_internal': 'Permitir asignación de hojas de ruta', 'routes.manage_all_drafts': 'Gestionar TODOS los borradores',
+  'routes.reassign': 'Reasignar', 'routes.view_all': 'Ver todas las hojas', 'routes.view_team': 'Ver hojas del equipo', 'routes.view_own': 'Ver hojas propias', 'routes.receive_internal': 'Permitir asignación de hojas de ruta', 'comms.view': 'Comunicaciones: consultar', 'comms.collaborators_manage': 'Comunicaciones: administrar colaboradores', 'comms.compose': 'Comunicaciones: redactar y compartir', 'comms.schedule': 'Comunicaciones: programar, pausar y cancelar', 'comms.test_send': 'Comunicaciones: enviar pruebas', 'comms.gmail_manage': 'Comunicaciones: administrar la conexión Gmail', 'routes.manage_all_drafts': 'Gestionar TODOS los borradores',
   'drafts.create': 'Crear borradores', 'drafts.view_own': 'Ver borradores propios', 'drafts.view_team': 'Ver borradores del equipo', 'drafts.manage_team': 'Gestionar borradores del equipo',
   'requests.create': 'Solicitar autorización', 'requests.view_team': 'Ver solicitudes del equipo', 'requests.approve_team': 'Aprobar solicitudes del equipo', 'requests.reject_team': 'Rechazar solicitudes del equipo',
   'requests.observe_team': 'Observar solicitudes del equipo', 'requests.reassign': 'Reasignar solicitudes', 'can_approve_internal_route_changes': 'Aprobar cambios de ruta interna',
