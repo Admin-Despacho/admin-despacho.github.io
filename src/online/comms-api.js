@@ -196,7 +196,7 @@ export const DemoComms = {
     Object.assign(st.db.gmail, { connected: true, needs_reconnect: false, email: 'comunicados.demo@gmail.com', simulated: true, connected_at: new Date().toISOString() });
     this._commsAudit(st, null, 'GMAIL', 'CONECTADO (SIMULADO)', me.full_name); st._save(); return { simulated: true }; },
   async commsGmailDisconnect() { const me = await this._me(); need(me, 'comms.gmail_manage'); const st = this._commsStore();
-    Object.assign(st.db.gmail, { connected: false, needs_reconnect: false, email: null }); this._commsAudit(st, null, 'GMAIL', 'DESCONECTADO', me.full_name); st._save(); return { ok: true }; },
+    Object.assign(st.db.gmail, { connected: false, needs_reconnect: false, email: null }); this._commsAudit(st, null, 'GMAIL', 'DESCONECTADO', me.full_name); st._save(); return { ok: true, revoked_in_google: true }; },   // demo: revocación SIMULADA
   // SOLO demo: ejecuta el mismo despachador que el servidor con Gmail SIMULADO (lo que en producción hace el programador cada 5 minutos)
   async commsDemoTick(now) { const st = this._commsStore(); return dispatch(st, new DemoGmail(), { now: now || demoNow(), pauseMs: 0, worker: 'demo' }); },
 };

@@ -83,9 +83,14 @@ export async function openComms(api, me, frame) {
       '<p class="rp-note">Se conecta con el inicio de sesión oficial de Google (OAuth). Despacho nunca pide la contraseña de Gmail. Permiso pedido: solo <b>enviar correos</b> (no lee el buzón). El token queda guardado en el servidor, nunca en el navegador.</p></div>' +
       '<div class="card span6" id="autoCard"><h3>Automatización</h3><p>Programador: ' + auto + '</p>' + (d ? '<p class="rp-note">Última ejecución: ' + esc(dt(d.at)) + ' · ' + esc(d.status) + ' · enviados: ' + (d.sent || 0) + (d.note ? ' · ' + esc(d.note) : '') + '</p>' : '') +
       (g.mode === 'demo' ? '<p class="msg warn">Modo demo: la conexión y los envíos son SIMULADOS. No se envía ningún correo real.</p><div class="uact"><button class="btn soft" type="button" id="gmTick">SIMULAR EJECUCIÓN DEL PROGRAMADOR</button></div>' : '') +
+      '<p class="rp-note">Cómo se usan los datos y la cuenta de Gmail: <a href="privacidad.html" target="_blank" rel="noopener">Política de privacidad</a>.</p>' +
       '<p class="rp-note">Límites: una cuenta Gmail gratuita admite hasta 500 correos por día (Despacho se detiene en 400, contando solo los enviados por este módulo) y 25 MB por correo. La velocidad la controla el servidor para todos los envíos juntos: hasta 60 por minuto y 2 por segundo (cuota de Gmail API).</p></div></div>');
     const c = w.querySelector('#gmConnect'); if (c) c.onclick = () => guard(() => api.commsGmailConnect(), api.mode === 'online' ? null : 'Gmail conectado (SIMULADO en la demo).');
-    const x = w.querySelector('#gmDisconnect'); if (x) x.onclick = async () => { if (await modal(w, 'Desconectar Gmail', '<p>Se revoca el permiso en Google y se borra el token del servidor. Los envíos programados quedan sin enviar hasta reconectar.</p>', { okText: 'DESCONECTAR', cancelText: 'CANCELAR' })) guard(() => api.commsGmailDisconnect(), 'Gmail desconectado.'); };
+    const x = w.querySelector('#gmDisconnect'); if (x) x.onclick = async () => { if (await modal(w, 'Desconectar Gmail', '<p>Se borra el token del servidor y se solicita a Google la revocación del acceso. Los envíos programados quedan sin enviar hasta reconectar.</p>', { okText: 'DESCONECTAR', cancelText: 'CANCELAR' }))
+      guard(async () => { const r = await api.commsGmailDisconnect();   // informa si Google CONFIRMÓ la revocación (no se da por hecha)
+        st.flash = r && r.revoked_in_google ? { text: 'Gmail desconectado: se borró el token del servidor y Google confirmó la revocación del acceso' + (api.mode === 'online' ? '.' : ' (SIMULADO en la demo).') }
+          : { err: true, text: 'Gmail desconectado: se borró el token del servidor, pero Google no confirmó la revocación. Quitá también el acceso desde la página de permisos de la cuenta de Google (myaccount.google.com/permissions).' };
+        return r; }); };
     const t = w.querySelector('#gmTick'); if (t) t.onclick = () => guard(async () => { const s = await api.commsDemoTick(); st.flash = { text: 'Programador simulado: ' + s.status + ' · enviados ' + s.sent + (s.note ? ' · ' + s.note : '') }; });
   }
 

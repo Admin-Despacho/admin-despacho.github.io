@@ -22,6 +22,7 @@ export function renderLogin(api, onDone) {
     '<label>Email<input id="loginEmail" type="email" autocomplete="username" required></label>' +
     '<label class="pwlabel">Contraseña<input id="loginPass" type="password" autocomplete="current-password" required><button class="pwtoggle" type="button" id="loginPassToggle" aria-label="Mostrar contraseña" aria-pressed="false"></button></label>' +
     '<button class="btn go" id="loginBtn" type="submit">INGRESAR</button></form>' +
+    '<p class="login-legal"><a href="privacidad.html" target="_blank" rel="noopener">Política de privacidad</a></p>' +
     '<button class="linkbtn forgot" type="button" id="forgotOpen">¿OLVIDASTE TU CONTRASEÑA?</button>' +
     '<form id="forgotForm" hidden novalidate><label>Tu email<input id="forgotEmail" type="email" autocomplete="username"></label><button class="btn dark" type="submit" id="forgotGo">ENVIAR ENLACE</button><div class="up-msg ok" id="forgotMsg" hidden></div></form>' +
     (api.mode === 'demo' ? '<div class="demo-users">Modo demo · contraseña <b>demo</b> para todos:<br>' +

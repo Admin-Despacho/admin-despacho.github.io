@@ -844,3 +844,8 @@ tr.main-row.flash{outline:3px solid #16d6e5}
 .udialog.wide{width:min(820px,100%)}
 .comms-run summary{cursor:pointer;line-height:1.8}
 @media(max-width:700px){.comms .row-form{grid-template-columns:1fr}.comms-tabs .btn{flex:1 1 100%}.comms-item .uact .btn{flex:1 1 calc(50% - 6px)}}
+
+/* enlace a la política de privacidad (pantalla de ingreso) */
+.login-legal { margin: 14px 0 0; text-align: center; font-size: 13px; }
+.login-legal a { color: inherit; opacity: 0.8; text-decoration: underline; }
+.login-legal a:hover { opacity: 1; }
