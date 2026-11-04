@@ -12,10 +12,11 @@ export function listDist(dir, root = dir, out = []) {
 }
 export function buildServiceWorker(distDir) {
   const files = listDist(distDir), h = createHash('sha256');
-  files.forEach(f => { h.update(f); h.update(readFileSync(join(distDir, f))); });
+  const tpl = readFileSync(join(distDir, 'sw.js'), 'utf8');
+  // V4.24.1: el propio sw.js (plantilla) también entra en la versión → un cambio SOLO del service worker genera un shell nuevo
+  files.forEach(f => { h.update(f); h.update(readFileSync(join(distDir, f))); }); h.update(tpl);
   const version = h.digest('hex').slice(0, 12);
   const precache = ['/', ...files.map(f => '/' + f)];
-  const tpl = readFileSync(join(distDir, 'sw.js'), 'utf8');
   if (!tpl.includes('/*__OKD_PRECACHE__*/') || !tpl.includes('__OKD_SW_VERSION__')) return { version: null, precache: [] }; // ya generado
   writeFileSync(join(distDir, 'sw.js'), tpl.replace('/*__OKD_PRECACHE__*/[]', JSON.stringify(precache)).replace('__OKD_SW_VERSION__', version));
   return { version, precache };

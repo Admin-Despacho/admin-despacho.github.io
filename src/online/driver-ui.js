@@ -224,7 +224,7 @@ export class DriverApp {
   // Sincroniza la cola en orden; un reintento con el mismo op_id no duplica en el servidor
   async sync() {
     if (this._syncing) return;
-    this._syncing = true;
+    this._syncing = true; window.OKD_SYNCING = true   // V4.24.1: visible para no recargar en medio de una sincronización;
     try {
     if (this.queue.length) this.setConn('sync');
     while (this.queue.length) {
@@ -241,7 +241,7 @@ export class DriverApp {
       this.queue.shift(); this._sv(this.kQ, this.queue);
     }
     this.setConn('live'); await this.load();
-    } finally { this._syncing = false; }
+    } finally { this._syncing = false; window.OKD_SYNCING = false; }
   }
   _send(op) {
     const a = op.args;

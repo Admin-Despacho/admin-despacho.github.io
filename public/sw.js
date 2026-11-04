@@ -1,23 +1,47 @@
-// Service worker (RC2.1d). En el build se reemplazan PRECACHE y VERSION con el shell REAL generado (scripts/sw_precache_plugin.mjs).
-// - Instala COMPLETO el shell nuevo (addAll es atómico): si algo falla, la instalación falla y sigue vigente el service worker/caché anterior.
-// - Solo al activarse (con el shell completo ya guardado) borra los caches de shell anteriores (okd-shell-*). Nunca toca IndexedDB/localStorage.
-// - Nunca cachea API/Supabase ni otros orígenes: solo archivos estáticos propios.
+// Service worker (V4.24.1). En el build se reemplazan PRECACHE y VERSION con el shell REAL generado (scripts/sw_precache_plugin.mjs).
+// - Instala COMPLETO el shell nuevo (addAll atómico): si algo falla, la instalación falla y sigue vigente el service worker anterior.
+// - V4.24.1: NO borra el shell anterior al activarse: lo conserva 7 días (una página vieja todavía abierta puede cargar sus módulos).
+// - V4.24.1: la PÁGINA se pide siempre revalidada (nunca un index.html viejo con archivos nuevos o al revés); sin conexión, la copia guardada.
+// - V4.24.1: si un archivo propio da 404/5xx o falla la red, se busca en las cachés (incluida la de la versión anterior).
+// - V4.24.1: nunca fuerza la navegación de una pantalla abierta (cada página se recarga una vez con su propio controllerchange).
+// - Nunca toca IndexedDB ni localStorage. Nunca cachea API/Supabase ni otros orígenes.
 const PRECACHE = /*__OKD_PRECACHE__*/[];
 const CACHE = 'okd-shell-__OKD_SW_VERSION__';
-// cache:'reload' → cada archivo se baja del servidor (no del caché HTTP del navegador): el shell instalado es exactamente el publicado
-// Si falla, se borra el caché a medio llenar y la instalación se rechaza: queda vigente el service worker anterior con su shell completo
+const META = 'okd-sw-meta', KEEP_DAYS = 7;
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE.map(u => new Request(u, { cache: 'reload' }))))
   .then(() => self.skipWaiting(), err => caches.delete(CACHE).then(() => { throw err; }))); });
-self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith('okd-shell') && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
+async function retireOldShells() {   // conserva los shells anteriores KEEP_DAYS días (registro en la caché okd-sw-meta) y luego los borra
+  const meta = await caches.open(META), prev = await meta.match('/__retired__').then(r => r ? r.json() : {}).catch(() => ({})), now = Date.now(), next = {};
+  for (const k of (await caches.keys()).filter(k => k.startsWith('okd-shell') && k !== CACHE)) {
+    const at = prev[k] || now;
+    if (now - at > KEEP_DAYS * 864e5) await caches.delete(k); else next[k] = at;
+  }
+  await meta.put('/__retired__', new Response(JSON.stringify(next), { headers: { 'Content-Type': 'application/json' } }));
+}
+// V4.24.1 (final): SIN rescate desde el service worker. Una página que no responde NO está necesariamente bloqueada (las versiones viejas no
+// conocen ningún protocolo) y forzar su navegación podía superponerse con su propia recarga. Cada página se recarga UNA vez con su propio
+// controllerchange (las viejas, como siempre; las V4.24.1, esperando que no haya PIN, entrega, firma ni sincronización en curso).
+// Los shells anteriores se retiran SOLO al activarse una versión nueva y recién después de KEEP_DAYS días: la versión que estaba en uso
+// queda fechada en ese momento y se conserva, así una página que todavía la usa puede seguir cargando sus archivos.
+self.addEventListener('activate', e => { e.waitUntil(retireOldShells().catch(() => null).then(() => self.clients.claim())); });
+
+const fromCaches = req => caches.match(req, { cacheName: CACHE, ignoreSearch: true }).then(r => r || caches.match(req, { ignoreSearch: true }));
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== location.origin) return; // API/Supabase y terceros: siempre red, nunca caché
-  if (e.request.mode === 'navigate') { e.respondWith(fetch(e.request).catch(() => caches.match('/index.html', { cacheName: CACHE }).then(r => r || caches.match('/')))); return; }
-  // red primero (siempre la versión publicada); el shell precargado cubre la falta de conexión
-  e.respondWith(fetch(e.request).then(res => { if (res.ok && PRECACHE.includes(u.pathname)) { const cp = res.clone(); caches.open(CACHE).then(c => c.put(e.request, cp)); } return res; })
-    .catch(() => caches.match(e.request, { ignoreSearch: true })));
+  if (e.request.mode === 'navigate') {   // página: SIEMPRE revalidada con el servidor; sin conexión, la copia guardada
+    // (una solicitud de NAVEGACIÓN no admite opciones: se pide su DIRECCIÓN revalidada; si no hay red, la copia guardada; nunca queda sin respuesta)
+    e.respondWith(fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' })
+      .catch(() => caches.match('/index.html', { cacheName: CACHE }).then(r => r || caches.match('/index.html')).then(r => r || caches.match('/')))
+      .then(r => r || fetch(e.request)));
+    return;
+  }
+  // archivos propios: red primero; si la red falla O responde 404/5xx, la copia en caché (también de la versión anterior)
+  e.respondWith(fetch(e.request).then(res => {
+    if (res.ok) { if (PRECACHE.includes(u.pathname)) { const cp = res.clone(); caches.open(CACHE).then(c => c.put(e.request, cp)); } return res; }
+    return fromCaches(e.request).then(r => r || res);
+  }).catch(() => fromCaches(e.request)));
 });
-
 
 self.addEventListener('push', e => {
   let d = {};

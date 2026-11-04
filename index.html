@@ -156,6 +156,69 @@
 <!-- Librerías de la v15: se completan al iniciar sesión -->
 <script type="text/plain" id="src-xlsx"></script>
 <script type="text/plain" id="src-worker"></script>
+<script>
+/* V4.24.1 · Vigilante de arranque (inline: funciona aunque el programa principal no cargue). Nunca toca localStorage, IndexedDB, la cola ni la sesión. */
+(function () {
+  var K = 'okd_boot_retry_at', WAIT = 20000;
+  window.OKD_BOOT = window.OKD_BOOT || 'CARGANDO';
+  function waitingUser() { var p = document.getElementById('pinGate'), l = document.getElementById('loginEmail'); return !!p || !!(l && l.offsetParent); }
+  function say(t) { var m = document.getElementById('okdBootMsg'); if (m) m.textContent = t; }
+  // ACTUALIZAR: pide la versión nueva y ESPERA que quede instalada y activa; NO borra cachés (el service worker retira las viejas solo
+  // después de instalar una completa). Sin conexión o si falla: se conserva el último shell que funcionaba.
+  window.OKD_UPDATE_APP = function () {
+    if (!navigator.onLine) { say('Sin conexión: se conserva la versión guardada. Probá ACTUALIZAR cuando vuelva la señal.'); return Promise.resolve('SIN_CONEXION'); }
+    if (!navigator.serviceWorker) { location.reload(); return Promise.resolve('SIN_SW'); }
+    say('Buscando la versión publicada…');
+    return navigator.serviceWorker.getRegistration().then(function (reg) {
+      if (!reg) { location.reload(); return 'SIN_REGISTRO'; }
+      return reg.update().then(function () {
+        var w = reg.installing || reg.waiting;
+        if (!w) { location.reload(); return 'SIN_CAMBIOS'; }   // ya está en la última versión: solo reintenta
+        return new Promise(function (ok) {
+          var t = setTimeout(function () { ok('DEMORA'); }, 45000);
+          function check() { if (w.state === 'activated') { clearTimeout(t); ok('ACTIVADA'); } else if (w.state === 'redundant') { clearTimeout(t); ok('FALLO'); } }
+          w.addEventListener('statechange', check); check();
+        }).then(function (r) {
+          if (r === 'ACTIVADA') { location.reload(); return r; }
+          say(r === 'FALLO' ? 'No se pudo instalar la versión nueva: se conserva la versión guardada.' : 'La descarga está demorada: se conserva la versión guardada.'); return r;
+        });
+      });
+    }).catch(function () { say('No se pudo buscar la versión publicada: se conserva la versión guardada.'); return 'ERROR'; });
+  };
+  window.OKD_BOOT_PANEL = function (reason) {
+    window.OKD_BOOT = window.OKD_BOOT === 'CARGANDO' ? 'ERROR' : window.OKD_BOOT;
+    if (document.getElementById('okdBootFail')) return;
+    var d = document.createElement('div'); d.id = 'okdBootFail'; d.setAttribute('role', 'alert');
+    d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#010306;color:#fff;display:flex;align-items:center;justify-content:center;padding:24px;font:16px/1.4 Inter,Segoe UI,Arial,sans-serif';
+    d.innerHTML = '<div style="max-width:420px;width:100%;background:#fff;color:#07151b;border-radius:16px;overflow:hidden;box-shadow:0 18px 44px rgba(0,0,0,.4)">' +
+      '<div style="background:#13212a;color:#fff;padding:14px 18px;border-bottom:4px solid #10d7e7;font-weight:800;letter-spacing:.03em">LA APLICACIÓN NO TERMINÓ DE INICIAR</div>' +
+      '<div style="padding:16px 18px">Tus datos y entregas pendientes en este celular se conservan. Probá de nuevo; si sigue igual, tocá ACTUALIZAR APLICACIÓN.' +
+      '<small id="okdBootMsg" style="display:block;color:#42545c;margin-top:8px;font-weight:700"></small>' +
+      '<small style="display:block;color:#667680;margin-top:6px">Detalle: ' + String(reason || 'sin respuesta').replace(/[<>&]/g, '').slice(0, 160) + '</small></div>' +
+      '<div style="display:grid;gap:10px;padding:0 18px 18px"><button id="okdBootRetry" style="min-height:52px;border:0;border-radius:12px;background:#10d7e7;color:#07151b;font-weight:800;font-size:16px">REINTENTAR</button>' +
+      '<button id="okdBootUpdate" style="min-height:52px;border:1px solid #c3d1d7;border-radius:12px;background:#fff;color:#07151b;font-weight:800;font-size:15px">ACTUALIZAR APLICACIÓN</button></div></div>';
+    document.body.appendChild(d);
+    document.getElementById('okdBootRetry').onclick = function () { location.reload(); };
+    document.getElementById('okdBootUpdate').onclick = function () { window.OKD_UPDATE_APP(); };
+  };
+  // una sola recarga automática cada 2 minutos; si vuelve a fallar, el panel (nunca carga infinita ni bucle de recargas)
+  window.OKD_RECOVER = function (reason) {
+    var last = +sessionStorage.getItem(K) || 0;
+    if (Date.now() - last > 120000) { try { sessionStorage.setItem(K, String(Date.now())); } catch (e) { } location.reload(); return; }
+    window.OKD_BOOT_PANEL(reason);
+  };
+  window.OKD_BOOT_FAIL = function (reason) { if (!window.OKD_BOOTED) window.OKD_RECOVER(reason); };
+  // vigila sin límite mientras no arranque: el PIN o el login a la vista son ESPERAS LEGÍTIMAS (no se interrumpen); si no, a los 20 s
+  (function watch(t0) { setTimeout(function () {
+    if (window.OKD_BOOTED || document.getElementById('okdBootFail')) return;
+    if (waitingUser()) { if (document.getElementById('pinGate')) window.OKD_BOOT = 'PIN'; return watch(Date.now()); }
+    if (Date.now() - t0 >= WAIT) { window.OKD_BOOT_FAIL('la carga superó ' + WAIT / 1000 + ' s'); return; }
+    watch(t0);
+  }, 2000); })(Date.now());
+  // archivo del programa (JS/CSS) que no se pudo cargar antes de arrancar → recuperación inmediata (el build quita onerror del script)
+  window.addEventListener('error', function (ev) { var t = ev.target; if (!window.OKD_BOOTED && t && (t.tagName === 'SCRIPT' || (t.tagName === 'LINK' && /stylesheet|modulepreload/.test(t.rel)))) window.OKD_BOOT_FAIL('no se pudo cargar ' + (t.src || t.href || 'el programa')); }, true);
+})();
+</script>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>

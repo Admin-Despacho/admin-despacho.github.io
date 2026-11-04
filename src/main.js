@@ -366,15 +366,27 @@ async function syncServerConfig() {
 window.OKD_SYNC_CONFIG = syncServerConfig;
 window.addEventListener('online', () => { if (window.OKD_CFG_STATE === 'REVISAR') syncServerConfig(); });
 function hideSplash() { const el = document.getElementById('splash'); if (!el) return; el.classList.add('hide'); setTimeout(() => el.remove(), 250); window.OKD_SPLASH_HIDDEN_AT = performance.now(); }
-route().catch(e => console.error(e)).finally(hideSplash);
+// V4.24.1 · un módulo de otra versión que ya no existe → una recarga (con freno anti-bucle del vigilante de index.html) o el panel de recuperación
+const isChunkFail = e => /dynamically imported module|Importing a module script failed|error loading dynamically imported module|Failed to fetch dynamically/i.test(String((e && e.message) || e || ''));
+// V4.24.1 · ESTADO DE ARRANQUE explícito (window.OKD_BOOT): CARGANDO → OK | LOGIN (exitosos) · PIN (espera legítima) · ERROR_RECUPERABLE · ERROR.
+// Solo OK y LOGIN marcan OKD_BOOTED: un route() que FALLA nunca se toma como arranque exitoso.
+const bootState = st => { window.OKD_BOOT = st; if (st === 'OK' || st === 'LOGIN') { window.OKD_BOOTED = true; try { sessionStorage.removeItem('okd_boot_retry_at'); } catch (e) { } } };
+window.addEventListener('unhandledrejection', ev => { if (isChunkFail(ev.reason) && window.OKD_RECOVER) { bootState('ERROR_RECUPERABLE'); window.OKD_RECOVER('módulo de otra versión'); } });
+route().then(() => { bootState(document.getElementById('loginEmail') && document.getElementById('loginEmail').offsetParent ? 'LOGIN' : 'OK'); hideSplash(); })
+  .catch(e => { console.error(e);
+    if (isChunkFail(e) && window.OKD_RECOVER) { bootState('ERROR_RECUPERABLE'); window.OKD_RECOVER('módulo de otra versión'); return; }
+    bootState('ERROR'); if (window.OKD_BOOT_PANEL) window.OKD_BOOT_PANEL('el inicio falló: ' + ((e && e.message) || e)); else hideSplash(); });
 // PWA: solo en el build publicado.
 // Si entra un service worker nuevo, recargamos UNA vez para no mezclar chunks de dos versiones.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   let reloadingForUpdate = false;
+  // V4.24.1 · una sola recarga por versión nueva, POSTERGADA mientras hay trabajo en curso (PIN a la vista, entrega abierta, firma, sincronización)
+  const busy = () => !!document.getElementById('pinGate') || !!document.querySelector('.drv-form:not([hidden]), .drv-sign-modal') || !!window.OKD_SYNCING;
+  const reloadWhenIdle = () => { if (busy()) { setTimeout(reloadWhenIdle, 3000); return; } location.reload(); };
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (reloadingForUpdate) return;
     reloadingForUpdate = true;
-    location.reload();
+    reloadWhenIdle();
   });
   navigator.serviceWorker.register('/sw.js').then(reg => {
     reg.update().catch(() => {});
