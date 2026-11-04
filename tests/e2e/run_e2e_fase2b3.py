@@ -34,13 +34,13 @@ async def main():
             await cr.click('[data-arrive]'); await cr.wait_for_timeout(700)
             s0 = (await cr.evaluate(DB))['routes2'][0]['stops'][0]
             res('LOC-01 (UI)', 'LLEGUÉ A LA PARADA guarda lat/lon, precisión y hora (puntual, sin GPS continuo)', s0['arrive_location']['lat'] == -32.89 and 'at' in s0['arrive_location'] and 'Llegada registrada' in await cr.inner_text('#drv'))
-            # firma / CUIL / DNI
+            # firma / CUIL (V4.19: sin foto del DNI)
             await cr.click('.drv-stop >> nth=0 >> [data-o="ENTREGADO"]'); await cr.fill('.drv-stop >> nth=0 >> [data-f="recv"]', 'Juan Pérez'); await cr.click('.drv-stop >> nth=0 >> [data-save]'); await cr.wait_for_timeout(200)
             e1 = await cr.inner_text('.drv-stop >> nth=0 >> .shiperr')
             await sign(cr, '.drv-stop >> nth=0 >> [data-sig]'); await cr.fill('.drv-stop >> nth=0 >> [data-f="cuil"]', '20-12345678-6'); await cr.dispatch_event('.drv-stop >> nth=0 >> [data-f="cuil"]', 'change'); await cr.wait_for_timeout(300)
-            dni_txt = await cr.inner_text('.drv-stop >> nth=0 >> [data-dni]')
-            res('FIRMA-01', 'Sin firma no se guarda; CUIL nuevo ofrece foto del DNI desde el celular', 'firma' in e1 and 'foto del DNI' in dni_txt and await cr.locator('.drv-stop >> nth=0 >> [data-dnifile]').count() == 1, e1)
-            await cr.set_input_files('.drv-stop >> nth=0 >> [data-dnifile]', files=[{'name': 'dni.jpg', 'mimeType': 'image/jpeg', 'buffer': b'\xff\xd8\xff\xe0DNI-FALSO'}]); await cr.wait_for_timeout(300)
+            form_txt = await cr.inner_text('.drv-stop >> nth=0 >> .drv-form')
+            res('FIRMA-01', 'V4.19: sin firma no se guarda; un CUIL nuevo NO pide foto del DNI (ningún campo de foto)', 'firma' in e1 and 'DNI' not in form_txt
+                and await cr.locator('.drv-stop >> nth=0 >> [data-dnifile], .drv-stop >> nth=0 >> input[type=file]').count() == 0, e1)
             await cr.select_option('.drv-stop >> nth=0 >> [data-f="cst"]', 'COBRO_PARCIAL'); await cr.fill('.drv-stop >> nth=0 >> [data-f="camt"]', '20000'); await cr.select_option('.drv-stop >> nth=0 >> [data-f="cmode"]', 'TRANSFERENCIA')
             await cr.click('.drv-stop >> nth=0 >> [data-save]'); await cr.wait_for_timeout(200)
             res('COB-02 (UI)', 'Cobro parcial exige observación', 'observación' in await cr.inner_text('.drv-stop >> nth=0 >> .shiperr'))
@@ -49,15 +49,13 @@ async def main():
             res('COB-03 (UI)', 'Cobranza guardada (parcial, importe, modo, nota) sin tocar el esperado', s0['collection_status'] == 'COBRO_PARCIAL' and s0['collected_amount'] == 20000 and s0['payment_mode'] == 'TRANSFERENCIA' and s0['expected_amount'] == 50000)
             ev = st['evidence'][s0['id']]
             res('FIRMA-02', 'Receptor + firma + CUIL en evidencia privada; la parada no lleva CUIL ni firma', ev['receiver_name'] == 'Juan Pérez' and ev['signature_png_b64'] and ev['cuil'] == '20123456786' and 'cuil' not in json.dumps(s0).lower() and 'signature' not in json.dumps(s0), '')
-            res('FIRMA-03', 'DNI registrado para ese CUIL', '20123456786' in st.get('identity', {}))
-            idn = st['identity']['20123456786']; obj = st['storage'][idn['storage_path']]
-            try: await cr.evaluate(f'()=>{api}.identityDocUrl("20123456786")'); drv_url = 'OK'
-            except Exception as e: drv_url = str(e)
-            res('DNI-UI-01', 'RC1: la foto va a Storage privado (ruta CUIL/uuid.jpg) y el chofer no obtiene URL', 'dni_photo_b64' not in idn and idn['storage_path'].startswith('20123456786/') and obj['mime'] == 'image/jpeg' and 'Sin permiso' in drv_url, idn['storage_path'])
+            res('FIRMA-03', 'V4.19: sin foto del DNI no se crea identidad con foto para ese CUIL', not ((st.get('identity') or {}).get('20123456786') or {}).get('storage_path'))
+            res('DNI-UI-01', 'V4.19: ningún archivo nuevo en el almacenamiento de identidades', not any(k.startswith('20123456786/') for k in (st.get('storage') or {})), list((st.get('storage') or {}).keys())[:3])
             res('MAILC-02 (UI)', 'Confirmación de entrega + "va en camino" a la nueva actual; sin CUIL/firma/notas', [m['to'] + '|' + m['subject'] for m in st['outboxCustomer']][1:] == ['uno@cliente.com|OK Accesorios · Tu pedido fue entregado', 'dos@cliente.com|OK Accesorios · Tu pedido va en camino'] and not any(x in json.dumps(st['outboxCustomer']) for x in ('20123456786', 'Resto el lunes', 'CUIL')), str([m['subject'] for m in st['outboxCustomer']]))
             # segundo cliente con el mismo CUIL → DNI ya registrado; falla de email
             await cr.click('.drv-stop >> nth=1 >> [data-o="ENTREGA_PARCIAL"]'); await cr.fill('.drv-stop >> nth=1 >> [data-f="cuil"]', '20123456786'); await cr.dispatch_event('.drv-stop >> nth=1 >> [data-f="cuil"]', 'change'); await cr.wait_for_timeout(300)
-            res('FIRMA-04', 'CUIL con DNI ya registrado: ✓ DNI YA REGISTRADO y no pide otra foto', '✓ DNI YA REGISTRADO' in await cr.inner_text('.drv-stop >> nth=1 >> [data-dni]') and await cr.locator('.drv-stop >> nth=1 >> [data-dnifile]').count() == 0)
+            res('FIRMA-04', 'V4.19: un CUIL ya usado tampoco pide foto (ningún campo de foto)', await cr.locator('.drv-stop >> nth=1 >> [data-dnifile], .drv-stop >> nth=1 >> input[type=file]').count() == 0
+                and 'DNI' not in await cr.inner_text('.drv-stop >> nth=1 >> .drv-form'))
             await cr.evaluate('()=>{window.OKD_MAIL_FAIL=true}')
             await resolve(cr, 1, 'ENTREGA_PARCIAL', note='Faltó una caja')
             st = await cr.evaluate(DB); s1 = st['routes2'][0]['stops'][1]; jobs = [j for j in st['customerJobs'] if j['stop_id'] == s1['id']]

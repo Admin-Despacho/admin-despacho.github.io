@@ -103,7 +103,8 @@ export async function openComms(api, me, frame) {
     if (st.detail) return drawDetail(ms.find(m => m.id === st.detail), cs);
     const warnConn = !g.connected || g.needs_reconnect ? '<p class="msg warn" id="cmNoGmail">Gmail ' + (g.needs_reconnect ? 'requiere reconexión' : 'no está conectado') + ': los comunicados se pueden redactar y compartir por WhatsApp, pero no programar envíos por correo.</p>' : '';
     shell(warnConn + (can(me, 'comms.compose') ? '<div class="uact"><button class="btn go" type="button" id="cmNew">+ NUEVO COMUNICADO</button></div>' : '') + '<div class="comms-list" id="cmList">' +
-      (ms.map(m => { const [c, t] = MSTATE[m.status] || ['warn', m.status], nx = m.status === 'ACTIVO' ? nextRuns(m.schedule, Date.now(), 1)[0] : null, n = resolveRecipients(cs, m.selection).list.length;
+      (ms.map(m => { if (m.system_kind) return sysItem(m);
+        const [c, t] = MSTATE[m.status] || ['warn', m.status], nx = m.status === 'ACTIVO' ? nextRuns(m.schedule, Date.now(), 1)[0] : null, n = resolveRecipients(cs, m.selection).list.length;
         return '<article class="card comms-item" data-mid="' + esc(m.id) + '"><div class="section-title"><h3>' + esc(m.internal_name) + '</h3>' + pill(c, t) + '</div>' +
           '<p><b>Asunto:</b> ' + esc(m.subject || '(sin asunto)') + '</p><p class="rp-note">' + esc(describeSchedule(m.schedule)) + ' · ' + n + ' destinatario(s) activos · ' + (m.attachments || []).length + ' adjunto(s)' +
           (nx ? ' · próximo: <b>' + esc(fmtLocal(nx)) + '</b>' : '') + '</p><div class="uact">' +
@@ -134,6 +135,15 @@ export async function openComms(api, me, frame) {
     });
   }
 
+  // comunicado del SISTEMA (correo diario de PDF de hojas): solo historial y pausar/reanudar; se configura en Configuración → F
+  function sysItem(m) {
+    return '<article class="card comms-item" data-mid="' + esc(m.id) + '" data-system="1"><div class="section-title"><h3>' + esc(m.internal_name) + '</h3>' +
+      pill('ok', 'Automático') + ' ' + pill(...(MSTATE[m.status] || ['warn', m.status])) + '</div>' +
+      '<p class="rp-note">Envía por Gmail los PDF de las hojas del día (un correo por hoja y destinatario). Horario, destinatarios y canal: Configuración → F · PDF y envíos.</p><div class="uact">' +
+      '<button class="btn soft" type="button" data-act="detail">HISTORIAL</button>' +
+      (can(me, 'comms.schedule') && m.status === 'ACTIVO' ? '<button class="btn soft" type="button" data-act="pause">PAUSAR</button>' : '') +
+      (can(me, 'comms.schedule') && m.status === 'PAUSADO' ? '<button class="btn dark" type="button" data-act="resume">REANUDAR</button>' : '') + '</div></article>';
+  }
   async function confirmActivate(m, cs) {
     const errs = validateSchedule(m.schedule), r = resolveRecipients(cs, m.selection), nx = nextRuns(m.schedule, Date.now(), 5);
     if (errs.length || !r.list.length || !m.subject) return say({ err: true, text: [!m.subject && 'Falta el asunto.', !r.list.length && 'No hay destinatarios activos.', ...errs].filter(Boolean).join(' ') });
@@ -190,8 +200,8 @@ export async function openComms(api, me, frame) {
     shell('<div class="uact"><button class="btn soft" type="button" id="cmBack">← VOLVER</button></div><h3>' + esc(m.internal_name) + ' ' + pill(...(MSTATE[m.status] || ['warn', m.status])) + '</h3>' +
       '<p class="rp-note">"Enviado — aceptado por Gmail" significa que Gmail lo recibió para enviarlo; no significa entregado ni leído.</p>' +
       '<h4>Próximos envíos</h4>' + (nx.length ? '<ul id="dtNext">' + nx.map(t => '<li>' + esc(fmtLocal(t)) + ' (hora de Argentina)</li>').join('') + '</ul>' : '<p id="dtNext">' + (m.status === 'PAUSADO' ? 'Pausado: no hay envíos hasta reanudar.' : 'No hay envíos programados.') + '</p>') +
-      '<h4>Ejecuciones y resultados por destinatario</h4>' + (runs.map(r => '<details class="card comms-run" data-rid="' + esc(r.id) + '"' + (r.kind === 'PRUEBA' || r === runs[0] ? ' open' : '') + '><summary><b>' + esc(dt(r.scheduled_for)) + '</b> · ' + (r.kind === 'PRUEBA' ? 'Prueba' : 'Programado') + ' · ' +
-        pill(...(RSTATE[r.status] || ['warn', r.status])) + ' · ' + esc(count(r)) + '</summary>' + (r.note ? '<p class="msg warn">' + esc(r.note) + '</p>' : '') + '<p class="rp-note">Copia usada: «' + esc(r.snapshot && r.snapshot.subject) + '» (versión ' + esc(r.snapshot && r.snapshot.message_version || '—') + ')</p>' +
+      '<h4>Ejecuciones y resultados por destinatario</h4>' + (runs.map(r => '<details class="card comms-run" data-rid="' + esc(r.id) + '"' + (r.kind === 'PRUEBA' || r === runs[0] ? ' open' : '') + '><summary><b>' + esc(dt(r.scheduled_for)) + '</b> · ' + (r.kind === 'PRUEBA' ? 'Prueba' : r.kind === 'HOJAS' ? 'Hoja' : 'Programado') + ' · ' +
+        pill(...(RSTATE[r.status] || ['warn', r.status])) + ' · ' + esc(count(r)) + '</summary>' + (r.note ? '<p class="msg warn">' + esc(r.note) + '</p>' : '') + '<p class="rp-note">Copia usada: «' + esc(r.snapshot && r.snapshot.subject) + '»' + (r.kind === 'HOJAS' ? ' (PDF de la hoja adjunto)' : ' (versión ' + esc(r.snapshot && r.snapshot.message_version || '—') + ')') + '</p>' +
         '<div class="tscroll"><table class="table"><thead><tr><th>Destinatario</th><th>Estado</th><th>Intentos</th><th>Detalle</th><th></th></tr></thead><tbody>' +
         r.deliveries.map(d => '<tr data-did="' + esc(d.id) + '"><td>' + esc(d.name || '') + '<br><small>' + esc(d.email || '') + '</small></td><td>' + pill(DSTATE[d.status] || 'warn', STATUS_LABEL[d.status] || d.status) + '</td><td>' + (d.attempts || 0) + '</td><td><small>' +
           esc([d.sent_at && (d.sent_at_source === 'ESTIMADA_INICIO_INTENTO' ? 'Envío estimado (inicio del intento): ' : 'Aceptado por Gmail: ') + dt(d.sent_at),

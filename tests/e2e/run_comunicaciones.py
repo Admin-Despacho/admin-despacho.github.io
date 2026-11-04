@@ -4,7 +4,7 @@ import asyncio, os, sys, json, traceback, datetime
 sys.path.insert(0, os.path.dirname(__file__))
 import run_cambiar_rol as cr
 from playwright.async_api import async_playwright
-cr.PORT = 4393; R = []; EXPECTED = 21; SHOTS = sys.argv[2] if len(sys.argv) > 2 else '/tmp/okd_comms_shots'; CK = 'okd_comms_demo_v1'
+cr.PORT = 4393; R = []; EXPECTED = 22; SHOTS = sys.argv[2] if len(sys.argv) > 2 else '/tmp/okd_comms_shots'; CK = 'okd_comms_demo_v1'
 def res(n, ok, d=''): R.append((n, 'PASS' if ok else 'FAIL', str(d)[:260])); print('..', ' | '.join(R[-1]), flush=True)
 art_today = (datetime.datetime.utcnow() - datetime.timedelta(hours=3)).date()
 MON = art_today + datetime.timedelta(days=(7 - art_today.weekday()) or 7)   # próximo lunes (como el ejemplo)
@@ -185,6 +185,35 @@ async def main():
                 and 'Envío estimado (inicio del intento)' in after21 and 'Confirmado manualmente' in after21 and d21['sent_at'] == d21['claimed_at'] and d21['sent_at_source'] == 'ESTIMADA_INICIO_INTENTO',
                 after21.replace('\n', ' ')[:200])
             await pg.evaluate('()=>{ delete window.OKD_COMMS_NOW; }')
+            await ctx.close()
+            # ----- CM-22: correo diario de PDF de hojas por Gmail (Configuración → F + Comunicaciones) -----
+            ctx = await b.new_context(**cr.DESK); pg = await ctx.new_page(); pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
+            await pg.goto(f'http://127.0.0.1:{cr.PORT}/'); await pg.evaluate('()=>localStorage.clear()'); await cr.login(pg, 'admin@okdespacho.demo')
+            await pg.evaluate('async()=>{ await window.OKD_ONLINE.api.commsGmailConnect(); }')
+            await pg.goto(f'http://127.0.0.1:{cr.PORT}/#/configuracion'); await pg.wait_for_timeout(1500)
+            await pg.locator('button', has_text='F. PDF Y ENVÍOS').first.click(); await pg.wait_for_timeout(900)
+            if not await pg.locator('#seOn').is_checked(): await pg.click('#seOn')
+            await pg.fill('#seTime', '00:00'); await pg.fill('#seTo', 'logistica@ejemplo.test, admin@ejemplo.test')
+            await pg.select_option('#seVia', 'GMAIL'); await pg.wait_for_timeout(700); note22 = await pg.locator('#seViaNote').inner_text()
+            await pg.click('#pcSave'); await pg.wait_for_timeout(1200)
+            ns22 = await pg.evaluate('async()=>window.OKD_ONLINE.api.notificationSettings()')
+            await pg.screenshot(path=os.path.join(SHOTS, 'computadora_config_hojas_gmail.png'))
+            # un PDF de hoja ficticio de la demo (generado hace 1 h) y el programador simulado
+            await pg.evaluate('''async()=>{ const A = window.OKD_ONLINE.api; A._refresh(); A.db.pdfStore = A.db.pdfStore || {}; A.db.routePdfs = A.db.routePdfs || {};
+              A.db.pdfStore['rq/v1/Hoja_03-000777_v1.pdf'] = btoa('%PDF-1.4\\n% hoja ficticia\\n');
+              A.db.routePdfs['rq|1'] = { route_id: 'rq', route_version: 1, route_number: '03-000777', file_name: 'Hoja_03-000777_v1.pdf', storage_path: 'rq/v1/Hoja_03-000777_v1.pdf', status: 'OK', generated_at: new Date(Date.now() - 3600e3).toISOString() };
+              A.db.routes2 = A.db.routes2 || []; A.db.routes2.push({ id: 'rq', number: '03-000777', version: 1, operational_status: 'PUBLICADA', status: 'PUBLICADA', dispatch_mode: 'APP',
+                published_at: new Date(Date.now() - 3600e3).toISOString(), stops: [] });   // hoja PUBLICADA (versión vigente 1) de la demo
+              A._save(); await A.commsDemoTick(Date.now()); }''')
+            await comms(pg); it22 = await item(pg, 'Correo diario de hojas'); txt22 = await it22.inner_text()
+            acts22 = await it22.locator('[data-act]').evaluate_all('els=>els.map(e=>e.dataset.act)')
+            await it22.locator('[data-act="detail"]').click(); await pg.wait_for_timeout(1000); h22 = await pg.locator('.comms-run').first.inner_text()
+            d22 = [x for x in (await db(pg))['deliveries'] if x['email'] in ('logistica@ejemplo.test', 'admin@ejemplo.test')]
+            await pg.screenshot(path=os.path.join(SHOTS, 'computadora_historial_hojas.png'))
+            res('CM-22 F → "Gmail conectado": se guarda y avisa la cuenta; en Comunicaciones aparece el correo AUTOMÁTICO (solo historial y pausar) con la hoja enviada a cada destinatario',
+                ns22.get('sheet_email_via') == 'GMAIL' and 'comunicados' in note22.lower() and 'Automático' in txt22 and sorted(acts22) == ['detail', 'pause']
+                and 'Hoja 03-000777 (v1)' in h22 and len(d22) == 2 and all(x['status'] == 'ENVIADO' for x in d22),
+                {'via': ns22.get('sheet_email_via'), 'acciones': acts22, 'envios': [x['status'] for x in d22], 'nota': note22[:90]})
             await ctx.close()
           finally: await b.close()
     finally:

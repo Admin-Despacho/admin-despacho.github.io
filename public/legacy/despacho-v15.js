@@ -1382,18 +1382,26 @@ const Publisher = {
       : (!external && !resp.length) ? 'No hay usuarios activos compatibles con ' + carrier.name + '.'
       : bad.length ? 'Falta resolver ' + bad.length + ' pedido(s) antes de publicar: ' + bad.map(r => (r.mainOrder || r.shipOrder) + ' (' + this.reasons([r]).map(x => x.text.split(':')[0]).join('; ') + ')').join(' · ') + '.' : '';
   },
+  // REVISAR (V4.20): lo que BLOQUEA arriba y se corrige AHÍ MISMO (sin bajar al final); avisos y lo que ya está bien, aparte y plegables.
+  // Mismo cálculo de siempre (readiness + problems): no agrega validaciones ni bloqueos.
   readyHtml(ready, bad) {
-    return '<div class="ready ' + ready.level + '" id="pubReady"' + (bad.length ? ' role="button" tabindex="0" title="Pendientes: se resuelven acá abajo"' : '') + '><b>' + ready.label + '</b>' +
-      (bad.length ? ' <span class="pendhint">· ' + bad.length + ' pendiente(s) — resolvelos acá abajo</span>' : '') + '<ul>' + ready.items.map(i => '<li class="' + i[0] + '">' + esc(i[1]) + '</li>').join('') + '</ul></div>';
+    const g = lvl => ready.items.filter(i => i[0] === lvl), err = g('err'), warn = g('warn'), ok = g('ok');
+    const open = this._revOpen || (this._revOpen = { err: true, warn: true, ok: false });
+    const list = arr => '<ul>' + arr.map(i => '<li class="' + i[0] + '">' + esc(i[1]) + '</li>').join('') + '</ul>';
+    const grp = (k, title, arr, extra) => arr.length || extra ? '<details class="revgrp ' + k + '" data-revg="' + k + '"' + (open[k] ? ' open' : '') + '><summary>' + title + ' (' + arr.length + ')</summary>' + list(arr) + (extra || '') + '</details>' : '';
+    // el primer <b> sigue siendo el rótulo de estado de siempre (REVISAR / LISTO / LISTO CON ADVERTENCIAS)
+    const banner = ready.level === 'REVISAR'
+      ? '<div class="revbanner" role="alert"><b>' + ready.label + '</b><strong>NO SE PUEDE PUBLICAR TODAVÍA</strong><span>' + err.length + ' punto(s) a resolver' + (bad.length ? ' · ' + bad.length + ' pedido(s) se corrigen acá mismo' : '') + '</span></div>'
+      : '<div class="revbanner ok"><b>' + ready.label + '</b><span>' + (ready.level === 'LISTO' ? 'Todo listo para publicar.' : 'Se puede publicar; revisá los avisos.') + '</span></div>';
+    return '<div class="ready ' + ready.level + '" id="pubReady">' + banner +
+      grp('err', 'BLOQUEA LA PUBLICACIÓN', err, this.pendingHtml(bad)) + grp('warn', 'AVISOS · NO IMPIDEN PUBLICAR', warn) + grp('ok', 'LISTO', ok) + '</div>';
   },
   // Actualiza la ventana EN EL LUGAR (resumen, panel, mensaje de bloqueo y PUBLICAR) sin cerrarla ni volver a detectar NOC
   refreshInPlace(m) {
     const ctx = m._ctx; if (!ctx) return;
     CalculationEngine.computeAll(RouteStore.rows);
     const rows = this.rows(), bad = this.problems(), ready = this.readiness(rows, ctx.carrier, ctx.resp, bad, ctx.vehicles, ctx.external), block = this.blockFor(ctx, bad);
-    const rd = m.querySelector('#pubReady'); if (rd) rd.outerHTML = this.readyHtml(ready, bad);
-    const pp = m.querySelector('#pubPend'), html = this.pendingHtml(bad);
-    if (pp) { if (html) pp.outerHTML = html; else pp.remove(); } else if (html) m.querySelector('#pubReady').insertAdjacentHTML('afterend', html);
+    const rd = m.querySelector('#pubReady'); if (rd) rd.outerHTML = this.readyHtml(ready, bad);   // los pendientes van DENTRO de REVISAR
     const pb = m.querySelector('#pubBlock'); if (pb) { pb.textContent = block; pb.hidden = !block; }
     m.dataset.baseBlocked = (block || ready.level === 'REVISAR') ? '1' : '0';
     const go = m.querySelector('#pubGo'); if (go) go.disabled = m.dataset.baseBlocked === '1';
@@ -1402,7 +1410,7 @@ const Publisher = {
   // Panel de pendientes (DESPLEGADO al abrir): motivo de cada pedido y cómo resolverlo ahí mismo
   pendingHtml(bad) {
     if (!bad.length) return '';
-    return '<div class="pendpanel" id="pubPend"' + (this._pendOpen === false ? ' hidden' : '') + '><b>PENDIENTES (' + bad.length + ')</b>' + bad.map(r => {
+    return '<div class="pendpanel" id="pubPend"><b>CORREGIR ACÁ (' + bad.length + ')</b>' + bad.map(r => {
       const st = baseStatus(r), probs = st.issues.filter(i => i.level === 'error' || i.level === 'warn');
       const absent = r.monto == null || probs.some(i => SALDO_AUSENTE.has(i.code)) || manualSaldoOk(r);
       const pay = probs.some(i => i.text === 'Forma de pago a revisar.'), payShip = r.hasShip && r.payShip === 'REVISAR';
@@ -1420,9 +1428,10 @@ const Publisher = {
     }).join('') + '</div>';
   },
   bindPending(m) {
-    const ready = m.querySelector('#pubReady'), panel = m.querySelector('#pubPend'); if (!panel) return;
-    const toggle = () => { panel.hidden = !panel.hidden; this._pendOpen = !panel.hidden; };
-    ready.addEventListener('click', toggle); ready.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    const ready = m.querySelector('#pubReady');
+    // grupos plegables: se recuerda cuáles están abiertos (se conservan al recalcular)
+    if (ready) ready.querySelectorAll('details[data-revg]').forEach(d => d.addEventListener('toggle', () => { (this._revOpen = this._revOpen || {})[d.dataset.revg] = d.open; }));
+    const panel = m.querySelector('#pubPend'); if (!panel) return;
     // se guarda, se actualiza la tabla y la ventana EN EL LUGAR (sin cerrarla): avisos, contador y PUBLICAR al instante
     const refresh = async () => { CalculationEngine.computeAll(RouteStore.rows); RouteStore.save(); if (typeof UI !== 'undefined' && UI.renderTable) UI.renderTable(); this._pendOpen = true; this.refreshInPlace(m); };
     panel.querySelectorAll('.pendrow').forEach(el => {
@@ -1488,7 +1497,6 @@ const Publisher = {
       (carrier && carrier.kind === 'INTERNO' && vehicles.length ? '<label>Vehículo (obligatorio) <select class="ed" id="pubVeh">' + vehicles.map(v => '<option value="' + v.id + '">' + esc(v.name + ' · ' + v.plate) + '</option>').join('') + '</select></label>' : '') +
       '<p class="shiperr" id="pubBlock"' + (blockMsg ? '' : ' hidden') + '>' + esc(blockMsg) + '</p>' +
       this.readyHtml(ready, bad) +
-      this.pendingHtml(bad) +
       '<div class="bulwrap"><table class="bultab"><thead><tr><th>PARADA</th><th>BULTOS</th></tr></thead><tbody>' + rows.map((r, i) => '<tr><td>' + esc(r.cliente) + ' <small>' + esc(r.mainOrder || '') + '</small></td><td><input class="ed" data-bul="' + i + '" inputmode="numeric" placeholder="opcional" value="' + (Number.isInteger(parseInt(r.bultos, 10)) && parseInt(r.bultos, 10) >= 0 ? parseInt(r.bultos, 10) : '') + '"></td></tr>').join('') +
       '</tbody></table><p class="sheetsum" id="pubSum">' + sheetSummary(rows) + '</p></div>' +
       this.finHtml(rows) + this.nocHtml(rows, nocInfo) +
@@ -1521,7 +1529,10 @@ const Publisher = {
         const bv = bulVals(); if (bv.some(v => v !== '' && !/^\d+$/.test(v))) { const er = m.querySelector('#pubErr'); er.textContent = 'Si informás bultos, tiene que ser un número entero (o dejalo vacío).'; er.hidden = false; ev.target.disabled = false; return; }
         rows.forEach((r, i) => { r.bultos = bv[i] === '' ? null : parseInt(bv[i], 10); });
         const keep = rows.map(r => ({ r, monto: r.monto, obs: r.obsPago }));
-        rows.forEach(r => { if (r.nocApplied > 0 && r.monto != null) { r.monto = Math.round((r.monto - r.nocApplied) * 100) / 100; r.obsPago = [r.obsPago, (r.nocList || []).map(x => 'NOC ' + x.comp + ' aplicada ' + ars(x.applied)).join(' · ')].filter(Boolean).join(' · '); } });
+        // V4.20: MONTO publicado = neto a cobrar (con la nota descontada: primero mercadería, luego envío). El detalle de las notas
+        // de crédito YA NO va a la hoja ni al PDF operativo: OBSERVACIONES DE PAGO lleva solo lo que escribió el operador.
+        // La información de las notas sigue en el servidor (st.noc, conciliación) para administración.
+        rows.forEach(r => { if (r.nocApplied > 0 && r.monto != null) { r.monto = Money.net(r).total; } });
         try {
         const respSel = m.querySelector('#pubResp');
         const pl = await this.payload(carrier, respSel ? respSel.value : null); const veh = m.querySelector('#pubVeh'); if (veh && veh.value) pl.vehicle_id = veh.value;
@@ -1981,7 +1992,7 @@ const Txt = {
   pagoLines(row) { return this.markProv(row, this._pagoLines(row)); },
   _pagoLines(row) {
     if (row.payOverride != null && row.payOverride !== '') return row.payOverride.split('\n').map(v => ({ label: '', value: v, kind: 'plain' }));
-    const p = Money.parts(row), k = Money.cob(row);
+    const p = Money.net(row), k = Money.cob(row);   // V4.20: importes A COBRAR (con la nota de crédito ya descontada)
     const mM = String(row.payMain || '').trim() || 'REVISAR', mS = String(row.payShip || '').trim() || 'REVISAR';
     const L = (label, value, kind) => ({ label, value, kind: kind || 'main' });
     if (p.total == null) {
@@ -1989,6 +2000,13 @@ const Txt = {
       return row.auto || row.montoManual ? base.concat([L('', 'SALDO NO ENCONTRADO / REVISAR')]) : base;
     }
     const tot = L('TOTAL:', ars(p.total), 'total');
+    if (p.noc > 0) {   // con nota de crédito: medio + importe A COBRAR (mercadería y envío netos); sin detalle de la nota
+      if (p.total === 0) return [L('', 'NO COBRAR · saldo cubierto'), tot];
+      if (!row.hasShip) return [L('', mM + ' ' + ars(p.main))];
+      if (p.main === 0) return [L('', mS), L('ENVÍO:', ars(p.ship), 'ship'), L('MERCADERÍA:', 'SALDO CUBIERTO', 'muted'), tot];
+      if (this.samePay(row)) return [L('', mM), L('MERCADERÍA:', ars(p.main)), L('ENVÍO:', ars(p.ship), 'ship'), tot];
+      return [L(mM + ' — MERCADERÍA:', ars(p.main)), L(mS + ' — ENVÍO:', ars(p.ship), 'ship'), tot];
+    }
     if (!row.hasShip) {
       if (k.m && !row.montoManual) return [L('', 'SIN COBRO'), tot];
       return [L('', mM + ' ' + ars(p.main))];
@@ -2038,6 +2056,14 @@ const Money = {
   suggestedMain(row) { return this.parts(row, true).main; },
   // El total de la fila (row.monto) siempre es: mercadería pendiente + envío pendiente
   apply(row) { row.monto = this.parts(row).total; },
+  // V4.20 · NOTA DE CRÉDITO aplicada: se descuenta PRIMERO de la mercadería y el EXCEDENTE del envío. Lo aplicado nunca supera el
+  // total (tope de aplicación existente), así que el crédito no usado queda disponible en la nota. Devuelve los importes A COBRAR.
+  net(row) {
+    const p = this.parts(row), n = Math.max(0, Number(row.nocApplied) || 0);
+    if (!n || p.total == null) return { ...p, noc: 0 };
+    const main = r2(Math.max(0, (p.main || 0) - n)), rest = Math.max(0, n - (p.main || 0)), ship = r2(Math.max(0, (p.ship || 0) - rest));
+    return { main, ship, total: r2(main + ship), noc: r2(Math.min(n, p.total)), warn: p.warn };
+  },
   // Valor que se ve y se edita en el campo MONTO: la mercadería
   fieldValue(row) { return this.parts(row).main; }
 };

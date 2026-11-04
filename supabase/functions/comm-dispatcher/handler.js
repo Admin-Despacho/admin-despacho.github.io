@@ -68,6 +68,8 @@ export async function dispatch(store, provider, opt = {}) {
       return await store.recordDispatch(sum), sum;   // no se crean ejecuciones: al volver, lo vencido de más de 'grace' queda PERDIDO
     }
     const q = await enqueueDue(store, now, o); sum.created = q.created.length; sum.missed = q.missed.length;
+    // correo diario de PDF de hojas por Gmail (Configuración → F, canal GMAIL): una ejecución por versión de hoja del día
+    if (store.enqueueSheetPdfs) { try { sum.sheets = await store.enqueueSheetPdfs(now); } catch (e) { sum.note = 'No se pudo encolar el correo de hojas: ' + String(e.message || e).slice(0, 120); } }
     // el CUPO diario se reserva dentro de la misma reserva atómica del servidor (cuenta enviados, en curso e inciertos de 24 h)
     const batch = await store.claim(o.limit, worker, now, { dailyCap: o.dailyCap, windowHours: o.sendWindowHours }); sum.claimed = batch.length;
     if (!batch.length && (await store.sentLast24h(now)) >= o.dailyCap) { sum.status = 'LIMITE_DIARIO'; sum.note = 'Se alcanzó el tope diario de seguridad del módulo (' + o.dailyCap + '). Se continúa cuando se libere cupo.'; }

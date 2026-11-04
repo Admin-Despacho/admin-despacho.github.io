@@ -51,11 +51,13 @@ async def choose(pg, mode):
     await pg.locator(front + '[data-rolesw-box]:visible [data-rolesw]').first.click(); await pg.wait_for_timeout(300)
     opts = await pg.evaluate('()=>[...document.querySelectorAll("#roleswMenu [data-rolesw-go]")].map(b=>b.innerText.trim())')
     await pg.locator(f'#roleswMenu [data-rolesw-go="{mode}"]').click(); await pg.wait_for_timeout(3500); await dismiss(pg); return opts
-async def sign(pg, sid):
-    cv = pg.locator(f'.drv-stop[data-s="{sid}"] [data-sig]'); await cv.scroll_into_view_if_needed(); bb = await cv.bounding_box()
-    await pg.mouse.move(bb['x'] + 20, bb['y'] + 20); await pg.mouse.down()
-    for i in range(1, 10): await pg.mouse.move(bb['x'] + 20 + i * 18, bb['y'] + 20 + (i % 3) * 12)
-    await pg.mouse.up(); await pg.wait_for_timeout(200)
+async def sign(pg, sid):   # V4.19: FIRMAR abre la firma a pantalla completa → firmar → CONFIRMAR FIRMA
+    OPENER = f'.drv-stop[data-s="{sid}"] [data-sigopen]'
+    await pg.click(OPENER); await pg.wait_for_selector('.drv-sign-modal [data-sigpad]'); await pg.wait_for_timeout(150)
+    b = await pg.locator('.drv-sign-modal [data-sigpad]').bounding_box()
+    await pg.mouse.move(b['x'] + b['width'] * .15, b['y'] + b['height'] * .55); await pg.mouse.down()
+    await pg.mouse.move(b['x'] + b['width'] * .45, b['y'] + b['height'] * .35, steps=8); await pg.mouse.move(b['x'] + b['width'] * .8, b['y'] + b['height'] * .6, steps=8); await pg.mouse.up()
+    await pg.click('.drv-sign-modal [data-sigok]'); await pg.wait_for_selector('.drv-sign-modal', state='detached')
 async def deliver_first(pg, rid):
     """Mis rutas: abrir la hoja, INICIAR (km), LLEGUÉ, ENTREGADO, nombre + firma, GUARDAR en la 1.ª parada. Devuelve (sid, error_formulario)."""
     await pg.locator(f'[data-open="{rid}"]').click(); await pg.wait_for_timeout(1200)

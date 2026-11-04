@@ -47,3 +47,7 @@
 20261110000100_permiso_asignacion_hojas.sql
 20261111000100_reenvios_reintento_pedido.sql
 20261112000100_comunicaciones.sql
+20261116000100_v4_21_entrega_sin_dni_email_opcional.sql
+20261117000100_v4_23_g2_diamante_emails.sql
+20261118000100_v4_24_salidas.sql
+20261113000100_hojas_por_gmail.sql

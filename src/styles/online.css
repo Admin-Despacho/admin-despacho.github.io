@@ -711,14 +711,24 @@ body:has(.drv-stop .drv-form:not([hidden])) .drv-foot{position:static}
 #drv .drv-result-btn.selected{outline:3px solid currentColor;outline-offset:-3px;font-weight:900}
 #drv .sigbox canvas{width:100%;max-width:100%;height:160px}
 #drv .sig-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px}
-.drv-sign-modal{position:fixed;inset:0;z-index:99999;background:rgba(0,14,24,.88);display:flex;align-items:center;justify-content:center;padding:14px}
-.drv-sign-panel{width:min(96vw,800px);max-height:96dvh;overflow:auto;background:white;color:#001622;border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:10px}
-.drv-sign-panel p{margin:0}
-.drv-sign-stage{border:2px dashed #7d99a5;border-radius:12px;background:#fff;min-height:260px;display:flex;align-items:stretch}
-.drv-sign-stage canvas{width:100%;height:min(46dvh,350px);max-width:none;touch-action:none;cursor:crosshair}
-.drv-sign-controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.drv-sign-controls button{min-height:50px}
-@media(max-width:420px){.drv-sign-panel{padding:12px}.drv-sign-stage{min-height:235px}}
+.drv-sign-modal{position:fixed;inset:0;z-index:99999;background:#fff;color:#001622;display:flex;flex-direction:column;gap:10px;
+  padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));
+  overscroll-behavior:none;touch-action:none}
+.drv-sign-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px}
+.drv-sign-head b{font-size:18px;letter-spacing:.03em}.drv-sign-head span{font-size:14px;color:#42545c}
+.drv-sign-stage{position:relative;flex:1;min-height:0;border:2px dashed #7d99a5;border-radius:12px;background:#fff;overflow:hidden}
+.drv-sign-stage canvas{position:absolute;inset:0;display:block;touch-action:none;cursor:crosshair}
+.drv-sign-line{position:absolute;left:6%;right:6%;bottom:22%;border-top:1.5px solid #c3d1d7;padding-top:4px;font-size:12px;color:#7d99a5;pointer-events:none}
+.drv-sign-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.drv-sign-controls button{min-height:54px;font-size:15px;min-width:0;white-space:normal;line-height:1.15;padding:6px 8px}
+.drv-sign-controls [data-sigok]{grid-column:1/-1;min-height:58px;font-size:16px}   /* vertical: CONFIRMAR FIRMA a todo el ancho */
+@media(orientation:landscape){.drv-sign-controls{grid-template-columns:repeat(3,minmax(0,1fr))}.drv-sign-controls [data-sigok]{grid-column:auto}}
+@media(orientation:landscape) and (max-height:480px){.drv-sign-head span{display:none}.drv-sign-controls button,.drv-sign-controls [data-sigok]{min-height:46px}}
+/* formulario: vista previa de la firma confirmada + botón FIRMAR */
+.sigbox[data-sigbox]{flex-direction:row;flex-wrap:wrap;align-items:center;gap:10px;padding:10px}
+.sigbox .sig-prev{max-width:100%;width:260px;aspect-ratio:5/2;object-fit:contain;background:#fff;border:1px solid #e1e8eb;border-radius:8px}
+.sigbox .sig-empty{color:#8a1c13;font-weight:700;font-size:14px}
+.sigbox .sig-open{min-height:52px;min-width:150px;font-size:16px}
 
 /* Menú del panel en celular/tablet: barra compacta con "MENÚ" (antes el menú completo quedaba arriba y había que bajar en cada ítem) */
 .rc4side .rc4menu{display:none}
@@ -849,3 +859,86 @@ tr.main-row.flash{outline:3px solid #16d6e5}
 .login-legal { margin: 14px 0 0; text-align: center; font-size: 13px; }
 .login-legal a { color: inherit; opacity: 0.8; text-decoration: underline; }
 .login-legal a:hover { opacity: 1; }
+/* PUBLICAR HOJA · REVISAR (V4.20): qué bloquea, bien visible, y se corrige en el mismo recuadro */
+#pubReady .revbanner{display:flex;flex-direction:column;gap:2px;margin:-2px -6px 8px;padding:12px 14px;border-radius:9px;background:#b42318;color:#fff}
+#pubReady .revbanner b{color:#fff;font-size:12px;letter-spacing:.08em;opacity:.9}
+#pubReady .revbanner strong{font-size:19px;letter-spacing:.03em;line-height:1.2}
+#pubReady .revbanner span{font-size:13.5px}
+#pubReady .revbanner.ok{background:#e3f7fa;color:#064e5a}
+#pubReady .revbanner.ok b{color:#064e5a;font-size:15px}
+#pubReady .revgrp{border-top:1px solid rgba(0,0,0,.08);padding:6px 0}
+#pubReady .revgrp>summary{cursor:pointer;font:700 12.5px var(--display);letter-spacing:.05em;padding:4px 0;list-style-position:inside}
+#pubReady .revgrp.err>summary{color:var(--err)}
+#pubReady .revgrp.warn>summary{color:#7a3e00}
+#pubReady .revgrp.ok>summary{color:#42545c}
+#pubReady .revgrp .pendpanel{margin:8px 0 4px}
+/* Historial (V4.20): filtros plegables y pestañas internas LISTADO / HOJA */
+.hfold{margin:0 0 10px}.hfold>summary{cursor:pointer;font:700 12.5px var(--display,inherit);letter-spacing:.06em;color:#42545c;padding:6px 2px}
+.htabs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px;border-bottom:2px solid #d9e3e8}
+.htabs [role=tab]{border:0;background:transparent;padding:9px 14px;font-weight:800;font-size:13px;letter-spacing:.04em;color:#42545c;border-bottom:3px solid transparent;margin-bottom:-2px;cursor:pointer;min-height:42px}
+.htabs [role=tab][aria-selected=true]{color:#07151b;border-bottom-color:#00b6c7}
+/* Menú lateral (V4.20): íconos, PLEGADO (solo íconos) y OCULTO (☰). Solo computadora; el celular conserva su menú. */
+.rc4side .nav a .nico{flex:none;color:var(--cyan,#10d7e7)}.rc4side .nav a.active .nico,.rc4side .nav a:hover .nico{color:#fff}
+.rc4side .brand{position:relative}.rc4fold,.rc4show,.rc4hide{display:none}
+@media(min-width:1001px){
+  .rc4fold{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;width:34px;height:34px;border-radius:10px;border:1px solid #23414c;background:#0b222b;color:#cad7dc;font-size:18px;cursor:pointer}
+  .rc4hide{display:block;margin:10px 0 0;padding:9px 12px;border-radius:10px;border:1px solid #23414c;background:transparent;color:#9db0b8;font-size:12.5px;cursor:pointer;text-align:left}
+  .rc4app{transition:grid-template-columns .18s ease}
+  .rc4app.side-mini{grid-template-columns:78px minmax(0,1fr)}
+  .rc4app.side-mini .rc4side{padding:18px 10px;align-items:center}
+  .rc4app.side-mini .brand{flex-direction:column;gap:8px;margin-bottom:14px}.rc4app.side-mini .brand>div,.rc4app.side-mini .nlbl,.rc4app.side-mini .nav .sub,.rc4app.side-mini .rc4who,.rc4app.side-mini .footer,.rc4app.side-mini .rc4hide{display:none}
+  .rc4app.side-mini .rc4side .logo{width:42px;height:42px}.rc4app.side-mini .rc4fold{margin:0}
+  .rc4app.side-mini .rc4side .nav a{justify-content:center;padding:11px 0;width:52px}
+  .rc4app.side-hidden{grid-template-columns:0 minmax(0,1fr)}.rc4app.side-hidden .rc4side{display:none}
+  .rc4app.side-hidden .rc4show{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;margin-right:12px;border-radius:12px;border:1px solid var(--line);background:#fff;font-size:20px;cursor:pointer}
+}
+/* V4.22 · service próximo (ámbar) y vencido / a revisar (rojo) en las fichas de vehículos */
+.vcard.soon{border-color:#e5a03a}.vcard .soon-tag{display:inline-block;background:#fff4e5;color:#7a3e00;border:1px solid #f3d3a8;border-radius:8px;padding:3px 8px;font-weight:700}
+.vcard .vform .rp-lbl{display:flex;flex-direction:column;gap:4px;margin:4px 0}
+/* V4.24 · VER ENTREGA: encabezado negro con línea cian, pestañas por ubicación, línea de tiempo y tarjetas blancas (notebook y Android) */
+.dt{background:#eef3f5;border-radius:14px;overflow:hidden;margin-top:14px;border:1px solid #d9e3e8}
+.dt-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;background:#07151b;color:#fff;padding:14px 16px;border-bottom:3px solid #10d7e7}
+.dt-head h3{margin:0;color:#fff;font-size:16px;letter-spacing:.04em}.dt-head p{margin:4px 0 0;color:#b9c8cf;font-size:13px}
+.dt-ro{flex:none;font-size:11px;font-weight:800;letter-spacing:.06em;color:#07151b;background:#10d7e7;border-radius:999px;padding:4px 10px}
+.dt-tabs{display:flex;gap:4px;overflow-x:auto;padding:8px 10px 0;background:#fff;border-bottom:1px solid #d9e3e8}
+.dt-tabs [role=tab]{flex:none;border:0;background:transparent;padding:10px 12px;font-weight:800;font-size:12.5px;letter-spacing:.04em;color:#42545c;border-bottom:3px solid transparent;cursor:pointer;min-height:42px}
+.dt-tabs [role=tab][aria-selected=true]{color:#07151b;border-bottom-color:#00b6c7}
+.dt-pane{padding:12px}
+.dt-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-bottom:10px}
+.dt-summary>div{background:#fff;border-radius:10px;padding:10px 12px;border:1px solid #e1e8eb}
+.dt-summary span,.dt-card p span{display:block;font-size:11px;color:#667680;text-transform:uppercase;letter-spacing:.05em}
+.dt-summary b{font-size:15px}.dt-summary small{display:block;color:#667680}
+.dt-summary.ENTREGADO>div:first-child b,.dt-summary.COMPLETADA>div:first-child b{color:#0b7a45}.dt-summary.ENTREGA_PARCIAL>div:first-child b{color:#9a5b00}
+.dt-summary.NO_ENTREGADO>div:first-child b,.dt-summary.REPROGRAMAR>div:first-child b{color:#b42318}
+.dt-timeline{list-style:none;margin:0 0 10px;padding:12px;background:#fff;border-radius:10px;border:1px solid #e1e8eb}
+.dt-ev{display:flex;gap:10px;padding:6px 0;position:relative}.dt-ev+.dt-ev{border-top:1px dashed #e1e8eb}
+.dt-dot{flex:none;width:12px;height:12px;border-radius:50%;background:#10d7e7;margin-top:4px;box-shadow:0 0 0 3px #e3f9fb}.dt-ev.none .dt-dot{background:#c3d1d7;box-shadow:none}
+.dt-ev b{display:block;font-size:13px;letter-spacing:.02em}.dt-ev span{display:block;font-size:13px;color:#42545c}
+.dt-none{color:#8a1c13 !important;font-weight:800;letter-spacing:.04em}.dt-map{font-size:12px;font-weight:700;color:#007a87}
+.dt-warn{background:#fff4e5;border:1px solid #f3d3a8;color:#7a3e00;border-radius:10px;padding:8px 10px;margin-bottom:10px;font-weight:700}
+.dt-cards{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:10px}.dt-card{background:#fff;border-radius:10px;padding:12px;border:1px solid #e1e8eb}
+.dt-card h4{margin:0 0 8px;font-size:12.5px;letter-spacing:.06em}.dt-card p{margin:0 0 8px}.dt-note{color:#667680;font-style:italic}
+.dt-sig img{width:100%;max-width:360px;aspect-ratio:5/2;object-fit:contain;background:#fff;border:1px solid #e1e8eb;border-radius:8px}
+.dt-more{background:#fff;border-radius:10px;border:1px solid #e1e8eb;padding:8px 12px;margin-top:10px}.dt-more summary{cursor:pointer;font-weight:800;font-size:12.5px;letter-spacing:.05em}
+.dt .geo-attribution{padding:0 12px 12px;margin:0;font-size:11.5px;color:#667680}
+@media(max-width:700px){.dt-cards{grid-template-columns:1fr}.dt-head{flex-direction:column}.dt-pane{padding:10px 8px}}
+/* V4.24 · formulario de entrega en Android: recuadros bien definidos, etiqueta fija, foco cian y error debajo de cada campo */
+.drv-form .drv-field{display:flex;flex-direction:column;gap:5px;margin:4px 0 12px}
+.drv-form .drv-lbl{font-size:14px;font-weight:700;color:#07151b}.drv-form .drv-lbl b{color:#b42318}
+.drv-form .drv-opt{font-style:normal;font-size:11px;font-weight:800;letter-spacing:.06em;color:#006b77;background:#e3f9fb;border-radius:999px;padding:2px 8px;margin-left:4px}
+.drv-form .drv-field .ed{background:#fff;border:2px solid #9fb3bc;border-radius:12px;min-height:52px;padding:12px 14px;font-size:17px;color:#07151b;width:100%;box-sizing:border-box}
+.drv-form .drv-field .ed::placeholder{color:#8a9ba3}
+.drv-form .drv-field .ed:focus{outline:none;border-color:#00b6c7;box-shadow:0 0 0 4px rgba(16,215,231,.22)}
+.drv-form .drv-ferr{color:#b42318;font-weight:700;font-size:13.5px}
+.drv-form .drv-field:has(.drv-ferr:not([hidden])) .ed{border-color:#b42318}
+/* V4.24 · fondo de SESIÓN BLOQUEADA (solo esa pantalla). El modal, el PIN y los botones conservan su estilo. */
+#pinGate.pin-lock{background:#eef3f5;flex-direction:column;align-items:center;justify-content:center;gap:clamp(14px,4vh,34px);padding:24px 14px;overflow:auto}
+#pinGate.pin-lock .pin-lock-bg{position:fixed;inset:0;z-index:0;pointer-events:none}#pinGate.pin-lock .pin-lock-bg svg{width:100%;height:100%;display:block}
+#pinGate.pin-lock .pin-lock-brand{position:relative;z-index:1;flex:none;display:flex;flex-direction:column;align-items:center;gap:10px;width:min(560px,86vw)}
+#pinGate.pin-lock .pin-lock-brand img{width:100%;height:auto;display:block}
+#pinGate.pin-lock .pin-lock-brand span{font:600 clamp(14px,2.4vw,24px)/1 Inter,Segoe UI,Arial,sans-serif;letter-spacing:.42em;color:#07151b;display:flex;align-items:center;gap:14px;white-space:nowrap}
+#pinGate.pin-lock .pin-lock-brand span::before,#pinGate.pin-lock .pin-lock-brand span::after{content:"";width:clamp(22px,4vw,46px);height:3px;background:#10d7e7;border-radius:2px}
+#pinGate.pin-lock .udialog{position:relative;z-index:1;flex:none;width:min(430px,100%);box-shadow:0 18px 44px rgba(7,21,27,.18)}
+#pinGate.pin-lock .udialog header{background:#13212a;color:#fff;border-bottom:4px solid #10d7e7}
+/* botones del PIN dentro de la pantalla en celulares angostos (antes "INGRESAR CON CONTRASEÑA" quedaba cortado) */
+@media(max-width:480px){#pinGate .udialog footer{flex-wrap:wrap;gap:10px}#pinGate .udialog footer>span{display:none}#pinGate .udialog footer .btn{flex:1 1 100%;min-width:0;white-space:normal}}

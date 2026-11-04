@@ -64,6 +64,15 @@ Deno.test('RC2-EMAIL hojas: envía el PDF adjunto una vez por hoja+versión; err
   eq((await call(s.deps, { action: 'send_sheet_emails' })).body.results[0].status, 'SENT'); eq((await call(s.deps, { action: 'send_sheet_emails' })).body.results, []);
   eq(s.sent.at(-1).attachments[0].filename, 'Hoja_01-000001_v1.pdf');
 });
+
+Deno.test('HG-IA-01 canal GMAIL (Configuración → F): Resend NO envía hojas, ni lo encolado antes del cambio', async () => {
+  const s = setup(); const jobs = [{ id: 'h1', route_id: 'r1', route_version: 1, recipient: 'log@ok.test', idempotency_key: 'r1|1|log', status: 'QUEUED' }]; let queued = 0;
+  s.deps.sheetStore = { listJobs: async () => jobs.filter(j => j.status !== 'SENT'), pdfFor: async () => ({ number: '01-000001', file_name: 'Hoja_01-000001_v1.pdf', bytes: new Uint8Array([37, 80]) }), updateJob: async (id, p) => Object.assign(jobs[0], p) };
+  s.deps.queueSheetEmails = async () => { queued++; }; s.deps.sheetVia = async () => 'GMAIL';
+  const before = s.sent.length, r = await call(s.deps, { action: 'send_sheet_emails' });
+  eq(r.body.skipped, 'GMAIL'); eq(s.sent.length, before, 'sin envíos por Resend'); eq(queued, 0, 'sin encolar'); eq(jobs[0].status, 'QUEUED', 'el trabajo no se toca');
+  s.deps.sheetVia = async () => 'RESEND'; await call(s.deps, { action: 'send_sheet_emails' }); eq(jobs[0].status, 'SENT', 'con RESEND sigue funcionando');
+});
 Deno.test('RC2-17 reenviar invitación sin crear otro usuario de Auth (fallback a enlace) y límite de emails claro', async () => {
   const { handle: h } = await import('../admin-users/handler.js');
   const base = { getUserFromJwt: async () => ({ id: 'adm' }), getProfile: async id => id === 'adm' ? { id: 'adm', role: 'ADMIN', status: 'ACTIVO', carriers: [] } : { id: 'inv', email: 'inv@ok.test', status: 'INVITACION_PENDIENTE', role: 'DESPACHO', carriers: [] },

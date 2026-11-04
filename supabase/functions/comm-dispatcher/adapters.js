@@ -18,7 +18,9 @@ export function pgStore(sb) {
     async release(id, token) { unwrap(await sb.rpc('comm_release', { p_id: id, p_token: token }), 'liberar'); },
     async finish(id, token, r) { return unwrap(await sb.rpc('comm_finish', { p_id: id, p_token: token, p_outcome: r.outcome, p_gmail_id: r.gmail_id || null,
       p_error_code: r.error_code || null, p_error: r.error || null }), 'registrar resultado'); },
-    async fetchAttachment(a) { const { data, error } = await sb.storage.from('comm-attachments').download(a.storage_path);
+    async enqueueSheetPdfs(now) { return unwrap(await sb.rpc('comm_enqueue_sheet_pdfs', { p_now: new Date(now).toISOString() }), 'correo de hojas') || 0; },
+    // cada adjunto se descarga de SU bucket (los PDF de hojas viven en 'route-pdfs'; los de comunicados, en 'comm-attachments')
+    async fetchAttachment(a) { const { data, error } = await sb.storage.from(a.bucket || 'comm-attachments').download(a.storage_path);
       if (error) throw Object.assign(new Error('No se pudo leer el adjunto ' + a.name), { code: 'ATTACHMENT_MISSING' }); return new Uint8Array(await data.arrayBuffer()); },
     async recordDispatch(s) { unwrap(await sb.rpc('comm_record_dispatch', { p: s }), 'registrar ejecución'); },
     async refreshToken() { return unwrap(await sb.rpc('comm_gmail_secret'), 'token'); },

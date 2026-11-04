@@ -28,8 +28,13 @@ async def login(pg, email):
         if await pg.input_value('#loginEmail') == email: break
     await pg.click('#loginBtn'); await pg.wait_for_timeout(2600)
     await pin(pg)
-async def sign(pg, sel):
-    b = await pg.locator(sel).bounding_box(); await pg.mouse.move(b['x'] + 20, b['y'] + 30); await pg.mouse.down(); await pg.mouse.move(b['x'] + 120, b['y'] + 70, steps=6); await pg.mouse.up()
+async def sign(pg, sel):   # V4.19: FIRMAR abre la firma a pantalla completa → firmar → CONFIRMAR FIRMA
+    OPENER = sel.replace('[data-sig]', '[data-sigopen]')
+    await pg.click(OPENER); await pg.wait_for_selector('.drv-sign-modal [data-sigpad]'); await pg.wait_for_timeout(150)
+    b = await pg.locator('.drv-sign-modal [data-sigpad]').bounding_box()
+    await pg.mouse.move(b['x'] + b['width'] * .15, b['y'] + b['height'] * .55); await pg.mouse.down()
+    await pg.mouse.move(b['x'] + b['width'] * .45, b['y'] + b['height'] * .35, steps=8); await pg.mouse.move(b['x'] + b['width'] * .8, b['y'] + b['height'] * .6, steps=8); await pg.mouse.up()
+    await pg.click('.drv-sign-modal [data-sigok]'); await pg.wait_for_selector('.drv-sign-modal', state='detached')
 async def main():
     server = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(PORT), '--strictPort', '--host', 'localhost'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -51,7 +56,8 @@ async def main():
             sp = await ctx.new_page(); ps(sp); await login(sp, 'sup.g2@okdespacho.demo')
             r_op = await op.evaluate(f'async()=>{{const l=await {API}.listInternalLocations(); let w; try {{ await {API}.saveInternalLocation({{location_key:"MONTECASEROS",name:"X",lat:0,lon:0}}); w="OK"; }} catch(e) {{ w=e.message; }} return [l.length, w]; }}')
             r_sp = await sp.evaluate(f'async()=>{{const l=await {API}.listInternalLocations(); let w; try {{ await {API}.saveInternalLocation({{location_key:"MONTECASEROS",name:"X",lat:0,lon:0}}); w="OK"; }} catch(e) {{ w=e.message; }} return [l.length, w]; }}')
-            res('G2-ROL-01', 'Operario y Superior LEEN G2 y NO lo modifican', r_op[0] == 2 and r_sp[0] == 2 and 'FORBIDDEN' in r_op[1] and 'FORBIDDEN' in r_sp[1], str(r_op) + str(r_sp))
+            # V4.23: la demo trae 3 ubicaciones internas (Montecaseros, San Juan y Depósito Diamante)
+            res('G2-ROL-01', 'Operario y Superior LEEN G2 y NO lo modifican', r_op[0] == 3 and r_sp[0] == 3 and 'FORBIDDEN' in r_op[1] and 'FORBIDDEN' in r_sp[1], str(r_op) + str(r_sp))
             # ===== Constructor (Operario): Montecaseros + 3 pedidos = UNA parada =====
             await op.evaluate('()=>{location.hash="#/despacho"}'); await op.wait_for_timeout(1200)
             await op.set_input_files('.file[data-kind="pedidos"] input', [os.path.join(FIX, f) for f in FILES])
@@ -156,7 +162,7 @@ async def main():
             if await tcard.count():
                 await tcard.locator('[data-arrive]').click() if await tcard.locator('[data-arrive]').count() else None; await gb.wait_for_timeout(800)
                 await tcard.locator('[data-o="ENTREGADO"]').click(); await gb.wait_for_timeout(400)
-                nosig = await tcard.locator('.drv-form [data-sig]').count() == 0
+                nosig = await tcard.locator('.drv-form [data-sigopen]').count() == 0
                 await tcard.locator('[data-save]').click(); await gb.wait_for_timeout(1300)
                 st = await gb.evaluate(DB); t0 = [x for x in [x for x in st['routes2'] if x['id'] == route['id']][0]['stops'] if x.get('stop_type') == 'TAREA'][0]
                 res('TAR-UI-02', 'TAREA REALIZADA sin firma ni receptor; sin email ni Recibido Conforme', nosig and t0['outcome'] == 'ENTREGADO' and not [j for j in st.get('customerJobs', []) if j['stop_id'] == t0['id']], t0['outcome'])

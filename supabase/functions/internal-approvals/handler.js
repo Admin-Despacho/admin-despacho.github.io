@@ -31,6 +31,8 @@ async function handleRaw(req, deps) {
   // Email diario de PDFs de hojas (default 18:00 Mendoza): cola idempotente hoja+versión+destinatario; adjunta el PDF guardado
   if (action === 'send_sheet_emails') {
     if (me && !hasPerm(me, 'settings.manage')) return json(403, { error: 'Sin permiso.' });
+    // canal GMAIL (Configuración → F): el correo de hojas lo envía Comunicaciones; Resend no envía nada (tampoco lo encolado antes del cambio)
+    if (deps.sheetVia && (await deps.sheetVia()) === 'GMAIL') return json(200, { results: [], skipped: 'GMAIL' });
     if (deps.queueSheetEmails) await deps.queueSheetEmails();
     const out = [];
     for (const j of await deps.sheetStore.listJobs()) {

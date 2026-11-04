@@ -9,7 +9,7 @@ DIST = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'dist-demo'); PO
 FIX = os.environ.get('OKD_FIXTURES_SALDO', '/tmp/okd_synth_saldo')
 FILES = ['informe_pedidos_qa.xlsx', 'saldo_comprobante_qa.xlsx', 'saldo_cuenta_corriente_qa.xlsx']
 ABSENT = ['SALDO NO ENCONTRADO', 'SALDO NO INFORMADO — REVISAR', 'SIN COMPROBANTE EN INFORME', 'SIN COMPROBANTE / NO ENCONTRADO', 'SIN COMPROBANTE / NO FACTURADO']
-R = []; EXPECTED = 14
+R = []; EXPECTED = 16
 def res(n, ok, d=''): R.append((n, 'PASS' if ok else 'FAIL', str(d)[:230])); print('..', ' | '.join(R[-1]), flush=True)
 ROW = '''(id)=>{const r=RouteStore.rows.find(x=>String(x.mainOrder)===id); if(!r) return null; const st=baseStatus(r);
   return {monto:r.monto, manual:!!r.montoManual, mm:r.montoMercaderiaManual==null?null:r.montoMercaderiaManual, rev:!!r.saldoRevisado, codes:st.issues.map(i=>i.level+":"+i.code),
@@ -94,6 +94,13 @@ async def main():
             # V4.14: el panel REVISAR se abre DESPLEGADO al intentar publicar (antes había que tocarlo)
             res('REV-01 REVISAR al publicar: el panel aparece desplegado con los pedidos pendientes y su motivo', p0['ready'] == 'REVISAR' and p0['open'] and p1['n'] == 4 and not p1['go']
                 and all(r['motivos'] for r in p1['rows']), {'n': p1['n'], 'filas': p1['rows'][:2]})
+            # V4.20: REVISAR muestra en grande qué bloquea y los controles para corregir DENTRO del recuadro, visibles sin desplazarse
+            rv = await pg.evaluate('''()=>{const r=document.getElementById("pubReady"), p=document.getElementById("pubPend"), m=document.getElementById("publishModal");
+              const pr=p&&p.getBoundingClientRect(); return {banner:(r.querySelector(".revbanner strong")||{}).textContent||null, dentro:!!(r&&p&&r.contains(p)),
+                visible:!!pr&&pr.top>=0&&pr.top<innerHeight, ctrl:!!(p&&p.querySelector("[data-pamt],[data-ppay],[data-pack]")),
+                grupos:[...r.querySelectorAll("details[data-revg]")].map(d=>d.dataset.revg+":"+(d.open?"abierto":"plegado"))}}''')
+            res('REV-NEW-01 REVISAR: aviso grande "NO SE PUEDE PUBLICAR TODAVÍA"; los controles para corregir están DENTRO del recuadro y visibles sin desplazarse; LISTO plegado',
+                rv['banner'] == 'NO SE PUEDE PUBLICAR TODAVÍA' and rv['dentro'] and rv['visible'] and rv['ctrl'] and 'err:abierto' in rv['grupos'] and 'ok:plegado' in rv['grupos'], rv)
             # NOC: se aplica sola una vez; la ya reflejada no
             noc_txt = await pg.evaluate('()=>[...document.querySelectorAll(".nocrow")].map(e=>e.innerText.replace(/\\s+/g," "))')
             n1 = (await pg.evaluate(ROW, '72003'))['noc']
@@ -123,6 +130,10 @@ async def main():
             p3 = await pend(pg)
             res('REV-03 al resolver, el contador baja y se habilita continuar con la publicación', p3['n'] == 0 and p3['go'] and p3['ready'] != 'REVISAR' and counts[-1] == 0
                 and all(counts[i] >= counts[i + 1] for i in range(len(counts) - 1)), {'contador': counts, 'estado': p3['ready']})
+            fin = await pg.evaluate('''()=>{const r=document.getElementById("pubReady"); return r?{label:(r.querySelector(".revbanner b")||{}).textContent, msg:(r.querySelector(".revbanner span")||{}).textContent,
+              rojo:!!r.querySelector(".revbanner:not(.ok)"), grupos:[...r.querySelectorAll("details[data-revg]")].map(d=>d.dataset.revg+":"+(d.open?"abierto":"plegado"))}:null}''')
+            res('REV-NEW-02 resuelto TODO desde REVISAR: el aviso pasa a "se puede publicar" (sin rojo) y los grupos conservan su estado',
+                fin and not fin['rojo'] and fin['label'] != 'REVISAR' and 'publicar' in (fin['msg'] or '').lower() and not any(g.startswith('err:') for g in fin['grupos']), fin)
             res('BUL-01 bultos vacíos no son error ni revisión obligatoria (no figuran en REVISAR)', not p0['bultosItem'] and not p3['bultosItem'], {'antes': p0['bultosItem'], 'despues': p3['bultosItem']})
             # las decisiones se guardan: cerrar, recargar y volver a abrir
             await pg.evaluate('async()=>{ document.getElementById("publishModal").remove(); await RouteStore.flush(); }')

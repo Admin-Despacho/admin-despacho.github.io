@@ -2,7 +2,7 @@
 // COMUNICACIONES · almacenamiento EN MEMORIA con las mismas reglas que las funciones SQL de la migración (claim/check/finish/…).
 // Lo usan las pruebas del despachador y el modo demo. Las reglas reales del servidor se prueban aparte en Postgres.
 // =====================================================================================================================
-import { MAX_ATTEMPTS, backoffSeconds } from './comms-core.js';
+import { MAX_ATTEMPTS, backoffSeconds, localParts, zonedToUtc } from './comms-core.js';
 
 const uid = p => p + '-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 export const STALE_PROCESSING_MS = 10 * 60e3;
@@ -24,7 +24,7 @@ export class MemoryCommsStore {
   async listActiveMessages() { return this.db.messages.filter(m => m.status === 'ACTIVO').map(m => ({ ...m, attachments: (m.attachments || []).filter(a => !a.detached) })); }
   async listCollaborators() { return this.db.collaborators.map(c => ({ ...c })); }
   async createRun(r) {
-    if (this.db.runs.some(x => x.message_id === r.message_id && x.scheduled_for === r.scheduled_for && x.kind === r.kind)) return null;   // única por comunicado + horario
+    if (r.kind !== 'HOJAS' && this.db.runs.some(x => x.message_id === r.message_id && x.scheduled_for === r.scheduled_for && x.kind === r.kind)) return null;   // única por comunicado + horario (las de hojas: por source_key)
     const run = { id: uid('run'), message_id: r.message_id, scheduled_for: r.scheduled_for, kind: r.kind, status: r.missed ? 'PERDIDA' : 'PENDIENTE',
       snapshot: JSON.parse(JSON.stringify(r.snapshot)), recipients_count: (r.recipients || []).length, created_at: new Date().toISOString(),
       note: r.missed ? 'Ejecución perdida (el servidor no la procesó a tiempo): NO se envió; queda para revisión.' : null };
@@ -71,6 +71,13 @@ export class MemoryCommsStore {
   async check(id, token) {
     const d = this.db.deliveries.find(x => x.id === id); if (!d || d.status !== 'PROCESANDO' || d.claim_token !== token) return 'LOST';
     const r = this._run(d.run_id), m = this._msg(r.message_id);
+    if (r.kind === 'HOJAS' && !(this.db.sheet && this.db.sheet.enabled && this.db.sheet.via === 'GMAIL')) {
+      Object.assign(d, { status: 'CANCELADO', claim_token: null, reason: 'Correo de hojas desactivado o cambiado a Resend antes del envío' }); this._save(); return 'CANCELLED'; }
+    if (r.kind === 'HOJAS') {   // ESTADO y VERSIÓN de la hoja, inmediatamente antes de cada envío (también en reintentos)
+      const rt = (this.db.sheetRoutes || []).find(x => x.id === r.snapshot.route_id);
+      if (!MemoryCommsStore.sheetEligible(rt)) { Object.assign(d, { status: 'CANCELADO', claim_token: null, reason: 'La hoja fue cancelada o dejó de estar publicada antes del envío' }); this._save(); return 'CANCELLED'; }
+      if (rt.version !== r.snapshot.route_version) { Object.assign(d, { status: 'CANCELADO', claim_token: null, reason: 'Hay una versión más nueva de la hoja (v' + rt.version + '): se envía esa' }); this._save(); return 'CANCELLED'; }
+    }
     if (r.kind !== 'PRUEBA') {
       if (r.status === 'CANCELADA' || !m || m.status === 'CANCELADO') { Object.assign(d, { status: 'CANCELADO', claim_token: null, reason: 'Comunicado cancelado antes del envío' }); this._save(); return 'CANCELLED'; }
       if (m.status === 'PAUSADO') { Object.assign(d, { status: 'PENDIENTE', claim_token: null, attempts: d.attempts - 1 }); this._save(); return 'PAUSED'; }
@@ -96,7 +103,36 @@ export class MemoryCommsStore {
     const ds = this.db.deliveries.filter(d => d.run_id === runId);
     r.status = ds.some(d => d.status === 'PENDIENTE' || d.status === 'PROCESANDO' || (d.status === 'ERROR' && d.retryable)) ? 'EN_CURSO' : 'COMPLETADA';
   }
-  async fetchAttachment(a) { const b = this.db.blobs[a.storage_path]; if (!b) throw Object.assign(new Error('No se encontró el adjunto ' + a.name), { code: 'ATTACHMENT_MISSING' }); return b instanceof Uint8Array ? b : new Uint8Array(b); }
+  // correo diario de hojas por Gmail (mismas reglas que comm_enqueue_sheet_pdfs): hojas PUBLICADAS o tercerizados DESPACHADOS, por el día de su
+  // publicación o despacho (no por el PDF); solo el PDF de la VERSIÓN VIGENTE; PDF tardío del día y PDF tardío de ayer generado hoy.
+  static sheetEligible(r) { return !!r && ['PUBLICADA', 'EN_CURSO', 'COMPLETADA'].includes(r.operational_status)
+    && ((r.dispatch_mode !== 'EXTERNAL' && !!r.published_at) || (r.dispatch_mode === 'EXTERNAL' && !!r.dispatched_at)); }
+  async enqueueSheetPdfs(now) {
+    const sh = this.db.sheet; if (!sh || !sh.enabled || sh.via !== 'GMAIL' || !(sh.recipients || []).length) return 0;
+    const day = localParts(now).date, prev = localParts(zonedToUtc(day, '12:00') - 864e5).date; let n = 0, m = null;
+    const sheetDay = r => localParts(Date.parse(r.dispatch_mode === 'EXTERNAL' ? r.dispatched_at : r.published_at)).date;
+    for (const r of (this.db.sheetRoutes || []).filter(MemoryCommsStore.sheetEligible).sort((a, b) => String(a.number).localeCompare(String(b.number)))) {
+      const p = (this.db.sheetPdfs || []).find(x => x.route_id === r.id && x.route_version === r.version && x.status !== 'PDF_ERROR' && x.status !== 'PENDING' && x.storage_path);   // VIGENTE
+      if (!p) continue;
+      const sd = sheetDay(r), late = sd === prev && localParts(Date.parse(p.generated_at)).date === day;
+      if (!((sd === day && now >= zonedToUtc(day, sh.time || '18:00')) || late)) continue;
+      const key = 'HOJA|' + r.id + '|' + r.version; if (this.db.runs.some(x => x.source_key === key)) continue;
+      if (!m) { m = this.db.messages.find(x => x.system_kind === 'HOJAS_DIA');
+        if (!m) { m = { id: 'msg-hojas-dia', internal_name: 'Correo diario de hojas (automático)', subject: 'OK Despacho · Hojas del día', body_html: '<p>Envío automático de los PDF de las hojas del día.</p>',
+          status: 'ACTIVO', system_kind: 'HOJAS_DIA', version: 1, selection: {}, schedule: null, attachments: [], active_since: new Date(now).toISOString(), cursor: new Date(now).toISOString() }; this.db.messages.push(m); } }
+      const recips = sh.recipients.map(e => String(e).toLowerCase()).filter(e => !(this.db.resendSent || []).includes(r.id + '|' + r.version + '|' + e));
+      const id = await this.createRun({ message_id: m.id, scheduled_for: new Date(Math.max(zonedToUtc(sd, sh.time || '18:00'), Date.parse(p.generated_at))).toISOString(), kind: 'HOJAS',
+        recipients: recips.map(e => ({ collaborator_id: null, email: e, name: 'Destinatario del correo de hojas' })),
+        snapshot: { subject: 'OK Despacho · Hoja ' + r.number + ' (v' + r.version + ')', body_html: '<p>Adjuntamos la hoja <b>' + r.number + '</b> versión ' + r.version + '.</p>',
+          from_name: 'OK Accesorios', message_version: 1, route_id: r.id, route_version: r.version, sheet_day: sd,
+          attachments: [{ name: p.file_name, mime: 'application/pdf', size_bytes: null, sha256: null, storage_path: p.storage_path, bucket: 'route-pdfs' }] } });
+      const run = this._run(id); run.source_key = key;
+      if (!recips.length) Object.assign(run, { status: 'COMPLETADA', note: 'Esta versión ya se había enviado por Resend a todos los destinatarios.' });
+      n++;
+    }
+    this._save(); return n;
+  }
+  async fetchAttachment(a) { const b = this.db.blobs[a.bucket ? a.bucket + ':' + a.storage_path : a.storage_path]; if (!b) throw Object.assign(new Error('No se encontró el adjunto ' + a.name), { code: 'ATTACHMENT_MISSING' }); return b instanceof Uint8Array ? b : new Uint8Array(b); }
   async recordDispatch(s) { this.db.dispatches.push(s); if (this.db.dispatches.length > 50) this.db.dispatches.shift(); this._save(); }
   // ---------- acciones de administración (en el servidor: RPC con permisos) ----------
   activate(id, now) { const m = this._msg(id); Object.assign(m, { status: 'ACTIVO', active_since: new Date(now).toISOString(), cursor: new Date(now).toISOString() }); this._save(); }

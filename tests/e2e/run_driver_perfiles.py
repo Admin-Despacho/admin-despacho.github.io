@@ -1,7 +1,7 @@
 """E2E (modo demo, Chromium, celular 390×844) · recorrido del chofer (V4.16; contrato de la demo: V4.16-PROPUESTA salvo donde se indica VIGENTE).
 Transportista EXTERNO (Cristian) y TRANSPORTISTA INTERNO (Gabriel) según la CONFIGURACIÓN del transportista (carriers.kind), no por nombres:
 al transportista de Cristian se le cambia el nombre antes de la prueba. Todo con controles reales (abrir hoja, INICIAR, LLEGUÉ, ENTREGADO,
-nombre, CUIL, foto del DNI, firma dibujada, GUARDAR, sin conexión). Las hojas se publican con la función de publicación de la demo.
+nombre, CUIL, firma dibujada a pantalla completa, GUARDAR, sin conexión; V4.19: sin foto del DNI). Las hojas se publican con la función de publicación de la demo.
 Datos SINTÉTICOS. Código de salida: 0 todo PASS · 1 alguna FAIL · 2 error de preparación o casos faltantes.
 Uso: python3 tests/e2e/run_driver_perfiles.py [dist-demo] [carpeta_capturas]"""
 import asyncio, os, subprocess, sys, time, socket, traceback, base64
@@ -31,7 +31,7 @@ ASSOC = '''(sid)=>{const d=JSON.parse(localStorage.getItem("okd_online_demo_v2")
   const job=(d.customerJobs||[]).find(j=>j.stop_id===sid); return {cuil:e.cuil||null, email:e.receiver_email||null, name:e.receiver_name||null, dni:idn.storage_path||null,
   dniStored:!!(idn.storage_path&&(d.storage||{})[idn.storage_path]), receipt:!!(d.receipts||{})[sid], job:job?job.kind:null}}'''
 FORM = '''(sid)=>{const f=document.querySelector('.drv-stop[data-s="'+sid+'"] .drv-form'); if(!f||f.hidden) return null; const has=s=>!!f.querySelector(s);
-  return {recv:has('[data-f="recv"]'), sign:has('[data-sig]'), cuil:has('[data-f="cuil"]'), email:has('[data-f="email"]'), cob:has('[data-f="cst"]')||has('[data-f="cmode"]')||has('[data-f="cnote"]'),
+  return {recv:has('[data-f="recv"]'), sign:has('[data-sigopen]'), cuil:has('[data-f="cuil"]'), email:has('[data-f="email"]'), cob:has('[data-f="cst"]')||has('[data-f="cmode"]')||has('[data-f="cnote"]'),
           cobText:(f.querySelector('.drv-cob')||{}).innerText||'', save:(f.querySelector('[data-save]')||{}).textContent||''}}'''
 def serve():
     p = subprocess.Popen([sys.executable, '-m', 'http.server', str(PORT), '--bind', '127.0.0.1'], cwd=DIST, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -58,11 +58,12 @@ async def open_route(pg, rid, km=None):
     if await pg.locator('#drvStart').count(): await pg.click('#drvStart'); await pg.wait_for_timeout(1500)
 async def stop_id(pg, rid, idx): return await pg.evaluate(f'()=>{{const r=(JSON.parse(localStorage.getItem("okd_online_demo_v2")).routes2||[]).find(x=>x.id==="{rid}"); return r.stops[{idx}].id}}')
 async def choose(pg, sid, o): await pg.locator(f'.drv-stop[data-s="{sid}"] [data-o="{o}"]').click(); await pg.wait_for_timeout(500)
-async def sign(pg, sid):
-    cv = pg.locator(f'.drv-stop[data-s="{sid}"] [data-sig]'); await cv.scroll_into_view_if_needed(); bb = await cv.bounding_box()
-    await pg.mouse.move(bb['x'] + 20, bb['y'] + 20); await pg.mouse.down()
-    for i in range(1, 12): await pg.mouse.move(bb['x'] + 20 + i * 18, bb['y'] + 20 + (i % 3) * 14)
-    await pg.mouse.up(); await pg.wait_for_timeout(200)
+async def sign(pg, sid):   # V4.19: FIRMAR abre la firma a pantalla completa → firmar → CONFIRMAR FIRMA
+    await pg.locator(f'.drv-stop[data-s="{sid}"] [data-sigopen]').click(); await pg.wait_for_selector('.drv-sign-modal [data-sigpad]'); await pg.wait_for_timeout(150)
+    b = await pg.locator('.drv-sign-modal [data-sigpad]').bounding_box()
+    await pg.mouse.move(b['x'] + b['width'] * .15, b['y'] + b['height'] * .55); await pg.mouse.down()
+    await pg.mouse.move(b['x'] + b['width'] * .45, b['y'] + b['height'] * .35, steps=8); await pg.mouse.move(b['x'] + b['width'] * .8, b['y'] + b['height'] * .6, steps=8); await pg.mouse.up()
+    await pg.click('.drv-sign-modal [data-sigok]'); await pg.wait_for_selector('.drv-sign-modal', state='detached')
 async def fill_id(pg, sid, cuil, png):
     f = pg.locator(f'.drv-stop[data-s="{sid}"] [data-f="cuil"]'); await f.fill(cuil); await f.press('Tab'); await pg.wait_for_timeout(900)   # un solo "change", como una persona
     fi = pg.locator(f'.drv-stop[data-s="{sid}"] [data-dnifile]')
@@ -91,17 +92,17 @@ async def main():
             await choose(pg, s1, 'ENTREGADO'); f1 = await pg.evaluate(FORM, s1)
             res('DRV-01 Cristian (configuración EXTERNO, transportista renombrado): sin LLEGADA A DESTINO ni cobranza; pide email', arrive == 0 and f1 and not f1['cob'] and f1['email'], {'llegada': arrive, 'form': f1})
             await pg.locator(f'.drv-stop[data-s="{s1}"] [data-f="recv"]').fill('Responsable QA Uno'); await fill_id(pg, s1, '20123456786', png); await sign(pg, s1)
-            e_nomail = await save(pg, s1)
+            await pg.locator(f'.drv-stop[data-s="{s1}"] [data-f="email"]').fill('receptor.uno@'); e_badmail = await save(pg, s1)   # V4.21: email opcional, pero si se carga debe ser válido
             await pg.locator(f'.drv-stop[data-s="{s1}"] [data-f="email"]').fill('receptor.uno@ejemplo.test')
             await pg.locator(f'.drv-stop[data-s="{s1}"] [data-save]').scroll_into_view_if_needed(); await pg.screenshot(path=os.path.join(SHOTS, 'cristian_entregado.png'))
             e1 = await save(pg, s1); st1 = await pg.evaluate(DB, ids['ct'])
-            res('DRV-02 Cristian: ENTREGADO elegido una sola vez → nombre + CUIL + foto del DNI + firma → GUARDAR (sin otra confirmación)', f1['recv'] and f1['sign'] and f1['cuil'] and 'GUARDAR' in f1['save']
+            res('DRV-02 Cristian: ENTREGADO elegido una sola vez → nombre + CUIL + firma (sin foto del DNI) → GUARDAR (sin otra confirmación)', f1['recv'] and f1['sign'] and f1['cuil'] and 'GUARDAR' in f1['save']
                 and e1 is None and st1[0]['outcome'] == 'ENTREGADO' and not dialogs, {'error': e1, 'parada': st1[0], 'dialogos': dialogs})
             # sin cobro = la cobranza queda como se publicó (PENDIENTE, valor por defecto del servidor) sin importe ni medio de pago
             res('DRV-03 guardar la entrega NO registra un cobro', st1[0]['col'] in (None, 'PENDIENTE') and st1[0]['amt'] is None and st1[0]['mode'] is None, st1[0])
             a1 = await pg.evaluate(ASSOC, s1)
-            res('DRV-14 Cristian: email obligatorio; entrega ↔ receptor ↔ email ↔ CUIL ↔ foto del DNI vinculada y recuperable; Recibido Conforme encolado (simulado)',
-                e_nomail and 'email' in e_nomail.lower() and a1['cuil'] == '20123456786' and a1['email'] == 'receptor.uno@ejemplo.test' and a1['dni'] and a1['dniStored'] and a1['receipt'] and a1['job'] == 'RECIBIDO_CONFORME', {'sin_email': e_nomail, 'asoc': a1})
+            res('DRV-14 Cristian: email OPCIONAL pero validado (mal escrito → corregir o borrar); entrega ↔ receptor ↔ email ↔ CUIL vinculados SIN foto del DNI; Recibido Conforme encolado (simulado)',
+                e_badmail and 'no es válido' in e_badmail and a1['cuil'] == '20123456786' and a1['email'] == 'receptor.uno@ejemplo.test' and not a1['dni'] and not a1['dniStored'] and a1['receipt'] and a1['job'] == 'RECIBIDO_CONFORME', {'email_mal': e_badmail, 'asoc': a1})
             # hoja publicada ANTES del cambio con task AMBAS: el servidor vigente exige cobranza → bloque de compatibilidad explicado
             await pg.locator('#drvBack').click(); await pg.wait_for_timeout(800); await open_route(pg, ids['ctOld']); s9 = await stop_id(pg, ids['ctOld'], 0)
             await choose(pg, s9, 'ENTREGADO'); f9 = await pg.evaluate(FORM, s9)
@@ -125,7 +126,7 @@ async def main():
             arr = await pg.locator(f'.drv-stop[data-s="{sc}"] [data-arrive]').count()
             res('DRV-05 Gabriel conserva LLEGADA A DESTINO', arr == 1, arr)
             await pg.locator(f'.drv-stop[data-s="{sc}"] [data-arrive]').click(); await pg.wait_for_timeout(1500)
-            # entrega COMERCIAL: nombre + CUIL + foto del DNI + firma
+            # entrega COMERCIAL: nombre + CUIL + firma (V4.19: sin foto del DNI)
             await choose(pg, sc, 'ENTREGADO'); fc = await pg.evaluate(FORM, sc)
             await pg.locator(f'.drv-stop[data-s="{sc}"] [data-f="recv"]').fill('Responsable QA Dos'); await sign(pg, sc)
             await pg.locator(f'.drv-stop[data-s="{sc}"] [data-f="email"]').fill('receptor.dos@ejemplo.test')
@@ -134,10 +135,10 @@ async def main():
             await pg.locator(f'.drv-stop[data-s="{sc}"] [data-save]').scroll_into_view_if_needed(); await pg.screenshot(path=os.path.join(SHOTS, 'gabriel_entrega_cliente.png'))
             e_c = await save(pg, sc); stg = await pg.evaluate(DB, ids['gb'])
             ag = await pg.evaluate(ASSOC, sc)
-            res('DRV-06 entrega comercial de Gabriel: exige email, CUIL y foto del DNI (además de nombre y firma) y guarda', fc and fc['cuil'] and fc['email'] and fc['recv'] and fc['sign'] and not fc['cob'] and e_no_cuil and 'CUIL' in e_no_cuil
+            res('DRV-06 entrega comercial de Gabriel: pide email (opcional) y exige CUIL (además de nombre y firma), sin foto del DNI, y guarda', fc and fc['cuil'] and fc['email'] and fc['recv'] and fc['sign'] and not fc['cob'] and e_no_cuil and 'CUIL' in e_no_cuil
                 and e_c is None and stg[0]['outcome'] == 'ENTREGADO', {'form': fc, 'sin_cuil': e_no_cuil, 'parada': stg[0]})
-            res('DRV-16 Gabriel (INTERNO): foto del DNI VINCULADA y recuperable desde la entrega, email y Recibido Conforme encolado (simulado)',
-                ag['cuil'] == '20987654321' and ag['email'] == 'receptor.dos@ejemplo.test' and ag['dni'] and ag['dniStored'] and ag['receipt'] and ag['job'] == 'RECIBIDO_CONFORME', ag)
+            res('DRV-16 Gabriel (INTERNO): entrega SIN foto del DNI (V4.19), CUIL y email vinculados y Recibido Conforme encolado (simulado)',
+                ag['cuil'] == '20987654321' and ag['email'] == 'receptor.dos@ejemplo.test' and not ag['dni'] and not ag['dniStored'] and ag['receipt'] and ag['job'] == 'RECIBIDO_CONFORME', ag)
             # MONTECASEROS (ubicación interna): solo nombre y apellido + firma
             if await pg.locator(f'.drv-stop[data-s="{sm}"] [data-arrive]').count(): await pg.locator(f'.drv-stop[data-s="{sm}"] [data-arrive]').click(); await pg.wait_for_timeout(1500)
             await choose(pg, sm, 'ENTREGADO'); fm = await pg.evaluate(FORM, sm)

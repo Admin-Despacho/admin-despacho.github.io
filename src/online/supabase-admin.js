@@ -43,6 +43,13 @@ export const SupabaseAdmin = {
   },
   async saveTemplate(carrierId, columns) { return this._rpc('save_sheet_template', { p_carrier: carrierId, p_columns: columns }); },
   // Vehículos
+  // V4.23 · padrón de emails de clientes (solo Administrador General; RLS y funciones del servidor)
+  async clientEmailsPreview(rows) { const { data, error } = await this.sb.rpc('client_emails_preview', { p_rows: rows }); if (error) throw new Error(error.message); return data; },
+  async clientEmailsApply(rows, mode, file) { const { data, error } = await this.sb.rpc('client_emails_apply', { p_rows: rows, p_mode: mode, p_file: file }); if (error) throw new Error(error.message); return data; },
+  async clientEmailUpsert(cuit, name, email) { const { data, error } = await this.sb.rpc('client_email_upsert', { p_cuit: cuit, p_name: name, p_email: email }); if (error) throw new Error(error.message); return data; },
+  async clientEmailsList(q) { let r = this.sb.from('client_emails').select('*').order('client_name').limit(200); const t = String(q || '').trim();
+    if (t) r = r.or('cuit.ilike.%' + t.replace(/[^0-9a-zA-Z@._ -]/g, '') + '%,client_name.ilike.%' + t.replace(/[^0-9a-zA-Z@._ -]/g, '') + '%,email.ilike.%' + t.replace(/[^0-9a-zA-Z@._ -]/g, '') + '%');
+    const { data, error } = await r; if (error) throw new Error(error.message); return data || []; },
   async vehicleStatus() { return sel(this.sb.from('vehicle_service_status').select('*').order('name')); },
   async saveVehicle(p) { const r = await this._rpc('upsert_vehicle', { p }); this.sendServiceAlerts().catch(() => null); return r; },
   async registerServiceDone(id, km, date, note) { const r = await this._rpc('register_vehicle_service', { p_vehicle: id, p_km: km, p_date: date, p_note: note || null }); this.sendServiceAlerts().catch(() => null); return r; },

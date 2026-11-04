@@ -2,6 +2,7 @@
 // Misma estética (negro, blanco, cyan). Toda acción la valida el servidor; la interfaz solo muestra lo autorizado.
 import { switcherHtml } from './role-view.js';
 import { esc } from './util.js';
+import { serviceInfo, intervalError } from './vehicle-service.js';
 import { hasPerm, ROLE_LABEL } from '../../supabase/functions/_shared/rules.js';
 import { DEFAULT_COLUMNS, moduleOfAction } from './demo-admin.js';
 import { zipStore, b64ToBytes, sha256Hex } from './zip.js';
@@ -123,20 +124,82 @@ export async function xlsxFromSnapshot(model, r, stops) {
 async function waitLegacy() { for (let i = 0; i < 60 && !(window.OKD_LEGACY && window.OKD_LEGACY.openDraft); i++) await new Promise(r => setTimeout(r, 100)); }
 
 // ================= HOJAS PUBLICADAS / HISTORIAL =================
+// V4.24 · SALIDA Y RECORRIDO (módulo independiente, SOLO LECTURA): salida del depósito, ubicaciones internas (llegada, recepción,
+// terminé), regreso a Diamante y cierre de cada hoja del Transportista Interno. SIN REGISTRO cuando un evento no existe (nunca se infiere).
+export async function openRecorridos(api, me) {
+  const w = frame(me, 'Salida y recorrido', '#/recorridos');
+  const today = new Date(), iso = d => d.toISOString().slice(0, 10), from0 = new Date(today.getTime() - 14 * 864e5);
+  w.innerHTML = '<div class="up-head"><h2>SALIDA Y RECORRIDO</h2></div><p class="rp-note">Registro de salida, llegadas, finalizaciones y regreso del Transportista Interno · solo lectura.</p>' +
+    '<details class="hfold" open><summary>FILTROS</summary><div class="ufilters"><label>Desde <input type="date" id="rcFrom" value="' + iso(from0) + '"></label><label>Hasta <input type="date" id="rcTo" value="' + iso(today) + '"></label>' +
+    '<button class="btn dark" type="button" id="rcGo">BUSCAR</button></div></details>' +
+    '<div class="htabs" role="tablist"><button type="button" role="tab" data-rctab="list" aria-selected="true">LISTADO</button><button type="button" role="tab" data-rctab="detail" aria-selected="false" hidden></button></div>' +
+    '<div id="rcList"></div><div id="rcDetail" hidden></div>';
+  const rcFold = w.querySelector('details.hfold'), tLi = w.querySelector('[data-rctab="list"]'), tDe = w.querySelector('[data-rctab="detail"]'); let rcScroll = 0;
+  const rcShow = det => { w.querySelector('#rcList').hidden = det; rcFold.hidden = det; w.querySelector('#rcDetail').hidden = !det;
+    tLi.setAttribute('aria-selected', String(!det)); tDe.setAttribute('aria-selected', String(det)); if (!det) window.scrollTo(0, rcScroll); };
+  tLi.onclick = () => rcShow(false); tDe.onclick = () => rcShow(true);
+  const loc = l => !l ? '' : l.missing_reason ? 'Sin ubicación · ' + esc(l.missing_reason) : l.lat != null && l.lon != null ? esc(Number(l.lat).toFixed(5) + ', ' + Number(l.lon).toFixed(5)) +
+    (l.accuracy != null ? ' · precisión ' + Math.round(Number(l.accuracy)) + ' m' : '') + (l.outside_m ? ' · ⚠ fuera del radio (' + l.outside_m + ' m)' : '') +
+    ' <a class="dt-map" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=' + encodeURIComponent(l.lat) + '&mlon=' + encodeURIComponent(l.lon) + '#map=17/' + encodeURIComponent(l.lat) + '/' + encodeURIComponent(l.lon) + '">VER EN MAPA</a>' : '';
+  const ev = (key, title, at, l, extra) => '<li class="dt-ev' + (at ? '' : ' none') + '" data-ev="' + key + '"><span class="dt-dot"></span><div><b>' + title + '</b>' +
+    (at ? '<span class="dt-when">' + dt(at) + '</span><span class="dt-geo">' + (loc(l) || 'Sin GPS') + '</span>' : '<span class="dt-none">SIN REGISTRO</span>') + (extra ? '<span>' + extra + '</span>' : '') + '</div></li>';
+  const showRoute = async id => {
+    const box = w.querySelector('#rcDetail'); if (box.hidden) rcScroll = window.scrollY; box.innerHTML = '<p class="rp-note">Cargando…</p>';
+    tDe.hidden = false; tDe.textContent = 'HOJA'; rcShow(true); const top0 = w.getBoundingClientRect().top + window.scrollY; if (window.scrollY > top0) window.scrollTo(0, Math.max(0, top0 - 8));
+    try { const d = await api.routeDetail(id), r = d.route, st = (r.stops || []).slice().sort((a, b) => (a.sequence_number || a.seq) - (b.sequence_number || b.seq));
+      const locs = st.filter(s => s.stop_type === 'UBICACION_INTERNA'), name = s => esc(String(s.client_name || 'UBICACIÓN').toUpperCase());
+      tDe.textContent = 'HOJA ' + (r.number || '');
+      box.innerHTML = '<section class="delivery-trace-panel dt" id="rcRoute"><header class="dt-head"><div><h3>HOJA ' + esc(r.number) + ' · ' + esc(r.carrier_name || r.carrier_id) + '</h3><p>Responsable: ' + esc(r.responsable_name || '—') +
+        ' · Vehículo: ' + esc([r.vehicle_name, r.vehicle_plate].filter(Boolean).join(' · ') || '—') + '</p></div><span class="dt-ro">SOLO LECTURA</span></header><div class="dt-pane"><ol class="dt-timeline" id="rcTimeline">' +
+        ev('start', 'SALIDA DEL DEPÓSITO DIAMANTE', r.started_at, r.start_location, 'km inicial ' + (r.km_start ?? '—')) +
+        locs.map(s => ev('arr-' + s.id, 'LLEGADA A ' + name(s), s.arrived_at, s.arrive_location) +
+          ev('rec-' + s.id, 'RECEPCIÓN EN ' + name(s) + (s.outcome && s.outcome !== 'PENDIENTE' ? ' · ' + esc(s.outcome.replaceAll('_', ' ')) : ''), s.outcome && s.outcome !== 'PENDIENTE' ? s.outcome_at : null, s.finish_location) +
+          ev('fin-' + s.id, 'FINALIZACIÓN EN ' + name(s), s.location_finished_at, s.location_finished_location) +
+          ev('dep-' + s.id, 'SALIDA DE ' + name(s), s.location_departed_at, s.location_departed_location)).join('') +
+        ev('depot', 'REGRESO A DEPÓSITO DIAMANTE', r.depot_arrived_at, r.depot_location) +
+        ev('close', 'CIERRE DE LA HOJA', r.completed_at, null, 'km final ' + (r.km_end ?? '—') + (r.km_start != null && r.km_end != null ? ' · recorridos ' + fmt(r.km_end - r.km_start) + ' km' : '') + ' · estado ' + esc(ST[r.operational_status] || r.operational_status)) +
+        '</ol><p class="rp-note">Los eventos registrados sin conexión aparecen cuando el celular sincroniza. Lo que nunca se registró figura como SIN REGISTRO.</p></div></section>';
+    } catch (e) { box.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; } };
+  const list = async () => {
+    const box = w.querySelector('#rcList'); let res;
+    try { res = await api.searchRoutes({ limit: 50, offset: 0, carrier: 'INTERNO', from: w.querySelector('#rcFrom').value, to: w.querySelector('#rcTo').value }); } catch (e) { box.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; return; }
+    const rows = (res.rows || res || []).filter(r => (r.carrier_kind || '') === 'INTERNO' || r.carrier_id === 'INTERNO');
+    box.innerHTML = '<div class="utable-wrap"><table class="utable" id="rcTable"><thead><tr><th>HOJA</th><th>RESPONSABLE</th><th>VEHÍCULO</th><th>SALIDA</th><th>REGRESO</th><th>ESTADO</th><th></th></tr></thead><tbody>' +
+      (rows.length ? rows.map(r => '<tr data-rid="' + r.id + '"><td>' + esc(r.number) + '</td><td>' + esc(r.responsable_name || '—') + '</td><td>' + esc(r.vehicle_plate || '—') + '</td><td>' + (r.started_at ? dt(r.started_at) : 'SIN REGISTRO') +
+        '</td><td>' + (r.depot_arrived_at ? dt(r.depot_arrived_at) : 'SIN REGISTRO') + '</td><td>' + esc(ST[r.operational_status] || r.operational_status) + '</td><td><button class="btn soft" type="button" data-rcview>VER RECORRIDO</button></td></tr>').join('')
+        : '<tr><td colspan="7">Sin hojas del Transportista Interno en esas fechas.</td></tr>') + '</tbody></table></div>';
+    box.querySelectorAll('[data-rcview]').forEach(b => b.onclick = () => showRoute(b.closest('tr').dataset.rid)); };
+  w.querySelector('#rcGo').onclick = () => { rcShow(false); list(); }; await list();
+}
 export async function openHistory(api, me) {
   const w = frame(me, 'Hojas publicadas', '#/historial');
   const carriers = await api.listCarriers().catch(() => []);
   let f = { limit: 25, offset: 0 };
-  w.innerHTML = '<div class="up-head"><h2>HOJAS PUBLICADAS / HISTORIAL</h2></div><div class="ufilters hfilters" id="hFilters">' +
+  w.innerHTML = '<div class="up-head"><h2>HOJAS PUBLICADAS / HISTORIAL</h2></div><details class="hfold" id="hFold" open><summary>FILTROS</summary><div class="ufilters hfilters" id="hFilters">' +
     '<input id="hfNumber" placeholder="N° hoja"><input id="hfOrder" placeholder="Pedido"><input id="hfClient" placeholder="Cliente"><input id="hfResp" placeholder="Responsable">' +
     '<select id="hfCarrier"><option value="">Transportista</option>' + carriers.map(c => '<option value="' + c.id + '">' + esc(c.name) + '</option>').join('') + '</select>' +
     '<select id="hfStatus"><option value="">Estado</option>' + Object.keys(ST).map(k => '<option value="' + k + '">' + ST[k] + '</option>').join('') + '</select>' +
     '<select id="hfApproval"><option value="">Aprobación</option><option value="PENDIENTE">PENDIENTE</option><option value="APROBADA">APROBADA</option><option value="OBSERVADA">OBSERVADA</option></select>' +
     '<select id="hfZone"><option value="">Zona</option><option>ESTE</option><option>ALREDEDORES</option><option>CENTRO</option></select>' +
-    '<input id="hfFrom" type="date"><input id="hfTo" type="date"><button class="btn dark" type="button" id="hfGo">BUSCAR</button></div><div id="hList"></div><div id="hDetail"></div>';
+    '<input id="hfFrom" type="date"><input id="hfTo" type="date"><button class="btn dark" type="button" id="hfGo">BUSCAR</button></div></details>' +
+    // V4.20: VER HOJA abre la hoja en una PESTAÑA interna (arriba), sin desplazarse al final; LISTADO vuelve a la lista donde estaba
+    '<div class="htabs" id="hTabs" role="tablist"><button type="button" role="tab" data-htab="list" aria-selected="true">LISTADO</button>' +
+    '<button type="button" role="tab" data-htab="detail" aria-selected="false" hidden></button></div><div id="hList"></div><div id="hDetail" hidden></div>';
+  // Filtros, página, plegado y hoja abierta se CONSERVAN al cambiar de vista y volver (en esta sesión del navegador)
+  const SK = 'okd_hist_state', loadSt = () => { try { return JSON.parse(sessionStorage.getItem(SK) || '{}'); } catch (e) { return {}; } };
+  const saveSt = p => { try { sessionStorage.setItem(SK, JSON.stringify({ ...loadSt(), ...p })); } catch (e) { } };
+  const FIELDS = { number: '#hfNumber', order: '#hfOrder', client: '#hfClient', responsable: '#hfResp', carrier: '#hfCarrier', status: '#hfStatus', approval: '#hfApproval', zone: '#hfZone', from: '#hfFrom', to: '#hfTo' };
+  const st0 = loadSt();
+  if (st0.f) { f = { ...f, ...st0.f }; Object.entries(FIELDS).forEach(([k, sel]) => { const el = w.querySelector(sel); if (el && st0.f[k] != null) el.value = st0.f[k]; }); }
+  const fold = w.querySelector('#hFold'); if (st0.fold === false) fold.open = false; fold.addEventListener('toggle', () => saveSt({ fold: fold.open }));
+  const tL = w.querySelector('[data-htab="list"]'), tD = w.querySelector('[data-htab="detail"]'); let listScroll = 0;
+  const show = which => { const det = which === 'detail'; w.querySelector('#hList').hidden = det; fold.hidden = det; w.querySelector('#hDetail').hidden = !det;
+    tL.setAttribute('aria-selected', String(!det)); tD.setAttribute('aria-selected', String(det)); if (!det) { saveSt({ view: 'list' }); window.scrollTo(0, listScroll); } };
+  tL.onclick = () => show('list'); tD.onclick = () => show('detail');
   const list = async m => {
     const box = w.querySelector('#hList'); let res = { total: 0, rows: [] };
     try { res = await api.searchRoutes(f); } catch (e) { m = { err: true, text: e.message }; }
+    saveSt({ f });
     box.innerHTML = '<div class="utable-wrap"><table class="utable" id="histTable"><thead><tr><th>HOJA</th><th>TRANSPORTISTA</th><th>RESPONSABLE</th><th>PUBLICADA</th><th>PARADAS · BULTOS</th><th>ESTADO</th><th>APROBACIÓN</th><th></th></tr></thead><tbody>' +
       (res.rows.length ? res.rows.map(r => '<tr data-rid="' + r.id + '"><td><b>' + esc(r.number) + '</b></td><td>' + esc(r.carrier_name || r.carrier_id) + '</td><td>' + esc(r.responsable_name || '') + '</td><td>' + dt(r.published_at) + '</td><td>' + r.stops + ' · ' + r.bultos + '</td>' +
         '<td><span class="ust ' + (r.operational_status === 'CANCELADA' ? 'DESHABILITADO' : r.operational_status === 'COMPLETADA' ? 'ACTIVO' : 'INVITACION_PENDIENTE') + '">' + (ST[r.operational_status] || r.operational_status) + '</span></td><td>' + esc(AP[r.approval_status] || '') + '</td>' +
@@ -149,7 +212,11 @@ export async function openHistory(api, me) {
   };
   const detail = async (id, m) => {
     const box = w.querySelector('#hDetail'); let d;
+    if (box.hidden) listScroll = window.scrollY;
+    tD.hidden = false; if (!tD.textContent) tD.textContent = 'HOJA'; show('detail'); saveSt({ view: 'detail', rid: id });
+    const top = w.getBoundingClientRect().top + window.scrollY; if (window.scrollY > top) window.scrollTo(0, Math.max(0, top - 8));
     try { d = await api.routeDetail(id); } catch (e) { box.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; return; }
+    tD.textContent = 'HOJA ' + (d.route && d.route.number || '');
     const r = d.route, active = ['PUBLICADA', 'EN_CURSO'].includes(r.operational_status), stops = (r.stops || []).slice().sort((a, b) => (a.sequence_number || a.seq) - (b.sequence_number || b.seq));
     const pend = (d.returns || []).filter(x => x.status === 'PENDING');
     const postReq = (d.postPublishRequests || []).find(x => Number(x.route_version || 1) === Number(r.version || 1));
@@ -157,10 +224,10 @@ export async function openHistory(api, me) {
     box.innerHTML = '<section class="step rp-step" id="hSheet"><h2><span class="n">' + esc(r.number) + '</span>HOJA ' + esc(r.number) + ' · ' + esc(r.carrier_name || r.carrier_id) + ' · ' + (ST[r.operational_status] || r.operational_status) + (AP[r.approval_status] ? ' · ' + AP[r.approval_status] : '') + '</h2>' +
       (r.vehicle_plate ? '<p class="rp-note">Vehículo ' + esc(r.vehicle_name || '') + ' · ' + esc(r.vehicle_plate) + ' · km ' + (r.km_start ?? '—') + ' → ' + (r.km_end ?? '—') + (r.km_start != null && r.km_end != null ? ' · ' + fmt(r.km_end - r.km_start) + ' km' : '') + '</p>' : '') +
       screenTable(r.sheet_snapshot && r.sheet_snapshot.screen_model) +
-      '<div class="utable-wrap"><table class="utable"><thead><tr><th>#</th><th>CLIENTE</th><th>PEDIDOS</th><th>BULTOS</th><th>RESULTADO</th>' + (me.role === 'ADMIN' ? '<th>ENTREGA</th>' : '') + '</tr></thead><tbody>' +
+      '<div class="utable-wrap"><table class="utable"><thead><tr><th>#</th><th>CLIENTE</th><th>PEDIDOS</th><th>BULTOS</th><th>RESULTADO</th>' + (hasPerm(me, 'signatures.view') ? '<th>ENTREGA</th>' : '') + '</tr></thead><tbody>' +
       stops.map((s, i) => '<tr data-stop="' + s.id + '"><td>' + (i + 1) + '</td><td>' + (s.stop_type === 'UBICACION_INTERNA' ? '<span class="tchip">TRASLADO INTERNO</span> ' : s.stop_type === 'TAREA' ? '<span class="tchip">TAREA</span> ' : '') + esc(s.client_name) + (s.provenance === 'DRIVER' ? ' <em>(agregada)</em>' : '') +
         (s.address && s.stop_type && s.stop_type !== 'PEDIDO' ? '<br><small>' + esc(s.address) + '</small>' : '') + (s.instructions ? '<br><small data-hist-obs><b>' + (s.stop_type === 'TAREA' ? 'Instrucciones' : 'Observación') + ':</b> ' + esc(s.instructions) + '</small>' : '') +
-        (s.contact_name || s.contact_phone ? '<br><small>Contacto: ' + esc([s.contact_name, s.contact_phone].filter(Boolean).join(' · ')) + '</small>' : '') + '</td><td>' + esc((s.order_numbers || []).join(' + ')) + '</td><td>' + (s.bultos || 0) + '</td><td>' + esc(String(s.outcome || '').replace('_', ' ')) + (s.outcome_reason || s.outcome_note ? ' · ' + esc(s.outcome_reason || s.outcome_note) : '') + '</td>' + (me.role === 'ADMIN' ? '<td><button class="btn soft" type="button" data-delivery-detail>VER ENTREGA</button></td>' : '') + '</tr>').join('') + '</tbody></table></div><div id="deliveryTraceBox"></div>' +
+        (s.contact_name || s.contact_phone ? '<br><small>Contacto: ' + esc([s.contact_name, s.contact_phone].filter(Boolean).join(' · ')) + '</small>' : '') + '</td><td>' + esc((s.order_numbers || []).join(' + ')) + '</td><td>' + (s.bultos || 0) + '</td><td>' + esc(String(s.outcome || '').replace('_', ' ')) + (s.outcome_reason || s.outcome_note ? ' · ' + esc(s.outcome_reason || s.outcome_note) : '') + '</td>' + (hasPerm(me, 'signatures.view') ? '<td><button class="btn soft" type="button" data-delivery-detail>VER ENTREGA</button></td>' : '') + '</tr>').join('') + '</tbody></table></div><div id="deliveryTraceBox"></div>' +
       '<h3 class="dsub">PDF / VERSIONES</h3><div class="utable-wrap"><table class="utable" id="hPdfs"><thead><tr><th>VERSIÓN</th><th>ARCHIVO</th><th>GENERADO</th><th>POR</th><th>ESTADO</th><th></th></tr></thead><tbody>' +
       (d.pdfs.length ? d.pdfs.map(p => '<tr data-v="' + p.route_version + '"><td>v' + p.route_version + '</td><td>' + esc(p.file_name || '') + '</td><td>' + dt(p.generated_at) + '</td><td>' + esc(p.generated_by_name || '') + '</td><td>' + p.status + (p.error ? ' · ' + esc(p.error) : '') + '</td>' +
         '<td>' + (p.status === 'OK' ? '<button class="btn soft" type="button" data-pdf>PDF</button>' : '<button class="btn dark" type="button" data-retry>REINTENTAR PDF</button>') + '</td></tr>').join('') : '<tr><td colspan="6">Sin PDF registrado.</td></tr>') + '</tbody></table></div>' +
@@ -219,41 +286,57 @@ export async function openHistory(api, me) {
       geoQueue = p.catch(() => null);
       return p;
     };
-    if (me.role === 'ADMIN') box.querySelectorAll('[data-delivery-detail]').forEach(btn => btn.onclick = async () => {
-      const row = btn.closest('tr'), traceBox = box.querySelector('#deliveryTraceBox');
+    // V4.24 · VER ENTREGA: Administrador General y Superior Despacho (permiso existente signatures.view; SOLO LECTURA).
+    // Pestañas SOLO de las ubicaciones de ESTA hoja; línea de tiempo por pestaña; SIN REGISTRO cuando un evento no existe (nunca se infiere).
+    const canTrace = hasPerm(me, 'signatures.view');
+    const mapLink = loc => loc && loc.lat != null && loc.lon != null ? ' <a class="dt-map" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=' + encodeURIComponent(loc.lat) + '&mlon=' + encodeURIComponent(loc.lon) + '#map=17/' + encodeURIComponent(loc.lat) + '/' + encodeURIComponent(loc.lon) + '">VER EN MAPA</a>' : '';
+    const evItem = (key, title, at, loc, extra) => '<li class="dt-ev' + (at ? '' : ' none') + '" data-ev="' + key + '"><span class="dt-dot"></span><div><b>' + title + '</b>' +
+      (at ? '<span class="dt-when">' + dt(at) + '</span><span class="dt-geo" data-geo="' + key + '">' + geoLabelFallback(loc) + '</span>' + mapLink(loc) : '<span class="dt-none">SIN REGISTRO</span>') + (extra || '') + '</div></li>';
+    const isDepotRoute = (r.carrier_kind || '') === 'INTERNO' || r.carrier_id === 'INTERNO';
+    const geoFill = root => root.querySelectorAll('[data-geo]').forEach(el => { const loc = el._loc; if (loc && loc.lat != null) reversePlace(loc).then(v => { if (el.isConnected) el.textContent = v; }); });
+    const attach = (root, map) => Object.entries(map).forEach(([k, loc]) => { const el = root.querySelector('[data-geo="' + k + '"]'); if (el) el._loc = loc; });
+    const stopPane = async (st) => {
+      const tr = await api.deliveryTrace(st.id), s = tr.stop || {}, ev = tr.evidence, rc = tr.receipt, mails = tr.emails || [], sig = ev && signatureSrc(ev.signature_png);
+      const internal = s.stop_type === 'UBICACION_INTERNA', task = s.stop_type === 'TAREA', out = String(s.outcome || 'PENDIENTE');
+      const html = '<div class="dt-summary ' + out + '"><div><span>Resultado</span><b>' + esc(out.replaceAll('_', ' ')) + '</b></div><div><span>Realizado por</span><b>' + esc(tr.outcome_by_name || '—') + '</b></div>' +
+        '<div><span>' + (internal ? 'Ubicación' : task ? 'Tarea' : 'Cliente') + '</span><b>' + esc(s.client_name || '') + '</b><small>' + esc(s.address || '') + '</small></div></div>' +
+        '<ol class="dt-timeline">' + evItem('arrive', internal ? 'LLEGADA A LA UBICACIÓN' : 'LLEGADA', s.arrived_at, s.arrive_location) +
+          evItem('finish', internal ? 'RECEPCIÓN INTERNA (' + esc(out.replaceAll('_', ' ')) + ')' : task ? 'TAREA RESUELTA' : 'ENTREGA / RESULTADO (' + esc(out.replaceAll('_', ' ')) + ')', s.outcome_at, s.finish_location) +
+          (internal ? evItem('locfin', 'TERMINÉ EN LA UBICACIÓN', s.location_finished_at, s.location_finished_location) + evItem('locdep', 'SALIDA DE LA UBICACIÓN', s.location_departed_at, s.location_departed_location) : '') + '</ol>' +
+        (s.location_warning ? '<div class="dt-warn">⚠ ' + esc(s.location_warning) + '</div>' : '') +
+        '<div class="dt-cards"><div class="dt-card"><h4>' + (internal ? 'RECEPCIÓN INTERNA G2' : task ? 'TAREA' : 'RECEPCIÓN') + '</h4>' +
+          '<p><span>Recibió</span><b>' + esc((ev && ev.receiver_name) || '—') + '</b></p>' + (!internal && !task ? '<p><span>CUIL</span><b>' + esc((ev && ev.receiver_cuil) || '—') + '</b></p><p><span>Email usado</span><b>' + esc((ev && ev.receiver_email) || 'sin email') + '</b></p>' : '') +
+          (internal ? '<p><span>Pedidos trasladados</span><b>' + esc((s.order_numbers || []).join(', ') || '—') + '</b></p><p class="dt-note">Traslado entre sucursales: no es entrega al cliente.</p>' : '<p><span>Pedidos / comprobantes</span><b>' + esc((s.order_numbers || []).join(' + ') || '—') + '</b></p>') +
+          (s.outcome_note || s.outcome_reason ? '<p><span>Observación / motivo</span><b>' + esc(s.outcome_note || s.outcome_reason) + '</b></p>' : '') +
+          (s.collection_status && s.collection_status !== 'PENDIENTE' ? '<p><span>Cobranza</span><b>' + esc(s.collection_status.replaceAll('_', ' ')) + ' · ' + (s.collected_amount != null ? fmtMoney(s.collected_amount) : '—') + ' · ' + esc(s.payment_mode || '—') + '</b></p>' : '') + '</div>' +
+          '<div class="dt-card dt-sig"><h4>FIRMA DIGITAL</h4>' + (sig ? '<img src="' + sig + '" alt="Firma de recepción">' : '<p class="dt-none">' + (task ? 'La tarea no lleva firma.' : 'Sin firma disponible.') + '</p>') + '</div></div>' +
+        (rc || mails.length ? '<details class="dt-more"><summary>RECIBIDO CONFORME Y EMAILS (' + ((rc ? 1 : 0) + mails.length) + ')</summary>' +
+          (rc ? '<p><b>Recibido Conforme:</b> ' + esc(rc.receipt_number || '—') + ' · generado ' + (rc.generated_at ? dt(rc.generated_at) : '—') + ' · ' + esc(rc.recipient_email || '—') + '</p>' : '') +
+          mails.map(m => '<p><b>' + esc(m.kind || '') + '</b> · ' + esc(m.status || '') + (m.sent_at ? ' · ' + dt(m.sent_at) : '') + (m.error ? ' · ' + esc(m.error) : '') + '</p>').join('') + '</details>' : '');
+      return { html, locs: { arrive: s.arrive_location, finish: s.finish_location, locfin: s.location_finished_location, locdep: s.location_departed_location } };
+    };
+    const depotPane = () => ({ html: '<div class="dt-summary ' + (r.operational_status || '') + '"><div><span>Hoja</span><b>' + esc(ST[r.operational_status] || r.operational_status) + '</b></div><div><span>Vehículo</span><b>' + esc([r.vehicle_name, r.vehicle_plate].filter(Boolean).join(' · ') || '—') + '</b></div>' +
+        '<div><span>Kilómetros</span><b>' + (r.km_start ?? '—') + ' → ' + (r.km_end ?? '—') + (r.km_start != null && r.km_end != null ? ' · ' + fmt(r.km_end - r.km_start) + ' km' : '') + '</b></div></div>' +
+      '<ol class="dt-timeline">' + evItem('start', 'SALIDA DEL DEPÓSITO (km ' + (r.km_start ?? '—') + ')', r.started_at, r.start_location) + evItem('depot', 'REGRESO A DEPÓSITO DIAMANTE', r.depot_arrived_at, r.depot_location) +
+        evItem('close', 'CIERRE DE LA HOJA (km ' + (r.km_end ?? '—') + ')', r.completed_at, null) + '</ol>', locs: { start: r.start_location, depot: r.depot_location } });
+    if (canTrace) box.querySelectorAll('[data-delivery-detail]').forEach(btn => btn.onclick = async () => {
+      const row = btn.closest('tr'), traceBox = box.querySelector('#deliveryTraceBox'), sel = stops.find(x => x.id === row.dataset.stop);
+      const tabs = [{ k: sel.id, l: sel.stop_type === 'UBICACION_INTERNA' ? String(sel.client_name || 'UBICACIÓN').toUpperCase() : sel.stop_type === 'TAREA' ? 'TAREA' : 'ENTREGA' , st: sel }]
+        .concat(stops.filter(x => x.stop_type === 'UBICACION_INTERNA' && x.id !== sel.id).map(x => ({ k: x.id, l: String(x.client_name || 'UBICACIÓN').toUpperCase(), st: x })))
+        .concat(isDepotRoute ? [{ k: 'DEPOT', l: 'DEPÓSITO DIAMANTE' }] : []);
       btn.disabled = true; btn.textContent = 'CARGANDO…';
-      try {
-        const tr = await api.deliveryTrace(row.dataset.stop), s = tr.stop || {}, ev = tr.evidence, rc = tr.receipt, mails = tr.emails || [];
-        const sig = ev && signatureSrc(ev.signature_png);
-        traceBox.innerHTML = '<section class="delivery-trace-panel"><div class="delivery-trace-head"><div><h3>' + (s.stop_type === 'UBICACION_INTERNA' ? 'TRAZABILIDAD DE TRASLADO INTERNO' : s.stop_type === 'TAREA' ? 'TRAZABILIDAD DE TAREA' : 'TRAZABILIDAD DE ENTREGA') + '</h3><p>' + esc(s.client_name || '') + ' · ' + esc((s.order_numbers || []).join(' + ') || 'Sin pedido') + '</p></div><button class="btn soft" type="button" data-close-trace>CERRAR</button></div>' +
-          '<div class="delivery-trace-grid">' +
-            '<div><span>Resultado</span><b>' + esc(String(s.outcome || 'PENDIENTE').replaceAll('_',' ')) + '</b></div>' +
-            '<div><span>Realizado por</span><b>' + esc(tr.outcome_by_name || '—') + '</b></div>' +
-            '<div><span>Llegada</span><b>' + (s.arrived_at ? dt(s.arrived_at) : 'Sin registro') + '</b></div>' +
-            '<div><span>Entrega / cierre</span><b>' + (s.outcome_at ? dt(s.outcome_at) : 'Sin registro') + '</b></div>' +
-            '<div class="wide"><span>Ubicación al llegar</span><b data-geo="arrive">' + geoLabelFallback(s.arrive_location) + '</b></div>' +
-            '<div class="wide"><span>Ubicación al finalizar</span><b data-geo="finish">' + geoLabelFallback(s.finish_location) + '</b></div>' +
-            (s.location_warning ? '<div class="wide warning"><span>Alerta de ubicación</span><b>' + esc(s.location_warning) + '</b></div>' : '') +
-            (s.outcome_note || s.outcome_reason ? '<div class="wide"><span>Observación / motivo</span><b>' + esc(s.outcome_note || s.outcome_reason) + '</b></div>' : '') +
-            (s.collection_status && s.collection_status !== 'PENDIENTE' ? '<div><span>Cobranza</span><b>' + esc(s.collection_status.replaceAll('_',' ')) + '</b></div><div><span>Importe</span><b>' + (s.collected_amount != null ? fmtMoney(s.collected_amount) : '—') + '</b></div><div><span>Medio</span><b>' + esc(s.payment_mode || '—') + '</b></div>' : '') +
-          '</div>' +
-          '<div class="delivery-evidence"><div><h4>' + (s.stop_type === 'UBICACION_INTERNA' ? 'RECEPCIÓN INTERNA DE TRASLADO' : s.stop_type === 'TAREA' ? 'TAREA' : 'RECEPCIÓN') + '</h4>' +
-          (s.stop_type === 'UBICACION_INTERNA' ? '<p><b>Ubicación:</b> ' + esc(s.client_name || '') + ' · ' + esc(s.address || '') + '</p><p><b>Pedidos trasladados:</b> ' + esc((s.order_numbers || []).join(', ') || '—') + '</p><p><i>Traslado entre sucursales: no es entrega al cliente.</i></p>' : '') + '<p><b>Recibió:</b> ' + esc(ev && ev.receiver_name || 'Sin evidencia registrada') + '</p>' + (ev && ev.created_at ? '<p><b>Registrada:</b> ' + dt(ev.created_at) + '</p>' : '') + '</div>' +
-          '<div class="signature-card"><h4>FIRMA</h4>' + (sig ? '<img src="' + sig + '" alt="Firma de recepción">' : '<p>Sin firma disponible.</p>') + '</div></div>' +
-          (rc ? '<div class="receipt-card"><h4>RECIBIDO CONFORME</h4><p><b>Comprobante:</b> ' + esc(rc.receipt_number || '—') + ' · <b>Generado:</b> ' + (rc.generated_at ? dt(rc.generated_at) : '—') + '</p><p><b>Email:</b> ' + esc(rc.recipient_email || '—') + '</p></div>' : '') +
-          (mails.length ? '<div class="email-trace"><h4>EMAILS DE LA ENTREGA</h4>' + mails.map(m => '<div><b>' + esc(m.kind || '') + '</b><span>' + esc(m.status || '') + (m.sent_at ? ' · ' + dt(m.sent_at) : '') + (m.error ? ' · ' + esc(m.error) : '') + '</span></div>').join('') + '</div>' : '') +
-        '</section>';
-        const geoArrive = traceBox.querySelector('[data-geo="arrive"]'), geoFinish = traceBox.querySelector('[data-geo="finish"]');
-        if (geoArrive && s.arrive_location && s.arrive_location.lat != null) reversePlace(s.arrive_location).then(v => { if (geoArrive.isConnected) geoArrive.textContent = v; });
-        if (geoFinish && s.finish_location && s.finish_location.lat != null) reversePlace(s.finish_location).then(v => { if (geoFinish.isConnected) geoFinish.textContent = v; });
-        const grid = traceBox.querySelector('.delivery-trace-grid');
-        if (grid && ((s.arrive_location && s.arrive_location.lat != null) || (s.finish_location && s.finish_location.lat != null))) {
-          const at = document.createElement('p'); at.className = 'geo-attribution'; at.textContent = 'Ubicación aproximada · © OpenStreetMap contributors'; grid.after(at);
-        }
-        traceBox.querySelector('[data-close-trace]').onclick = () => { traceBox.innerHTML = ''; };
-        traceBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      } catch (e) { traceBox.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; }
-      finally { btn.disabled = false; btn.textContent = 'VER ENTREGA'; }
+      traceBox.innerHTML = '<section class="delivery-trace-panel dt"><header class="dt-head"><div><h3>' + (sel.stop_type === 'UBICACION_INTERNA' ? 'TRAZABILIDAD DE TRASLADO INTERNO' : sel.stop_type === 'TAREA' ? 'TRAZABILIDAD DE TAREA' : 'TRAZABILIDAD DE ENTREGA') + '</h3>' +
+        '<p>HOJA ' + esc(r.number) + ' · ' + esc(r.carrier_name || r.carrier_id) + ' · Responsable: ' + esc(r.responsable_name || '—') + '</p></div><span class="dt-ro">SOLO LECTURA</span></header>' +
+        '<div class="dt-tabs" role="tablist">' + tabs.map((t, i) => '<button type="button" role="tab" data-dtab="' + t.k + '" aria-selected="' + (i === 0) + '">' + esc(t.l) + '</button>').join('') + '</div><div class="dt-pane" id="dtPane"></div>' +
+        '<p class="geo-attribution">Ubicación aproximada · © OpenStreetMap contributors · Los eventos registrados sin conexión aparecen cuando el celular sincroniza.</p></section>';
+      const pane = traceBox.querySelector('#dtPane');
+      const open = async k => { traceBox.querySelectorAll('[data-dtab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.dtab === k)));
+        pane.innerHTML = '<p class="rp-note">Cargando…</p>';
+        try { const t = tabs.find(x => x.k === k), res = t.k === 'DEPOT' ? depotPane() : await stopPane(t.st); pane.innerHTML = res.html; attach(pane, res.locs); geoFill(pane); }
+        catch (e) { pane.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; } };
+      traceBox.querySelectorAll('[data-dtab]').forEach(b => b.onclick = () => open(b.dataset.dtab));
+      await open(tabs[0].k); btn.disabled = false; btn.textContent = 'VER ENTREGA';
+      traceBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
     box.querySelectorAll('[data-pdf]').forEach(b => b.onclick = async () => { try { const v = +b.closest('tr').dataset.v, blob = await api.downloadRoutePdf(id, v); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Hoja_' + r.number + '_v' + v + '.pdf'; document.body.appendChild(a); a.click(); a.remove(); } catch (e) { again({ err: true, text: e.message }); } });
     box.querySelectorAll('[data-retry]').forEach(b => b.onclick = () => run(async () => {
@@ -304,17 +387,19 @@ export async function openHistory(api, me) {
   w.querySelector('#hfGo').onclick = () => {
     const v = id => w.querySelector(id).value.trim();
     f = { limit: 25, offset: 0, number: v('#hfNumber'), order: v('#hfOrder'), client: v('#hfClient'), responsable: v('#hfResp'), carrier: v('#hfCarrier'), status: v('#hfStatus'), approval: v('#hfApproval'), zone: v('#hfZone'), from: v('#hfFrom'), to: v('#hfTo') };
-    list();
+    saveSt({ f, view: 'list', rid: null }); show('list'); list();
   };
   await list();
+  if (st0.view === 'detail' && st0.rid) detail(st0.rid);   // volver a la vista: se reabre la hoja que estaba abierta
 }
 
 // ================= CONFIGURACIÓN =================
 const SECTIONS = [['transportistas', 'A. TRANSPORTISTAS'], ['plantillas', 'B. PLANTILLAS / COLUMNAS'], ['vehiculos', 'C. VEHÍCULOS Y MANTENIMIENTO'], ['financieras', 'D. REGLAS FINANCIERAS'], ['asignacion', 'D2. REGLAS DE ASIGNACIÓN'], ['financiacion', 'D3. FINANCIACIÓN PROPIA'],
-  ['emails', 'E. EMAILS Y NOTIFICACIONES'], ['pdf', 'F. PDF Y ENVÍOS'], ['ubicaciones', 'G. UBICACIONES CLIENTES'], ['ubicaciones_interno', 'G2. UBICACIONES TRANSPORTISTA INTERNO'], ['backup', 'H. BACKUP'], ['general', 'I. PARÁMETROS GENERALES']];
+  ['emails', 'E. EMAILS Y NOTIFICACIONES'], ['pdf', 'F. PDF Y ENVÍOS'], ['ubicaciones', 'G. UBICACIONES CLIENTES'], ['ubicaciones_interno', 'G2. UBICACIONES TRANSPORTISTA INTERNO'], ['backup', 'H. BACKUP'], ['general', 'I. PARÁMETROS GENERALES'], ['emails_clientes', 'J. EMAILS DE CLIENTES']];
 export async function openConfig(api, me, section, opts) {
   const only = opts && opts.only;   // acceso por un permiso puntual (carriers.manage): solo esas secciones
   const allowed = SECTIONS.filter(([k]) => !only || only.includes(k)).filter(([k]) => {
+    if (k === 'emails_clientes') return me.role === 'ADMIN';   // V4.23: solo el Administrador General (no el permiso de configuración)
     if (hasPerm(me, 'settings.manage')) return true;
     if (k === 'transportistas') return hasPerm(me, 'carriers.manage');
     if (k === 'plantillas') return hasPerm(me, 'columns.manage_defaults') || hasPerm(me, 'columns.manage_templates');
@@ -335,7 +420,46 @@ export async function openConfig(api, me, section, opts) {
   w.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => show(b.dataset.sec));
   await show(cur);
 }
+// V4.23 · ExcelJS (ya incluido en la app) para la plantilla y la importación del padrón de emails
+const loadExcelJS = () => window.ExcelJS ? Promise.resolve(window.ExcelJS) : new Promise((ok, ko) => { const s = document.createElement('script'); s.src = '/legacy/exceljs.min.js'; s.onload = () => ok(window.ExcelJS); s.onerror = () => ko(new Error('No se pudo cargar el lector de Excel.')); document.head.appendChild(s); });
+const normH = v => String(v == null ? '' : (v.text || v.result || v)).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+const EST = { NUEVO: 'Nuevo', ACTUALIZAR: 'A actualizar', SIN_CAMBIOS: 'Sin cambios', DUPLICADO: 'Duplicado', EMAIL_INVALIDO: 'Email inválido', CUIT_INVALIDO: 'CUIT inválido', DESCONOCIDO: 'Cliente no identificado', SIN_EMAIL: 'Sin email (no se borra)' };
 const CFG = {
+  // V4.23 · Padrón de EMAILS DE CLIENTES por CUIT validado (los Excel de origen no traen un código de cliente propio)
+  async emails_clientes(api, me, sec, again) {
+    sec.innerHTML = '<h2><span class="n">J</span>EMAILS DE CLIENTES</h2><p class="rp-note">Identificación por <b>CUIT</b> (con dígito verificador): los archivos del constructor no traen un código de cliente propio y no se asocia por nombre. Celdas vacías no borran emails; no se crean clientes.</p>' +
+      '<div class="uact"><button class="btn soft" type="button" id="ceTpl">DESCARGAR PLANTILLA EXCEL</button><label class="btn dark" for="ceFile">IMPORTAR EMAILS DESDE EXCEL</label><input type="file" id="ceFile" accept=".xlsx" hidden></div>' +
+      '<div id="cePrev"></div><h3 class="dsub">BUSCAR / EDITAR</h3><div class="ufilters"><input id="ceQ" placeholder="CUIT, nombre o email"><button class="btn soft" type="button" id="ceGo">BUSCAR</button></div><div id="ceList"></div>' +
+      '<h3 class="dsub">AGREGAR O CAMBIAR</h3><div class="ufilters"><input id="ceCuit" placeholder="CUIT (11 dígitos)" inputmode="numeric"><input id="ceName" placeholder="Nombre o razón social"><input id="ceMail" placeholder="Email"><button class="btn dark" type="button" id="ceSave">GUARDAR</button></div>';
+    sec.querySelector('#ceTpl').onclick = async () => { const X = await loadExcelJS(), wb = new X.Workbook(), ws = wb.addWorksheet('Emails de clientes');
+      ws.addRow(['CUIT', 'Nombre o razón social', 'Email']); ws.getRow(1).font = { bold: true }; ws.columns = [{ width: 18 }, { width: 40 }, { width: 36 }];
+      const buf = await wb.xlsx.writeBuffer(), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); a.download = 'plantilla_emails_clientes.xlsx'; a.click(); };
+    sec.querySelector('#ceFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; const box = sec.querySelector('#cePrev');
+      try { const X = await loadExcelJS(), wb = new X.Workbook(); await wb.xlsx.load(await f.arrayBuffer()); const ws = wb.worksheets[0]; if (!ws) throw new Error('El archivo no tiene hojas.');
+        const head = ws.getRow(1).values.map(normH), col = names => head.findIndex(h => names.includes(h));
+        const cC = col(['cuit', 'cuitdni']), cN = col(['nombreorazonsocial', 'razonsocial', 'nombre', 'cliente']), cE = col(['email', 'mail', 'correo', 'correoelectronico']);
+        if (cC < 0 || cE < 0) throw new Error('Faltan columnas obligatorias: ' + [cC < 0 ? 'CUIT' : null, cE < 0 ? 'Email' : null].filter(Boolean).join(' y ') + '. Usá la plantilla.');
+        const rows = []; ws.eachRow((r, i) => { if (i === 1) return; const v = r.values, t = x => String(x == null ? '' : (x.text || x.result || x)).trim();
+          if (!t(v[cC]) && !t(v[cE]) && !(cN >= 0 && t(v[cN]))) return; rows.push({ cuit: t(v[cC]), name: cN >= 0 ? t(v[cN]) : '', email: t(v[cE]) }); });
+        if (!rows.length) throw new Error('El archivo no tiene filas para importar.');
+        const pv = await api.clientEmailsPreview(rows), rs = pv.resumen || {};
+        box.innerHTML = '<div class="card"><b>VISTA PREVIA · ' + esc(f.name) + '</b><p>Total de filas: <b>' + rows.length + '</b> · ' + Object.keys(EST).filter(k => rs[k]).map(k => EST[k] + ': <b>' + rs[k] + '</b>').join(' · ') + '</p>' +
+          '<div class="utable-wrap"><table class="utable" id="cePrevT"><thead><tr><th>CUIT</th><th>NOMBRE</th><th>EMAIL</th><th>ACTUAL</th><th>RESULTADO</th></tr></thead><tbody>' +
+          pv.filas.slice(0, 300).map(x => '<tr data-est="' + x.estado + '"><td>' + esc(x.cuit) + '</td><td>' + esc(x.name || '') + '</td><td>' + esc(x.email || '') + '</td><td>' + esc(x.actual || '') + '</td><td>' + esc(EST[x.estado] || x.estado) + '</td></tr>').join('') + '</tbody></table></div>' +
+          '<label class="chk"><input type="radio" name="ceMode" value="CONSERVAR" checked> Conservar el email existente</label><label class="chk"><input type="radio" name="ceMode" value="REEMPLAZAR"> Reemplazar el email existente por el del Excel</label>' +
+          '<div class="uact"><button class="btn dark" type="button" id="ceApply">CONFIRMAR IMPORTACIÓN</button><button class="btn soft" type="button" id="ceCancel">CANCELAR</button></div></div>';
+        box.querySelector('#ceCancel').onclick = () => { box.innerHTML = ''; e.target.value = ''; };
+        box.querySelector('#ceApply').onclick = async () => { const mode = box.querySelector('[name="ceMode"]:checked').value;
+          try { const r = await api.clientEmailsApply(rows, mode, f.name); again({ text: 'Importación aplicada: ' + (r.insertados || 0) + ' nuevos, ' + (r.actualizados || 0) + ' actualizados. Los no identificados, duplicados e inválidos no se importaron.' }); } catch (er) { again({ err: true, text: er.message }); } };
+      } catch (er) { box.innerHTML = '<div class="up-msg err" id="ceErr">' + esc(er.message) + '</div>'; e.target.value = ''; } };
+    const list = async () => { const q = sec.querySelector('#ceQ').value.trim(); let rows = []; try { rows = await api.clientEmailsList(q); } catch (e) { rows = []; }
+      sec.querySelector('#ceList').innerHTML = '<div class="utable-wrap"><table class="utable" id="ceT"><thead><tr><th>CUIT</th><th>NOMBRE</th><th>EMAIL</th><th>ÚLTIMA ACTUALIZACIÓN</th><th></th></tr></thead><tbody>' +
+        (rows.length ? rows.map(x => '<tr data-cuit="' + esc(x.cuit) + '"><td>' + esc(x.cuit) + '</td><td>' + esc(x.client_name || '') + '</td><td>' + esc(x.email) + '</td><td>' + (x.updated_at ? new Date(x.updated_at).toLocaleString('es-AR') : '') + ' · ' + esc(x.source || '') + '</td><td><button class="btn soft" type="button" data-ceedit>EDITAR</button></td></tr>').join('') : '<tr><td colspan="5">Sin resultados.</td></tr>') + '</tbody></table></div>';
+      sec.querySelectorAll('[data-ceedit]').forEach(b => b.onclick = () => { const x = rows.find(y => y.cuit === b.closest('tr').dataset.cuit); sec.querySelector('#ceCuit').value = x.cuit; sec.querySelector('#ceName').value = x.client_name || ''; sec.querySelector('#ceMail').value = x.email; sec.querySelector('#ceMail').focus(); }); };
+    sec.querySelector('#ceGo').onclick = list;
+    sec.querySelector('#ceSave').onclick = () => run(() => api.clientEmailUpsert(sec.querySelector('#ceCuit').value, sec.querySelector('#ceName').value, sec.querySelector('#ceMail').value), 'Email del cliente guardado.', again);
+    await list();
+  },
   async transportistas(api, me, sec, again) {
     const cs = await api.listCarriers();
     const canManage = hasPerm(me, 'settings.manage') || hasPerm(me, 'carriers.manage');
@@ -394,10 +518,15 @@ const CFG = {
     if (hasPerm(me, 'vehicle_mileage.view') || hasPerm(me, 'vehicle_mileage.rules_manage')) { const kb = document.createElement('div'); kb.className = 'card kmrules-in-config'; kb.id = 'kmRules'; await mileageBlock(api, me, kb, again); sec.after(kb); }
     const [vs, allUsers, ns] = await Promise.all([api.vehicleStatus(), api.listUsers().catch(() => []), api.notificationSettings().catch(() => ({}))]);
     const users = allUsers.filter(u => u.role === 'TRANSPORTISTA_INTERNO' && u.status === 'ACTIVO');
-    const card = v => '<div class="vcard' + (v.service_due ? ' due' : '') + (v.active === false ? ' off' : '') + '" data-vid="' + v.id + '"><b>' + esc(v.name) + ' · ' + esc(v.plate) + '</b>' + (v.active === false ? ' <em>(inactivo)</em>' : '') +
-      '<div>Conductor habitual: ' + esc(v.habitual_driver_name || '—') + '</div><div>KM actual: <b>' + fmt(v.current_km) + '</b></div><div>Próximo service: <b>' + fmt(v.next_service_km) + '</b> (cada ' + fmt(v.service_interval_km) + ' km)</div>' +
-      '<div>' + (v.service_due ? '<span class="due-tag">⚠ SERVICE REQUERIDO</span>' : 'Faltan: <b>' + fmt(v.km_to_service) + ' km</b>') + '</div>' +
-      '<div class="uact"><button class="btn soft" type="button" data-edit>EDITAR</button><button class="btn soft" type="button" data-svc>REGISTRAR SERVICE REALIZADO</button><button class="btn soft" type="button" data-off>' + (v.active === false ? 'ACTIVAR' : 'DESACTIVAR') + '</button></div><div class="vform" hidden></div></div>';
+    // V4.22: próximo = último service + intervalo DEL VEHÍCULO; faltan = próximo − km actual; alerta de próximo / vencido / intervalo a revisar
+    const card = v => { const si = serviceInfo(v, ns.service_warning_km ?? 1000);
+      return '<div class="vcard' + (si.due ? ' due' : si.soon ? ' soon' : '') + (v.active === false ? ' off' : '') + '" data-vid="' + v.id + '" data-svcstate="' + si.state + '"><b>' + esc(v.name) + ' · ' + esc(v.plate) + '</b>' + (v.active === false ? ' <em>(inactivo)</em>' : '') +
+      '<div>Conductor habitual: ' + esc(v.habitual_driver_name || '—') + '</div><div>KM actual: <b>' + fmt(si.current) + '</b></div><div>Último service: <b>' + fmt(si.last) + ' km</b></div>' +
+      '<div>Intervalo de service: <b>cada ' + fmt(si.interval) + ' km</b></div><div>Próximo service: <b data-next>' + fmt(si.next) + ' km</b></div>' +
+      '<div data-left>' + (si.suspicious ? '<span class="due-tag">⚠ REVISÁ EL INTERVALO DE SERVICE: ' + fmt(si.interval) + ' km no es un intervalo válido (¿se cargó el kilometraje?). Tocá EDITAR.</span>'
+        : si.due ? '<span class="due-tag">⚠ SERVICE VENCIDO hace ' + fmt(-si.left) + ' km</span>'
+        : si.soon ? '<span class="soon-tag">⚠ SERVICE PRÓXIMO · faltan ' + fmt(si.left) + ' km</span>' : 'Faltan: <b>' + fmt(si.left) + ' km</b>') + '</div>' +
+      '<div class="uact"><button class="btn soft" type="button" data-edit>EDITAR</button><button class="btn soft" type="button" data-svc>REGISTRAR SERVICE REALIZADO</button><button class="btn soft" type="button" data-off>' + (v.active === false ? 'ACTIVAR' : 'DESACTIVAR') + '</button></div><div class="vform" hidden></div></div>'; };
     sec.innerHTML = '<h2><span class="n">C</span>VEHÍCULOS Y MANTENIMIENTO</h2><div class="vgrid" id="vehList">' + (vs.map(card).join('') || '<p class="rp-empty">Sin vehículos.</p>') + '</div>' +
       '<h3 class="dsub">ALERTAS DE SERVICE POR EMAIL</h3>' +
       '<div class="service-alert-box">' +
@@ -463,12 +592,17 @@ const CFG = {
         await api.sendServiceAlerts().catch(() => null);
       }, 'Service registrado. Se recalculó el próximo service y comenzó un nuevo ciclo.', again);
     }
-    sec.querySelector('#nvSave').onclick = () => run(() => api.saveVehicle({ name: sec.querySelector('#nvName').value, plate: sec.querySelector('#nvPlate').value, habitual_driver_id: sec.querySelector('#nvDriver').value || null,
-      current_km: num(sec.querySelector('#nvKm').value) || 0, last_service_km: num(sec.querySelector('#nvLast').value.trim()), service_interval_km: num(sec.querySelector('#nvInt').value) || 10000 }), 'Vehículo agregado.', again);
+    sec.querySelector('#nvSave').onclick = () => { const ie = intervalError(sec.querySelector('#nvInt').value); if (ie) return again({ err: true, text: ie }); run(() => api.saveVehicle({ name: sec.querySelector('#nvName').value, plate: sec.querySelector('#nvPlate').value, habitual_driver_id: sec.querySelector('#nvDriver').value || null,
+      current_km: num(sec.querySelector('#nvKm').value) || 0, last_service_km: num(sec.querySelector('#nvLast').value.trim()), service_interval_km: num(sec.querySelector('#nvInt').value) || 10000 }), 'Vehículo agregado.', again); };
     sec.querySelectorAll('.vcard').forEach(c => {
       const v = vs.find(x => x.id === c.dataset.vid), form = c.querySelector('.vform');
-      c.querySelector('[data-edit]').onclick = () => { form.hidden = false; form.innerHTML = '<input class="ed" data-e="name" value="' + esc(v.name) + '"><input class="ed" data-e="plate" value="' + esc(v.plate) + '"><select data-e="driver"><option value="">Conductor habitual</option>' + users.map(u => '<option value="' + u.id + '"' + (u.id === v.habitual_driver_id ? ' selected' : '') + '>' + esc(u.full_name) + '</option>').join('') + '</select><input class="ed" data-e="int" value="' + v.service_interval_km + '"><button class="btn dark" type="button" data-esave>GUARDAR</button>';
-        form.querySelector('[data-esave]').onclick = () => run(() => api.saveVehicle({ id: v.id, name: form.querySelector('[data-e="name"]').value, plate: form.querySelector('[data-e="plate"]').value, habitual_driver_id: form.querySelector('[data-e="driver"]').value || null, service_interval_km: num(form.querySelector('[data-e="int"]').value), active: v.active !== false }), 'Vehículo actualizado.', again); };
+      c.querySelector('[data-edit]').onclick = () => { form.hidden = false; form.innerHTML = '<label class="rp-lbl">Nombre / modelo <input class="ed" data-e="name" value="' + esc(v.name) + '"></label><label class="rp-lbl">Patente <input class="ed" data-e="plate" value="' + esc(v.plate) + '"></label>' +
+          '<label class="rp-lbl">Conductor habitual <select data-e="driver"><option value="">—</option>' + users.map(u => '<option value="' + u.id + '"' + (u.id === v.habitual_driver_id ? ' selected' : '') + '>' + esc(u.full_name) + '</option>').join('') + '</select></label>' +
+          // V4.22: el intervalo es CADA CUÁNTOS KM se hace el service (no el kilometraje del vehículo); antes este campo no tenía rótulo
+          '<label class="rp-lbl">Intervalo de service (km) · cada cuántos km se hace <input class="ed" data-e="int" inputmode="numeric" placeholder="p. ej. 10000" value="' + v.service_interval_km + '"></label>' +
+          '<small class="rp-note">El kilometraje del vehículo se corrige en «CORRECCIÓN DE KM», no acá.</small><button class="btn dark" type="button" data-esave>GUARDAR</button>';
+        form.querySelector('[data-esave]').onclick = () => { const ie = intervalError(form.querySelector('[data-e="int"]').value); if (ie) return again({ err: true, text: ie });
+          run(() => api.saveVehicle({ id: v.id, name: form.querySelector('[data-e="name"]').value, plate: form.querySelector('[data-e="plate"]').value, habitual_driver_id: form.querySelector('[data-e="driver"]').value || null, service_interval_km: num(form.querySelector('[data-e="int"]').value), active: v.active !== false }), 'Vehículo actualizado.', again); }; };
       c.querySelector('[data-svc]').onclick = () => { form.hidden = false; form.innerHTML = '<input class="ed" type="date" data-s="date" value="' + new Date().toISOString().slice(0, 10) + '"><input class="ed" data-s="km" inputmode="numeric" placeholder="KM del service" value="' + v.current_km + '"><input class="ed" data-s="note" placeholder="Observación"><button class="btn dark" type="button" data-ssave>REGISTRAR</button>';
         form.querySelector('[data-ssave]').onclick = () => run(() => api.registerServiceDone(v.id, num(form.querySelector('[data-s="km"]').value), form.querySelector('[data-s="date"]').value, form.querySelector('[data-s="note"]').value), 'Service registrado: comienza un nuevo ciclo.', again); };
       c.querySelector('[data-off]').onclick = () => run(() => api.saveVehicle({ id: v.id, name: v.name, plate: v.plate, habitual_driver_id: v.habitual_driver_id, service_interval_km: v.service_interval_km, active: v.active === false }), v.active === false ? 'Vehículo activado.' : 'Vehículo desactivado.', again);
@@ -570,13 +704,28 @@ const CFG = {
       '<label class="chk"><input type="checkbox" id="pcDl"' + (c.pdf_auto_download ? ' checked' : '') + '> DESCARGAR PDF AUTOMÁTICAMENTE AL PUBLICAR</label>' +
       '<p class="rp-note">Al publicar una hoja, OK Despacho genera y guarda el PDF. Si esta opción está activa, también intenta descargarlo en este dispositivo. Cada versión se guarda aparte (v1, v2…).</p>' +
       '<label class="chk"><input type="checkbox" id="seOn"' + (ns.sheet_email_enabled ? ' checked' : '') + '> Enviar por email los PDF de las hojas del día</label><label>Horario (Mendoza) <input id="seTime" value="' + esc(ns.sheet_email_time || '18:00') + '"></label>' +
-      '<label>Destinatarios <input id="seTo" value="' + esc((ns.sheet_email_recipients || []).join(', ')) + '"></label></div><button class="btn dark" type="button" id="pcSave">GUARDAR</button>';
+      '<label>Destinatarios <input id="seTo" value="' + esc((ns.sheet_email_recipients || []).join(', ')) + '"></label>' +
+      '<label>Enviar mediante <select id="seVia"><option value="GMAIL"' + (ns.sheet_email_via === 'GMAIL' ? ' selected' : '') + '>Gmail conectado en Comunicaciones</option>' +
+      '<option value="RESEND"' + (ns.sheet_email_via !== 'GMAIL' ? ' selected' : '') + '>Resend (servicio de correo actual)</option></select></label>' +
+      '<p class="rp-note" id="seViaNote"></p></div><button class="btn dark" type="button" id="pcSave">GUARDAR</button>';
+    // estado del canal Gmail: la cuenta y el programador son los de Comunicaciones
+    const viaNote = async () => {
+      const box = sec.querySelector('#seViaNote'); if (!box) return;
+      if (sec.querySelector('#seVia').value !== 'GMAIL') { box.className = 'rp-note'; box.textContent = 'Los PDF se envían por Resend, como hasta ahora.'; return; }
+      let g = null; try { g = api.commsGmailStatus ? await api.commsGmailStatus() : null; } catch (e) { g = null; }
+      const ok = g && g.connected && !g.needs_reconnect;
+      box.className = ok ? 'rp-note' : 'msg warn';
+      box.textContent = !g ? 'Se envía desde la cuenta Gmail conectada en Comunicaciones (no se pudo consultar su estado con tus permisos).'
+        : ok ? 'Se envía desde ' + (g.email || 'la cuenta Gmail conectada') + ' (Comunicaciones). Un correo por hoja y destinatario; historial en Comunicaciones → «Correo diario de hojas (automático)».'
+        : 'Gmail no está conectado o requiere reconexión: mientras tanto NO se envía. Conectalo en Comunicaciones → Conexión Gmail.';
+    };
+    sec.querySelector('#seVia').onchange = viaNote; viaNote();
     sec.querySelector('#pcSave').onclick = () => run(async () => {
       const to = sec.querySelector('#seTo').value.split(',').map(x => x.trim()).filter(Boolean), time = sec.querySelector('#seTime').value.trim();
       if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)) throw new Error('Horario inválido (HH:MM).');
       if (to.some(e => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))) throw new Error('Hay un email inválido.');
       await api.setDispatchSettings(sec.querySelector('#pcGen').checked, sec.querySelector('#pcDl').checked);
-      await api.setNotificationSettings({ sheet_email_enabled: sec.querySelector('#seOn').checked, sheet_email_time: time, sheet_email_recipients: to });
+      await api.setNotificationSettings({ sheet_email_enabled: sec.querySelector('#seOn').checked, sheet_email_time: time, sheet_email_recipients: to, sheet_email_via: sec.querySelector('#seVia').value });
     }, 'Configuración de PDF y envíos guardada.', again);
   },
   async ubicaciones(api, me, sec, again) {

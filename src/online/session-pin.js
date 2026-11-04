@@ -39,9 +39,24 @@ function due(me) {
   if (p.mode === 'DAILY') return l.day !== today();
   return Date.now() - Number(l.at || 0) >= p.hours * 3600000;
 }
+const LOCK_BG = '<div class="pin-lock-bg" aria-hidden="true"><svg viewBox="0 0 1440 1080" preserveAspectRatio="xMidYMid slice">' +
+  '<defs><linearGradient id="plg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e9f0f3"/></linearGradient></defs>' +
+  '<rect width="1440" height="1080" fill="url(#plg)"/>' +
+  '<g stroke="#dfe8ec" stroke-width="2" fill="none"><path d="M0 820 L420 600 L760 760 L1440 420"/><path d="M180 1080 L560 520 L900 300 L1220 0"/><path d="M0 300 L380 420 L700 200 L1100 360 L1440 260"/><path d="M640 1080 L820 820 L1440 900"/></g>' +
+  '<g fill="#d5e1e6"><rect x="30" y="420" width="34" height="90"/><rect x="72" y="460" width="28" height="50"/><rect x="108" y="400" width="30" height="110"/><rect x="146" y="450" width="40" height="60"/><rect x="194" y="470" width="24" height="40"/></g>' +
+  '<path d="M0 0 Q300 120 420 -40" stroke="#bdf3f8" stroke-width="70" fill="none" opacity=".6"/><path d="M1440 1080 Q1100 930 900 1100" stroke="#bdf3f8" stroke-width="80" fill="none" opacity=".6"/>' +
+  '<g stroke="#10d7e7" stroke-width="4" stroke-dasharray="12 12" fill="none"><path d="M120 780 C260 700 140 600 300 560"/><path d="M1300 200 C1180 260 1320 360 1200 440 C1120 500 1260 560 1180 600"/></g>' +
+  '<g fill="#10d7e7"><path d="M120 760 c-26 0-44 20-44 44 0 32 44 70 44 70s44-38 44-70c0-24-18-44-44-44z"/><path d="M1320 150 c-22 0-38 17-38 38 0 28 38 60 38 60s38-32 38-60c0-21-16-38-38-38z"/></g>' +
+  '<g fill="#fff"><circle cx="120" cy="804" r="15"/><circle cx="1320" cy="188" r="13"/></g>' +
+  '<g fill="none" stroke="#9fb3bc" stroke-width="5" stroke-linejoin="round"><path d="M1240 470h110v70h-110z M1350 490h40l26 30v20h-66z"/><circle cx="1275" cy="548" r="14"/><circle cx="1380" cy="548" r="14"/>' +
+  '<path d="M1230 780 l110-60 110 60 v80h-220z M1290 860v-60h100v60"/><path d="M1300 820h80 M1300 840h80"/></g></svg>' +
+  '</div><div class="pin-lock-brand"><img src="/brand/ok-accesorios-negro.png" alt="OK Accesorios"><span>DESPACHO ONLINE</span></div>';   // marca EN EL FLUJO, arriba del recuadro
 function modalBase(me, title, text) {
   const m=document.createElement('div'); m.className='umodal'; m.id='pinGate';
   m.style.zIndex='999999';
+  // V4.24 · SOLO "SESIÓN BLOQUEADA": fondo de logística (blanco/gris, rutas y ubicaciones celestes, logo oficial en negro). El PIN, los botones,
+  // la lógica y la autenticación NO cambian; "CONFIGURÁ TU PIN", el inicio de sesión y la recuperación de contraseña tampoco.
+  const locked = title === 'SESIÓN BLOQUEADA';
   m.innerHTML='<div class="udialog" role="dialog" aria-modal="true" style="max-width:430px"><header><b>'+title+'</b></header><div class="body">'+
     '<p style="margin:0 0 10px">'+text+'</p>'+
     '<p style="margin:0 0 14px;font-size:12px;color:var(--muted)">Usuario: <b>'+String(me.full_name||'')+'</b></p>'+
@@ -49,6 +64,7 @@ function modalBase(me, title, text) {
     '<label>PIN de 6 dígitos<input id="pinA" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" style="font-size:24px;letter-spacing:8px;text-align:center"></label>'+
     '<div id="pinConfirmWrap" hidden><label>Repetir PIN<input id="pinB" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" style="font-size:24px;letter-spacing:8px;text-align:center"></label></div>'+
     '</div><footer><button class="btn ghost" type="button" id="pinPassword">INGRESAR CON CONTRASEÑA</button><span style="flex:1"></span><button class="btn go" type="button" id="pinGo">CONTINUAR</button></footer></div>';
+  if (locked) { m.classList.add('pin-lock'); m.insertAdjacentHTML('afterbegin', LOCK_BG); }   // DESPUÉS de armar el modal (si no, se borra)
   document.body.appendChild(m);
   setTimeout(()=>m.querySelector('#pinA')?.focus(),0);
   return m;

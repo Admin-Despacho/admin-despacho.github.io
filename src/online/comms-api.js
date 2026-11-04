@@ -139,6 +139,7 @@ export const DemoComms = {
     let m = p.id && st.db.messages.find(x => x.id === p.id);
     if (!m) { m = { id: 'msg-' + uuid().slice(0, 8), status: 'BORRADOR', version: 1, attachments: [], created_at: new Date().toISOString(), created_by: me.full_name }; st.db.messages.unshift(m); this._commsAudit(st, m.id, 'COMUNICADO', 'CREADO', me.full_name); }
     else {
+      if (m.system_kind) throw err('El correo diario de hojas solo se pausa o reanuda; se configura en Configuración → F.', 'MENSAJE_DEL_SISTEMA');   // igual que el servidor
       if (['CANCELADO', 'FINALIZADO'].includes(m.status)) throw err('El comunicado está ' + m.status.toLowerCase() + ': duplicalo para reutilizarlo.', 'NO_EDITABLE');
       const before = SIG(m), after = SIG({ ...m, ...p });
       if (['ACTIVO', 'PAUSADO'].includes(m.status) && before !== after && !confirm) throw err('El cambio afecta los próximos envíos: confirmalo.', 'CONFIRMATION_REQUIRED');
@@ -158,6 +159,7 @@ export const DemoComms = {
   async commsAddAttachment(messageId, file, existing, confirm) {
     const me = await this._me(); need(me, 'comms.compose'); const r = await inspectFile(file, existing); if (r.errors.length) throw err(r.errors.join(' '), 'ADJUNTO_INVALIDO');
     const st = this._commsStore(), m = st.db.messages.find(x => x.id === messageId), path = 'demo/' + uuid() + '.' + EXT[r.mime];
+    if (m.system_kind) throw err('El correo diario de hojas adjunta los PDF de las hojas automáticamente.', 'MENSAJE_DEL_SISTEMA');
     if (['ACTIVO', 'PAUSADO'].includes(m.status) && !confirm) throw err('Agregar un adjunto afecta los próximos envíos: confirmalo.', 'CONFIRMATION_REQUIRED');
     m.version = (m.version || 1) + 1;
     st.db.blobs[path] = r.bytes; const a = { id: 'att-' + uuid().slice(0, 8), name: file.name, file_name: file.name, mime: r.mime, size_bytes: file.size, sha256: r.sha256, storage_path: path };
@@ -177,7 +179,9 @@ export const DemoComms = {
   },
   async commsPause(id) { const me = await this._me(); need(me, 'comms.schedule'); const st = this._commsStore(); st.pause(id); this._commsAudit(st, id, 'COMUNICADO', 'PAUSADO', me.full_name); st._save(); },
   async commsResume(id) { const me = await this._me(); need(me, 'comms.schedule'); const st = this._commsStore(); st.resume(id, demoNow()); this._commsAudit(st, id, 'COMUNICADO', 'REANUDADO', me.full_name); st._save(); },
-  async commsCancel(id) { const me = await this._me(); need(me, 'comms.schedule'); const st = this._commsStore(); st.cancel(id); this._commsAudit(st, id, 'COMUNICADO', 'CANCELADO', me.full_name); st._save(); },
+  async commsCancel(id) { const me = await this._me(); need(me, 'comms.schedule'); const st = this._commsStore();
+    if ((st.db.messages.find(x => x.id === id) || {}).system_kind) throw err('El correo diario de hojas no se cancela: se pausa, o se desactiva en Configuración → F.', 'MENSAJE_DEL_SISTEMA');
+    st.cancel(id); this._commsAudit(st, id, 'COMUNICADO', 'CANCELADO', me.full_name); st._save(); },
   async commsRequestTest(id, email) {
     const me = await this._me(); need(me, 'comms.test_send'); if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(String(email).trim())) throw err('Indicá un correo válido para la prueba.', 'CORREO_INVALIDO');
     const st = this._commsStore(); st.requestTest(id, email, demoNow()); this._commsAudit(st, id, 'COMUNICADO', 'PRUEBA_SOLICITADA', me.full_name, { destino: email }); st._save();
@@ -198,5 +202,19 @@ export const DemoComms = {
   async commsGmailDisconnect() { const me = await this._me(); need(me, 'comms.gmail_manage'); const st = this._commsStore();
     Object.assign(st.db.gmail, { connected: false, needs_reconnect: false, email: null }); this._commsAudit(st, null, 'GMAIL', 'DESCONECTADO', me.full_name); st._save(); return { ok: true, revoked_in_google: true }; },   // demo: revocación SIMULADA
   // SOLO demo: ejecuta el mismo despachador que el servidor con Gmail SIMULADO (lo que en producción hace el programador cada 5 minutos)
-  async commsDemoTick(now) { const st = this._commsStore(); return dispatch(st, new DemoGmail(), { now: now || demoNow(), pauseMs: 0, worker: 'demo' }); },
+  async commsDemoTick(now) {
+    const st = this._commsStore();
+    // correo diario de hojas: la configuración de F y los PDF de hojas de la demo (en el servidor los lee comm_enqueue_sheet_pdfs)
+    try { if (this._refresh) this._refresh(); const ns = this._ns ? this._ns() : {};
+      st.db.sheet = { enabled: !!ns.sheet_email_enabled, via: ns.sheet_email_via || 'RESEND', time: ns.sheet_email_time || '18:00', recipients: ns.sheet_email_recipients || [] };
+      st.db.sheetPdfs = Object.values(this.db.routePdfs || {}).filter(x => x.status === 'OK' && x.storage_path).map(x => ({ id: x.route_id + '|' + x.route_version, route_id: x.route_id,
+        route_version: x.route_version, route_number: x.route_number, file_name: x.file_name, storage_path: x.storage_path, generated_at: x.generated_at }));
+      st.db.sheetRoutes = (this.db.routes2 || []).map(x => ({ id: x.id, number: x.number, version: x.version || 1, operational_status: x.operational_status,
+        dispatch_mode: x.dispatch_mode || 'APP', published_at: x.published_at || null, dispatched_at: x.dispatched_at || null }));
+      for (const x of st.db.sheetPdfs) { const b = (this.db.pdfStore || {})[x.storage_path]; if (b) st.db.blobs['route-pdfs:' + x.storage_path] = b64ToBytes(b); }
+    } catch (e) { /* sin datos de hojas: sigue con los comunicados */ }
+    const r = await dispatch(st, new DemoGmail(), { now: now || demoNow(), pauseMs: 0, worker: 'demo' });
+    for (const k of Object.keys(st.db.blobs)) if (k.startsWith('route-pdfs:')) delete st.db.blobs[k];   // no se duplican los PDF en el almacenamiento de la demo
+    st._save(); return r;
+  },
 };

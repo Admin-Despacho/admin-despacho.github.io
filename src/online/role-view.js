@@ -26,7 +26,7 @@ export function switcherHtml(me) {
 }
 
 // Guarda el trabajo antes de cambiar de vista. Devuelve false si el usuario prefiere quedarse.
-// Trabajo SIN GUARDAR en la pantalla del chofer (vista Transportista o Solo Lectura): paradas nuevas, entregas con datos, firma o foto, km.
+// Trabajo SIN GUARDAR en la pantalla del chofer (vista Transportista o Solo Lectura): paradas nuevas, entregas con datos o firma, km.
 // Las operaciones ya guardadas sin conexión NO se cuentan: quedan en la cola del equipo y no se pierden al cambiar de vista.
 export function driverPending(doc = document) {
   const has = el => !!el && !el.hidden && el.offsetParent !== null;
@@ -35,18 +35,16 @@ export function driverPending(doc = document) {
   if (has(add) && (filled(add) || (add.querySelector('#naLocPick') && add.querySelector('#naLocPick').textContent.trim()))) out.push('una parada nueva sin agregar');
   doc.querySelectorAll('#drv .drv-form').forEach(f => {
     if (!has(f)) return;
-    const cv = f.querySelector('[data-sig]'); let ink = false;
-    if (cv && cv.width) { try { const px = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; for (let i = 3; i < px.length; i += 16) if (px[i]) { ink = true; break; } } catch (e) { } }
-    const prev = f.querySelector('[data-dniprev]'), st = f.querySelector('[data-dnist]');
-    const photo = (prev && !prev.hidden) || (st && /Procesando/.test(st.textContent || ''));
-    if (filled(f) || ink || photo) out.push('una entrega sin guardar' + (photo ? ' (con foto del DNI)' : ink ? ' (con firma)' : ''));
+    // V4.19: la firma confirmada se ve en la vista previa del formulario (ya no hay lienzo chico ni foto del DNI)
+    const sp = f.querySelector('[data-sigprev]'), ink = !!(sp && !sp.hidden && sp.getAttribute('src'));
+    if (filled(f) || ink) out.push('una entrega sin guardar' + (ink ? ' (con firma)' : ''));
   });
   if ([...doc.querySelectorAll('#drvKm, #drvKmIni')].some(i => (i.value || '').trim())) out.push('un kilometraje sin confirmar');
   return out;
 }
 async function saveWork() {
   const pend = driverPending();
-  if (pend.length && !confirm('Tenés sin guardar: ' + pend.join(', ') + '.\n\nSi cambiás de vista ahora, eso se descarta (nombre, CUIL y firma de una entrega se recuperan al volver; la foto del DNI no). ' +
+  if (pend.length && !confirm('Tenés sin guardar: ' + pend.join(', ') + '.\n\nSi cambiás de vista ahora, eso se descarta (nombre, CUIL y firma de una entrega se recuperan al volver). ' +
       'Tocá CANCELAR para quedarte y guardarlo. ¿Cambiar de vista igual?')) return false;
   const open = document.querySelector('#publishModal, .umodal:not([hidden]) form, .umodal:not([hidden]) input:not([type=hidden])');
   if (open && !confirm('Hay una ventana con trabajo abierto (sin guardar). Si cambiás de vista ahora, se cierra sin publicar ni enviar nada. ¿Cambiar igual?')) return false;

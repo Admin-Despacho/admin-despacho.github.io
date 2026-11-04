@@ -80,11 +80,11 @@ async def main():
                 await card.locator('[data-o="ENTREGADO"]').click(); await pg.wait_for_timeout(400)
                 await card.locator('.drv-form [data-f="recv"]').scroll_into_view_if_needed()
                 await pg.screenshot(path=os.path.join(OUT, tag + '_4_recepcion_interna_firma.png'), full_page=True); m4 = await pg.evaluate(MEASURE, None)
-                sig = await card.locator('[data-sig]').bounding_box()
+                sig = await card.locator('[data-sigbox]').bounding_box()
                 # el pie fijo (KM FINAL / FINALIZAR) no debe tapar la firma ni GUARDAR mientras se completa la parada
-                await card.locator('[data-sig]').scroll_into_view_if_needed(); await pg.wait_for_timeout(200)
+                await card.locator('[data-sigbox]').scroll_into_view_if_needed(); await pg.wait_for_timeout(200)
                 ov = await pg.evaluate('''()=>{const f=document.querySelector('.drv-foot'); if(!f) return 0; const fr=f.getBoundingClientRect(), H=innerHeight;
-                  return [...document.querySelectorAll('.drv-stop .drv-form:not([hidden]) [data-sig], .drv-stop .drv-form:not([hidden]) [data-save]')].filter(e=>{const r=e.getBoundingClientRect();
+                  return [...document.querySelectorAll('.drv-stop .drv-form:not([hidden]) [data-sigbox], .drv-stop .drv-form:not([hidden]) [data-save]')].filter(e=>{const r=e.getBoundingClientRect();
                     const vis=Math.min(r.bottom,H)>Math.max(r.top,0); return vis && !(r.bottom<=fr.top||r.top>=fr.bottom);}).length;}''')
                 res('RESP-OVL-' + str(w), f'Celular {w}: el pie fijo no tapa la firma ni GUARDAR de la parada abierta', ov == 0, 'superpuestos=' + str(ov))
                 await pg.click('#drvAddOpen'); await pg.wait_for_timeout(300); await pg.locator('#drvAdd').scroll_into_view_if_needed()

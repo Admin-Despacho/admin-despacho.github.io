@@ -80,6 +80,7 @@ const MODULE_ROUTES = {
   '#/config-operativa': { ok: me => hasPerm(me, 'columns.view') || hasPerm(me, 'columns.manage_defaults') || hasPerm(me, 'vehicle_mileage.view'), open: rc4Open('openOperationalConfig') },
   '#/despacho': { ok: me => hasPerm(me, 'routes.create'), open: async me => { closeOverlay(); show('#operario'); await mountLegacyRc4(me, '#/despacho'); } },
   '#/borradores': { ok: me => hasPerm(me, 'routes.create'), open: async me => (await adminUi()).openDrafts(api, me) },
+  '#/recorridos': { ok: me => hasPerm(me, 'signatures.view'), open: async me => (await adminUi()).openRecorridos(api, me) },   // V4.24
   '#/historial': { ok: me => hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team') || hasPerm(me, 'routes.view_own'), open: async me => (await adminUi()).openHistory(api, me) },
   '#/aprobaciones': { ok: canApprovals, open: async me => { const { ApprovalsPanel } = await import('./online/approvals-ui.js'); await new ApprovalsPanel(api, me).open(); } },
   '#/usuarios': { ok: me => hasPerm(me, 'users.view'), open: async me => { await new UsersPanel(api, me, null, logout).open(); await withNav(me, '#/usuarios'); } },

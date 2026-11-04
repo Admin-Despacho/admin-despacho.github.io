@@ -74,6 +74,18 @@ export const DemoAdmin = {
       responsable_name: r.responsable_name, operational_status: r.operational_status, approval_status: r.approval_status || 'NO_REQUERIDA', published_at: r.published_at, completed_at: r.completed_at,
       stops: r.stops.length, bultos: r.stops.reduce((a, s) => a + (Number(s.bultos) || 0), 0), zones: [...new Set(r.stops.map(s => s.zone).filter(Boolean))] })) };
   },
+  // V4.24 · VER ENTREGA en la demo (antes solo existía online): mismo permiso que el servidor (signatures.view), SOLO LECTURA
+  async deliveryTrace(stopId) {
+    this._refresh(); const me = await this.me(); this._need(me, 'signatures.view');
+    const r = (this.db.routes2 || []).find(x => x.stops.some(st => st.id === stopId)); if (!r) throw err('No existe.', 'NOT_FOUND', 404);
+    this._routeScope(me, r);   // como el servidor (RLS): signatures.view Y poder ver ESA hoja (Superior Despacho: las de su equipo)
+    const stop = { ...r.stops.find(x => x.id === stopId) }, e = (this.db.evidence || {})[stopId];
+    const evidence = e ? { receiver_name: e.receiver_name, receiver_cuil: e.cuil || e.receiver_cuil || null, receiver_email: e.receiver_email || e.email || null, signature_png: e.signature_png_b64 || null, created_by: e.created_by } : null;
+    const rc = (this.db.receipts || {})[stopId], receipt = rc ? { receipt_number: rc.receipt_number || rc.number || null, generated_at: rc.generated_at || rc.at || null, recipient_email: rc.recipient_email || rc.email || null } : null;
+    const emails = (this.db.customerJobs || []).filter(j => j.stop_id === stopId).map(j => ({ kind: j.kind, status: j.status, sent_at: j.sent_at || null, error: j.error || null }));
+    const by = id => ((this.db.users || []).find(u => u.id === id) || {}).full_name || null;
+    return { stop, evidence, receipt, emails, outcome_by_name: by(stop.outcome_by) || by(e && e.created_by) };
+  },
   async routeDetail(id) {
     this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all', 'routes.view_team', 'routes.view_own');
     const r = (this.db.routes2 || []).find(x => x.id === id); if (!r) throw err('No existe.', 'NOT_FOUND', 404);
@@ -161,13 +173,43 @@ export const DemoAdmin = {
     const cur = await this.financialRules(); const f = { version: cur.version + 1, rules, created_by: me.id, created_at: new Date().toISOString() };
     this.db.financialRules.push(f); this._audit(me, 'FINANCIAL_RULES_CHANGED', 'v' + f.version, cur.rules, rules); this._save(); return f;
   },
-  _ns() { return this.db.notifSettings = this.db.notifSettings || { on_the_way_enabled: true, delivered_enabled: true, sheet_email_enabled: false, sheet_email_time: '18:00', sheet_email_recipients: [], provider: 'RESEND', max_retries: 5 }; },
+  _ns() { return this.db.notifSettings = this.db.notifSettings || { on_the_way_enabled: true, delivered_enabled: true, sheet_email_enabled: false, sheet_email_time: '18:00', sheet_email_recipients: [], sheet_email_via: 'RESEND', provider: 'RESEND', max_retries: 5 }; },
   async notificationSettings() { this._refresh(); return { ...this._ns() }; },
   async pendingAssignedRoutes(userId) { this._refresh(); return (this.db.routes2 || []).filter(r => r.responsable_id === userId && ['PUBLICADA', 'EN_CURSO'].includes(r.operational_status)).map(r => ({ id: r.id, number: r.number, operational_status: r.operational_status, carrier_id: r.carrier_id })); },
+  // V4.23 (propuesta) · padrón de emails de clientes en la demo: mismas reglas que el servidor
+  async _ceAdmin() { const me = await this.me(); if (!me || me.role !== 'ADMIN') throw err('Solo el Administrador General.', 'FORBIDDEN', 403); return me; },
+  _cuitOk(c) { if (!/^\d{11}$/.test(c)) return false; const w = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]; let s = 0; for (let i = 0; i < 10; i++) s += +c[i] * w[i]; let v = 11 - (s % 11); if (v === 11) v = 0; if (v === 10) return false; return +c[10] === v; },
+  async clientEmailsPreview(rows) {
+    this._refresh(); await this._ceAdmin(); const db = this.db.clientEmails || {}, known = new Set((this.db.routes2 || []).flatMap(r => r.stops.map(s => s.client_key)));
+    const norm = x => String(x || '').replace(/\D/g, ''), seen = {}; (rows || []).forEach(x => { const c = norm(x.cuit); seen[c] = (seen[c] || 0) + 1; });
+    const filas = (rows || []).map(x => { const c = norm(x.cuit), e = String(x.email || '').trim().toLowerCase() || null, cur = (db[c] || {}).email || null;
+      const estado = !this._cuitOk(c) ? 'CUIT_INVALIDO' : seen[c] > 1 ? 'DUPLICADO' : !e ? 'SIN_EMAIL' : !/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(e) ? 'EMAIL_INVALIDO'
+        : !known.has(c) && !cur ? 'DESCONOCIDO' : !cur ? 'NUEVO' : cur === e ? 'SIN_CAMBIOS' : 'ACTUALIZAR';
+      return { cuit: c, name: x.name || '', email: e, actual: cur, estado }; });
+    const resumen = {}; filas.forEach(f => { resumen[f.estado] = (resumen[f.estado] || 0) + 1; }); return { filas, resumen };
+  },
+  async clientEmailsApply(rows, mode, file) {
+    if (!['CONSERVAR', 'REEMPLAZAR'].includes(mode)) throw err('Modo inválido.', 'MODO_INVALIDO', 400);
+    const pv = await this.clientEmailsPreview(rows), me = await this._ceAdmin(), db = this.db.clientEmails = this.db.clientEmails || {}; let ins = 0, upd = 0; const now = new Date().toISOString();
+    pv.filas.forEach(f => { if (f.estado === 'NUEVO') { db[f.cuit] = { cuit: f.cuit, client_name: f.name || null, email: f.email, source: 'EXCEL', updated_at: now, updated_by: me.id }; ins++; }
+      else if (f.estado === 'ACTUALIZAR' && mode === 'REEMPLAZAR') { Object.assign(db[f.cuit], { email: f.email, client_name: f.name || db[f.cuit].client_name, source: 'EXCEL', updated_at: now, updated_by: me.id }); upd++; } });
+    (this.db.clientEmailImports = this.db.clientEmailImports || []).push({ at: now, by: me.id, file, mode, summary: { ...pv.resumen, insertados: ins, actualizados: upd } }); this._save();
+    return { ...pv.resumen, insertados: ins, actualizados: upd };
+  },
+  async clientEmailUpsert(cuit, name, email) {
+    this._refresh(); const me = await this._ceAdmin(), c = String(cuit || '').replace(/\D/g, ''), e = String(email || '').trim().toLowerCase();
+    if (!this._cuitOk(c)) throw err('CUIT_INVALIDO: el CUIT no es válido', 'CUIT_INVALIDO', 400);
+    if (!/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(e)) throw err('EMAIL_INVALID: el email no es válido', 'EMAIL_INVALID', 400);
+    const db = this.db.clientEmails = this.db.clientEmails || {}; db[c] = { cuit: c, client_name: String(name || '').trim() || (db[c] || {}).client_name || null, email: e, source: 'MANUAL', updated_at: new Date().toISOString(), updated_by: me.id };
+    this._save(); return db[c];
+  },
+  async clientEmailsList(q) { this._refresh(); await this._ceAdmin(); const t = String(q || '').toLowerCase().trim();
+    return Object.values(this.db.clientEmails || {}).filter(x => !t || [x.cuit, x.client_name, x.email].some(v => String(v || '').toLowerCase().includes(t.replace(/[^0-9a-z@._ -]/g, '')))).sort((a, b) => String(a.client_name || '').localeCompare(String(b.client_name || ''))); },
   async setNotificationSettings(p) {
     this._refresh(); const me = await this.me(); this._need(me, 'settings.manage');
     if (p.sheet_email_time && !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(p.sheet_email_time)) throw err('Horario inválido (HH:MM).', 'BAD_TIME', 400);
     if ((p.sheet_email_recipients || []).some(e => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))) throw err('Hay un email inválido.', 'BAD_EMAIL', 400);
+    if (p.sheet_email_via !== undefined && !['RESEND', 'GMAIL'].includes(p.sheet_email_via)) throw err('Canal inválido: RESEND o GMAIL.', 'CANAL_INVALIDO', 400);   // igual que el servidor
     Object.assign(this._ns(), p); this._audit(me, 'NOTIFICATION_SETTINGS_CHANGED', null, null, p); this._save();
   },
   async listLocations() { this._refresh(); return (this.db.locations || []).slice(); },

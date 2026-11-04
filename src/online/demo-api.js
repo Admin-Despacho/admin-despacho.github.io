@@ -48,6 +48,7 @@ export function demoSeed() {
     // G2 (ubicaciones internas de Mendoza). "San Juan" es la calle San Juan de Mendoza.
     internalLocations: [
       { location_key: 'MONTECASEROS', name: 'Montecaseros - casa central', address: 'Montecaseros 1234, Mendoza', lat: -32.8900, lon: -68.8400, radius_m: 200, active: true, note: null, updated_at: '2026-10-01T12:00:00.000Z' },
+      { location_key: 'DEPOSITO_DIAMANTE', name: 'Depósito Diamante (demo)', address: 'Diamante 100, Mendoza', lat: -32.9000, lon: -68.8000, radius_m: 150, active: true, note: null, updated_at: '2026-10-01T12:00:00.000Z' },
       { location_key: 'SAN_JUAN', name: 'Sucursal San Juan', address: 'San Juan 500, Mendoza', lat: -32.8950, lon: -68.8450, radius_m: 150, active: true, note: null, updated_at: '2026-10-01T12:00:00.000Z' }],
     vehicles: [{ id: 'vh-1', name: 'Kangoo', plate: 'AB123CD', active: true, brand: 'Renault', model: 'Kangoo', type: 'Utilitario', year: 2019, notes: '', current_km: 50000, last_service_km: 41000, last_service_date: '2026-03-01', service_interval_km: 10000, habitual_driver_id: 'u-gabriel' }],
     audit: [], mails: [], seq: 1
@@ -555,22 +556,22 @@ export class DemoApi {
     let cuil = null;
     if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome)) {
       if (!task && (!String(ev.receiver_name || '').trim() || !ev.signature_png_b64)) throw err('EVIDENCE_REQUIRED: nombre del receptor y firma obligatorios', 'EVIDENCE_REQUIRED', 400);
-      // contrato VIGENTE (migración cristian_email_dni_required): CUIL + DNI + email obligatorios solo para Cristian.
+      // contrato VIGENTE (migración cristian_email_dni_required): CUIL + DNI + email obligatorios solo para Cristian. V4.21 (propuesta): sin foto del DNI y email OPCIONAL.
       // contrato V4.17-PROPUESTA: los mismos controles para TODA entrega comercial (externo e interno). Sucursal/TAREA: sin ellos.
       var idReq = cristian || (demoContract() !== 'VIGENTE' && commercial);
       if (idReq) { cuil = String(ev.cuil || '').replace(/\D/g, ''); if (cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
       else { cuil = String(ev.cuil || '').replace(/\D/g, '') || null; if (cuil && cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
       // RC4.1: email del receptor (segunda pantalla), opcional; si viene debe ser válido
       var vEmail = String(ev.email || '').trim().toLowerCase() || null;
-      if (idReq && !vEmail) throw err('EMAIL_REQUIRED: el email del receptor es obligatorio', 'EMAIL_REQUIRED', 400);
+      // V4.21 (propuesta): el email del receptor es OPCIONAL (antes: EMAIL_REQUIRED). Si viene, se valida el formato.
       if (vEmail && !(/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(vEmail) && vEmail.length <= 254)) throw err('EMAIL_INVALID: el email no es válido', 'EMAIL_INVALID', 400);
       var vDni = String(ev.dni || '').replace(/\D/g, '') || (cuil ? cuil.slice(2, 10) : null);
       if (vDni && !/^[0-9]{7,8}$/.test(vDni)) throw err('DNI_INVALID: el DNI debe tener 7 u 8 dígitos', 'DNI_INVALID', 400);
       if (ev.dni_photo_b64) throw err('DNI_STORAGE_REQUIRED: la foto del DNI se sube a Storage privado', 'DNI_STORAGE_REQUIRED', 400);
       if ((cristian || (demoContract() !== 'VIGENTE' && commercial && cuil)) && ev.dni_storage_path) { const o = (this.db.storage || {})[ev.dni_storage_path];
         if (!new RegExp('^' + cuil + '/[0-9a-f-]{36}\\.(jpg|png)$').test(ev.dni_storage_path) || !o || o.owner !== me.id) throw err('DNI_UPLOAD_INVALID', 'DNI_UPLOAD_INVALID', 400); }
-      // DNI_REQUIRED: la identidad tiene que quedar con DNI registrado (foto subida ahora o identidad ya registrada que se reutiliza)
-      if (idReq && !(((this.db.identity || {})[cuil] || {}).storage_path || ev.dni_storage_path)) throw err('DNI_REQUIRED: cargá la foto del DNI para el CUIL nuevo', 'DNI_REQUIRED', 400);
+      // V4.19 (propuesta): la foto del DNI YA NO es obligatoria para ningún transportista (antes: DNI_REQUIRED). Si llega una foto
+      // (p. ej. una entrega que quedó en la cola sin conexión antes de la actualización), se sigue vinculando como antes.
     }
     const contract = demoContract(), colGiven = !!(col && col.status && col.status !== 'PENDIENTE');
     if (commercial && ['COBRANZA', 'AMBAS'].includes(st.task) && (contract === 'VIGENTE' || colGiven)) {   // propuesta: solo se valida si se informa
@@ -659,12 +660,65 @@ export class DemoApi {
     list.forEach(e => { const key = r.id + '|' + r.version + '|' + kind + '|' + e; if (!J.some(j => j.idempotency_key === key)) J.push({ id: 'ej-' + (++this.db.seq), route_id: r.id, route_version: r.version, kind, recipient: e, idempotency_key: key, status: 'QUEUED', retry_count: 0, queued_at: new Date().toISOString() }); });
   }
   _irSettings() { return this.db.irSettings = this.db.irSettings || { supervisor_user_id: null, copy_admin: true, extra_emails: [], email_enabled: true, push_enabled: false }; }
+  // V4.23 (propuesta) · el depósito de regreso: el elegido o la ÚNICA ubicación activa "DIAMANTE" (sin clave inventada)
+  _returnDepot() {
+    const locs = (this.db.internalLocations || []).filter(l => l.active !== false), k = (this.db.returnDepot || {}).location_key;
+    if (k) return locs.find(l => l.location_key === k) || null;
+    const m = locs.filter(l => /diamante/i.test(l.name || '') || /diamante/i.test(l.location_key || ''));
+    return m.length === 1 ? m[0] : null;
+  }
+  async finishInternalLocation(stopId, location, opId) {
+    this._net(); this._refresh();
+    const r = (this.db.routes2 || []).find(x => x.stops.some(st => st.id === stopId)); if (!r) throw err('No existe.', 'NOT_FOUND', 404);
+    this._mine(r.id); const st = r.stops.find(x => x.id === stopId);
+    if (r.operational_status !== 'EN_CURSO') throw err('La hoja no está en curso.', 'BAD_STATE', 409);
+    if ((st.stop_type || 'PEDIDO') !== 'UBICACION_INTERNA') throw err('NOT_INTERNAL_LOCATION: solo para ubicaciones internas', 'NOT_INTERNAL_LOCATION', 400);
+    if (st.location_finished_at) return st;
+    if (!st.arrived_at) throw err('ARRIVE_FIRST: registrá primero la llegada a la ubicación', 'ARRIVE_FIRST', 400);
+    if (st.outcome === 'PENDIENTE') throw err('RESOLVE_FIRST: resolvé la recepción antes de terminar en la ubicación', 'RESOLVE_FIRST', 400);
+    st.location_finished_location = this._loc(location, st); st.location_finished_at = new Date().toISOString(); this._save(); return st;
+  }
+  async departInternalLocation(stopId, location, opId) {   // V4.24 (propuesta) · SALÍ DE <SUCURSAL>, solo después de TERMINÉ EN
+    this._net(); this._refresh();
+    const r = (this.db.routes2 || []).find(x => x.stops.some(st => st.id === stopId)); if (!r) throw err('No existe.', 'NOT_FOUND', 404);
+    this._mine(r.id); const st = r.stops.find(x => x.id === stopId);
+    if (r.operational_status !== 'EN_CURSO') throw err('La hoja no está en curso.', 'BAD_STATE', 409);
+    if ((st.stop_type || 'PEDIDO') !== 'UBICACION_INTERNA') throw err('NOT_INTERNAL_LOCATION: solo para ubicaciones internas', 'NOT_INTERNAL_LOCATION', 400);
+    if (st.location_departed_at) return st;
+    if (!st.location_finished_at) throw err('FINISH_FIRST: registrá TERMINÉ EN la ubicación antes de la salida', 'FINISH_FIRST', 400);
+    st.location_departed_location = this._loc(location, st); st.location_departed_at = new Date().toISOString(); this._save(); return st;
+  }
+  async recordDeparture(routeId, location, opId) {   // V4.24 (propuesta): GPS de la salida; el inicio sigue siendo startRoute
+    this._net(); this._refresh(); const { r } = this._mine(routeId);
+    if (r.operational_status !== 'EN_CURSO' || !r.started_at) throw err('START_FIRST: iniciá el recorrido antes de registrar la salida', 'START_FIRST', 400);
+    if (r.carrier_id !== 'INTERNO') throw err('NOT_INTERNAL: solo el Transportista Interno registra la salida del depósito', 'NOT_INTERNAL', 400);
+    if (r.start_location) return r;
+    const d = this._returnDepot(); r.start_location = this._loc(location, d ? { expected_lat: d.lat, expected_lon: d.lon, expected_radius_m: d.radius_m } : null);
+    r.start_location_key = d ? d.location_key : null; this._save(); return r;
+  }
+  async arriveDepot(routeId, location, opId) {
+    this._net(); this._refresh(); const { r } = this._mine(routeId);
+    if (r.operational_status !== 'EN_CURSO') throw err('La hoja no está en curso.', 'BAD_STATE', 409);
+    if (r.carrier_id !== 'INTERNO') throw err('NOT_INTERNAL: solo el Transportista Interno registra el regreso al depósito', 'NOT_INTERNAL', 400);
+    if (r.depot_arrived_at) return r;
+    const pend = r.stops.filter(s => s.outcome === 'PENDIENTE').length;
+    if (pend) throw err('PENDING_STOPS: faltan ' + pend + ' paradas por resolver antes de volver al depósito', 'PENDING_STOPS', 409);
+    const d = this._returnDepot(); if (!d) throw err('DEPOT_NOT_CONFIGURED: falta elegir la ubicación del depósito de regreso en Configuración', 'DEPOT_NOT_CONFIGURED', 400);
+    r.depot_location = this._loc(location, { expected_lat: d.lat, expected_lon: d.lon, expected_radius_m: d.radius_m });
+    r.depot_location_key = d.location_key; r.depot_arrived_at = new Date().toISOString(); this._save(); return r;
+  }
+  async deliveryEmailSuggestion(stopId) {
+    this._refresh(); const r = (this.db.routes2 || []).find(x => x.stops.some(st => st.id === stopId)); if (!r) return null;
+    const st = r.stops.find(x => x.id === stopId); if ((st.stop_type || 'PEDIDO') !== 'PEDIDO') return null;
+    return (st.customer_email || '').trim() || ((this.db.clientEmails || {})[st.client_key] || {}).email || null;
+  }
   async finalizeRoute(id, kmEnd) {
     this._net(); this._refresh(); const { r, me } = this._mine(id);
     if (r.operational_status === 'COMPLETADA') return r;
     if (r.operational_status !== 'EN_CURSO') throw err('La hoja no está en curso.', 'BAD_STATE', 409);
     const pend = r.stops.filter(s => s.outcome === 'PENDIENTE').length;
     if (pend) throw err('Faltan ' + pend + ' entregas por resolver.', 'PENDING_STOPS', 409);
+    if (r.carrier_id === 'INTERNO' && !r.depot_arrived_at) throw err('DEPOT_ARRIVAL_REQUIRED: registrá LLEGUÉ A DIAMANTE antes de finalizar la hoja', 'DEPOT_ARRIVAL_REQUIRED', 409);   // V4.23
     if (r.vehicle_id) {
       const v = this.db.vehicles.find(x => x.id === r.vehicle_id);
       if (kmEnd == null || kmEnd === '') throw err('KM_REQUIRED: cargá el kilometraje final', 'KM_REQUIRED', 400);

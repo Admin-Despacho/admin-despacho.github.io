@@ -1,5 +1,7 @@
 -- Pruebas de la PROPUESTA de Comunicaciones (Postgres local). Corre DESPUÉS de g2_revision_test. Datos y usuarios FICTICIOS.
 \set ON_ERROR_STOP on
+-- (mantenimiento V4.24) fechas RELATIVAS a la ejecución: antes eran fijas (2/11 y 3/11/2026) y la prueba fallaba al pasar esos días
+select set_config('qa.t1', (date_trunc('minute', now()) - interval '1 hour')::text, false), set_config('qa.t2', date_trunc('minute', now())::text, false);
 \set ADM 'e0000000-0000-0000-0000-0000000000c1'
 \set OPC 'e0000000-0000-0000-0000-0000000000c2'
 \set OPN 'e0000000-0000-0000-0000-0000000000c3'
@@ -64,11 +66,11 @@ select tst.res('CS-04f el token está en Vault y solo el servidor lo lee', (sele
   and (select status from public.comm_messages where id = (select id from m1)) = 'ACTIVO', '');
 -- ===== ejecución idempotente, clave única ejecución + destinatario =====
 begin; set local role service_role;
-create temp table r1 as select public.comm_create_run((select id from m1), '2026-11-02 12:00+00', 'PROGRAMADO', false,
+create temp table r1 as select public.comm_create_run((select id from m1), current_setting('qa.t1')::timestamptz, 'PROGRAMADO', false,
   '[{"collaborator_id":null,"email":"ana@ejemplo.test","name":"Ana Díaz"},{"collaborator_id":null,"email":"bruno@ejemplo.test","name":"Bruno Paz"},{"collaborator_id":null,"email":"ANA@ejemplo.test","name":"Ana bis"}]',
   '[{"id":null,"name":"Carla Ruiz","reason":"Inactivo"}]', '{"subject":"Recordatorio: normas de cobro","body_html":"<p>Hola <b>equipo</b></p>","attachments":[]}') id;
 grant select on r1 to public;
-select tst.res('CS-05a la misma ejecución creada por OTRO trabajador no se duplica', public.comm_create_run((select id from m1), '2026-11-02 12:00+00', 'PROGRAMADO', false, '[]', '[]', '{}') is null, '');
+select tst.res('CS-05a la misma ejecución creada por OTRO trabajador no se duplica', public.comm_create_run((select id from m1), current_setting('qa.t1')::timestamptz, 'PROGRAMADO', false, '[]', '[]', '{}') is null, '');
 commit;
 select tst.res('CS-05b un envío por destinatario (sin duplicar el mismo correo) + omitido con motivo', (select count(*) from public.comm_deliveries where run_id = (select id from r1) and status = 'PENDIENTE') = 2
   and (select reason from public.comm_deliveries where run_id = (select id from r1) and status = 'OMITIDO') = 'Inactivo', '');
@@ -140,7 +142,7 @@ begin; select tst.u(:'ADM'); set local role authenticated;
 create temp table m2 as select (public.comm_save_message('{"internal_name":"Aviso","subject":"Aviso QA","body_html":"<p>v1</p>","selection":{"all":true},"schedule":{"kind":"DAILY","time":"08:00","start_date":"2026-11-01"}}')).id;
 grant select on m2 to public; select public.comm_activate((select id from m2));
 commit;
-begin; set local role service_role; select public.comm_create_run((select id from m2), '2026-11-03 11:00+00', 'PROGRAMADO', false, '[{"email":"ana@ejemplo.test","name":"Ana"}]', '[]', '{"subject":"Aviso QA","body_html":"<p>v1</p>","attachments":[]}'); commit;
+begin; set local role service_role; select public.comm_create_run((select id from m2), current_setting('qa.t2')::timestamptz, 'PROGRAMADO', false, '[{"email":"ana@ejemplo.test","name":"Ana"}]', '[]', '{"subject":"Aviso QA","body_html":"<p>v1</p>","attachments":[]}'); commit;
 begin; select tst.u(:'ADM'); set local role authenticated;
 select tst.expect('CS-10a editar contenido de un comunicado ACTIVO exige confirmación', format($q$ select public.comm_save_message('{"id":"%s","body_html":"<p>v2</p>"}') $q$, (select id from m2)), 'CONFIRMATION_REQUIRED%');
 select public.comm_save_message(jsonb_build_object('id', (select id from m2), 'body_html', '<p>v2</p>'), true);

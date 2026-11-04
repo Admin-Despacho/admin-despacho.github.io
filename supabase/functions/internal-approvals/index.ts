@@ -38,6 +38,7 @@ const provider = { async send(m: any) {
 const deps = {
   cronSecret: Deno.env.get('CRON_SECRET') ?? '', appUrl: (Deno.env.get('APP_URL') ?? '').replace(/\/$/, ''), store, customerStore, sheetStore, provider,
   inlineLogo: inlineLogoFrom(logoModule),   // RC4.1: logo del Recibido Conforme embebido por CID (no depende de APP_URL)
+  async sheetVia() { const r = must(await admin.from('notification_settings').select('sheet_email_via').eq('id', 'DEFAULT').single()) as any; return r && r.sheet_email_via || 'RESEND'; },
   async queueSheetEmails() { must(await admin.rpc('queue_sheet_emails', { p_day: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Mendoza' }).format(new Date()) })); },
   async runServiceAlerts() {
     const settings = must(await admin.from('notification_settings').select('*').eq('id', 'DEFAULT').single()) as any;

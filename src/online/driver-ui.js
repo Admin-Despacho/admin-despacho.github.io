@@ -65,6 +65,58 @@ export async function imageDims(f) {
 // completa y se copiaba a base64. Ahora se decodifica YA REDUCIDA (lado mayor 1600 px), un solo canvas chico, JPEG 0,75, Blob (sin base64).
 // V4.17: NUNCA se vuelve a abrir el original sin límites. Solo una imagen con dimensiones CONOCIDAS (leídas del encabezado) y chicas
 // (≤ 1600 px por lado) se decodifica entera; el peso del archivo no decide (una imagen de pocos KB puede tener dimensiones enormes).
+// ===================================================================================================================
+// FIRMA A PANTALLA COMPLETA (V4.19). onConfirm(pngDataUrl) recibe la firma confirmada; cancelar no cambia nada.
+// ===================================================================================================================
+// V4.23 · nombre corto de la ubicación interna EXISTENTE para los botones (MONTECASEROS, SAN JUAN); sin crear ubicaciones
+export const locName = s => { const k = String(s.internal_location_key || '').trim(); return (k ? k.replace(/_/g, ' ') : String(s.client_name || 'LA UBICACIÓN')).toUpperCase(); };
+export const SIG_OUT_W = 1200, SIG_OUT_H = 480;   // salida 5:2 (la misma proporción que el lienzo anterior de 600×240)
+export function renderSignaturePng(strokes, lineWidth = 3) {   // recorta a lo dibujado y centra SIN deformar (escala uniforme)
+  const pts = strokes.flat(); if (!pts.length) return null;
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const w = Math.max(maxX - minX, 1), h = Math.max(maxY - minY, 1), pad = 24, k = Math.min((SIG_OUT_W - 2 * pad) / w, (SIG_OUT_H - 2 * pad) / h, 4);
+  const ox = (SIG_OUT_W - w * k) / 2 - minX * k, oy = (SIG_OUT_H - h * k) / 2 - minY * k;
+  const c = document.createElement('canvas'); c.width = SIG_OUT_W; c.height = SIG_OUT_H; const x = c.getContext('2d');
+  x.lineCap = 'round'; x.lineJoin = 'round'; x.strokeStyle = '#000E18'; x.lineWidth = Math.max(2.5, Math.min(8, lineWidth * k));
+  for (const st of strokes) { x.beginPath(); st.forEach((p, i) => i ? x.lineTo(p[0] * k + ox, p[1] * k + oy) : x.moveTo(p[0] * k + ox, p[1] * k + oy)); if (st.length === 1) x.lineTo(st[0][0] * k + ox + 0.1, st[0][1] * k + oy); x.stroke(); }
+  return c.toDataURL('image/png');
+}
+export function openSignature(opener, title, onConfirm) {
+  if (document.querySelector('.drv-sign-modal')) return;
+  const modal = document.createElement('div'); modal.className = 'drv-sign-modal';
+  modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); modal.setAttribute('aria-label', title);
+  modal.innerHTML = '<div class="drv-sign-head"><b>' + title + '</b><span>Firmá con el dedo dentro del recuadro</span></div>' +
+    '<div class="drv-sign-stage" data-sigstage><canvas data-sigpad aria-label="Espacio para firmar"></canvas><span class="drv-sign-line" aria-hidden="true">Firma</span></div>' +
+    '<div class="drv-sign-controls"><button type="button" class="btn soft" data-sigcancel>CANCELAR</button><button type="button" class="btn soft" data-sigclear>BORRAR FIRMA</button>' +
+    '<button type="button" class="btn dark" data-sigok disabled>CONFIRMAR FIRMA</button></div>';
+  document.body.appendChild(modal);
+  const prevOverflow = document.body.style.overflow, prevOverscroll = document.documentElement.style.overscrollBehavior;
+  document.body.style.overflow = 'hidden'; document.documentElement.style.overscrollBehavior = 'none';   // la página no se desplaza
+  const stage = modal.querySelector('[data-sigstage]'), cv = modal.querySelector('[data-sigpad]'), ctx = cv.getContext('2d'), ok = modal.querySelector('[data-sigok]');
+  let strokes = [], cur = null, box = { w: 1, h: 1 };
+  const draw = () => { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); const d = window.devicePixelRatio || 1; ctx.setTransform(d, 0, 0, d, 0, 0);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#000E18'; ctx.lineWidth = 3;
+    for (const st of strokes) { ctx.beginPath(); st.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); if (st.length === 1) ctx.lineTo(st[0][0] + 0.1, st[0][1]); ctx.stroke(); } };
+  const fit = () => {   // lienzo = tamaño REAL del recuadro × densidad del celular; al girar, los trazos se escalan UNIFORME y se centran
+    const r = stage.getBoundingClientRect(), d = window.devicePixelRatio || 1, w = Math.max(1, Math.floor(r.width)), h = Math.max(1, Math.floor(r.height));
+    if (strokes.length && (w !== box.w || h !== box.h)) { const k = Math.min(w / box.w, h / box.h), ox = (w - box.w * k) / 2, oy = (h - box.h * k) / 2;
+      strokes = strokes.map(st => st.map(p => [p[0] * k + ox, p[1] * k + oy])); }
+    box = { w, h }; cv.width = w * d; cv.height = h * d; cv.style.width = w + 'px'; cv.style.height = h + 'px'; draw(); };
+  const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  cv.onpointerdown = e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); cur = [pos(e)]; strokes.push(cur); draw(); };
+  cv.onpointermove = e => { if (!cur) return; e.preventDefault(); cur.push(pos(e)); draw(); };
+  cv.onpointerup = cv.onpointercancel = () => { cur = null; ok.disabled = !strokes.length; };
+  const stopScroll = e => e.preventDefault(); modal.addEventListener('touchmove', stopScroll, { passive: false });
+  const onResize = () => fit(); window.addEventListener('resize', onResize); window.addEventListener('orientationchange', onResize);
+  const close = () => { window.removeEventListener('resize', onResize); window.removeEventListener('orientationchange', onResize); modal.removeEventListener('touchmove', stopScroll);
+    document.body.style.overflow = prevOverflow; document.documentElement.style.overscrollBehavior = prevOverscroll; modal.remove(); if (opener) opener.focus(); };
+  modal.querySelector('[data-sigclear]').onclick = () => { strokes = []; cur = null; ok.disabled = true; draw(); };
+  modal.querySelector('[data-sigcancel]').onclick = close;   // cancelar: no guarda una firma incompleta ni toca la anterior
+  ok.onclick = () => { const png = renderSignaturePng(strokes); if (!png) return; close(); onConfirm(png); };
+  modal.onkeydown = ev => { if (ev.key === 'Escape') { ev.preventDefault(); close(); } };
+  requestAnimationFrame(fit); ok.focus();
+}
+
 export async function processDniPhoto(f, opts = {}) {
   const MAX = opts.max || 1600, Q = opts.quality || 0.75, t0 = (globalThis.performance || Date).now();
   if (!f || !/^image\//i.test(f.type || '')) throw new Error('el archivo no es una imagen');
@@ -196,7 +248,11 @@ export class DriverApp {
     if (op.kind === 'view') return this.api.markViewed(a.route);
     if (op.kind === 'start') return this.api.startRoute(a.route, a.km);
     if (op.kind === 'outcome') return this._sendOutcome(op);
-    if (op.kind === 'arrive') return this.api.arriveStop(a.stop, a.location, op.op_id);
+    if (op.kind === 'arrive') return this.api.arriveStop(a.stop, a.location, op.op_id)
+    if (op.kind === 'locfinish') return this.api.finishInternalLocation(a.stop, a.location, op.op_id)   // V4.23 · TERMINÉ EN la ubicación
+    if (op.kind === 'depot') return this.api.arriveDepot(a.route, a.location, op.op_id)                // V4.23 · LLEGUÉ A DIAMANTE
+    if (op.kind === 'departure') return this.api.recordDeparture(a.route, a.location, op.op_id)        // V4.24 · GPS de la SALIDA del depósito
+    if (op.kind === 'locdepart') return this.api.departInternalLocation(a.stop, a.location, op.op_id)   // V4.24 · SALÍ DE <SUCURSAL>;
     if (op.kind === 'finalize') return this.api.finalizeRoute(a.route, a.km);
     if (op.kind === 'addStop') return this.api.addInternalStop(a.route, a.stop, a.version, op.op_id, op.offline);
     if (op.kind === 'reorder') return this.api.reorderInternalStops(a.route, a.order, a.version, op.op_id, op.offline);
@@ -209,6 +265,10 @@ export class DriverApp {
     if (op.kind === 'outcome') Object.assign(r.stops.find(s => s.id === op.args.stop) || {}, { outcome: op.args.outcome, outcome_note: op.args.note, outcome_reason: op.args.reason, outcome_at: t });
     if (op.kind === 'finalize') Object.assign(r, { operational_status: 'COMPLETADA', completed_at: t, km_end: op.args.km ?? r.km_end });
     if (op.kind === 'arrive') Object.assign(r.stops.find(s => s.id === op.args.stop) || {}, { arrived_at: t, arrive_location: op.args.location });
+    if (op.kind === 'locfinish') Object.assign(r.stops.find(s => s.id === op.args.stop) || {}, { location_finished_at: t, location_finished_location: op.args.location });
+    if (op.kind === 'depot') Object.assign(r, { depot_arrived_at: t, depot_location: op.args.location });
+    if (op.kind === 'departure') Object.assign(r, { start_location: r.start_location || op.args.location });
+    if (op.kind === 'locdepart') Object.assign(r.stops.find(s => s.id === op.args.stop) || {}, { location_departed_at: t, location_departed_location: op.args.location });
     if (op.kind === 'addStop' && !r.stops.some(s => s.id === op.args.stop.id)) {
       const s = op.args.stop || {};
       const n = Math.max(0, ...r.stops.map(x => x.sequence_number ?? x.seq ?? 0)) + 1;
@@ -286,7 +346,14 @@ export class DriverApp {
         (s.location_warning ? '<small class="drv-note"><b>⚠ ' + esc(s.location_warning) + '</b></small>' : '') +
         (running ? '<div class="drv-acts">' + Object.keys(OUT).map(k => '<button type="button" class="btn drv-result-btn ' + (k === 'ENTREGADO' ? 'result-done' : k === 'ENTREGA_PARCIAL' ? 'result-partial' : k === 'NO_ENTREGADO' ? 'result-failed' : k === 'REPROGRAMAR' ? 'result-reschedule' : '') + (s.outcome === k ? ' selected' : '') + '" data-o="' + k + '">' + outLabel(s, k) + '</button>').join('') + '</div>' +
           '<div class="drv-form" hidden></div>' : '') +
-        (running && isInternal(r) && s.outcome === 'PENDIENTE' && cur && s.id === cur.id ? (s.arrived_at ? '<small class="drv-note">Llegada registrada ' + hhmm(s.arrived_at) + (s.arrive_location && s.arrive_location.missing_reason ? ' · sin ubicación' : '') + '</small>' : '<button class="btn soft drv-arrive" type="button" data-arrive>LLEGUÉ A LA PARADA</button>') : '') + '</div>').join('') +
+        (running && isInternal(r) && s.outcome === 'PENDIENTE' && cur && s.id === cur.id ? (s.arrived_at ? '<small class="drv-note">Llegada registrada ' + hhmm(s.arrived_at) + (s.arrive_location && s.arrive_location.missing_reason ? ' · sin ubicación' : '') + '</small>' : '<button class="btn soft drv-arrive" type="button" data-arrive>' + (s.stop_type === 'UBICACION_INTERNA' ? 'LLEGUÉ A ' + esc(locName(s)) : 'LLEGUÉ A LA PARADA') + '</button>') : '') +
+        // V4.23 · ubicación interna (Montecaseros / San Juan) ya resuelta: TERMINÉ EN … (no cierra la hoja ni cambia la recepción)
+        (running && isInternal(r) && s.stop_type === 'UBICACION_INTERNA' && s.outcome !== 'PENDIENTE' ? (!s.arrived_at ? '<button class="btn soft drv-arrive" type="button" data-arrive>LLEGUÉ A ' + esc(locName(s)) + '</button>'
+          : s.location_finished_at ? '<small class="drv-note">Terminado en ' + esc(locName(s)) + ' ' + hhmm(s.location_finished_at) + (s.location_finished_location && s.location_finished_location.outside_m ? ' · fuera del radio' : '') + '</small>' +
+            // V4.24 (opción B) · SALÍ DE <SUCURSAL>: evento PROPIO, solo DESPUÉS de TERMINÉ EN (no cambia la recepción ni cierra la hoja)
+            (s.location_departed_at ? '<small class="drv-note">Salida de ' + esc(locName(s)) + ' ' + hhmm(s.location_departed_at) + (s.location_departed_location && s.location_departed_location.outside_m ? ' · fuera del radio' : '') + '</small>'
+              : '<button class="btn soft drv-locdep" type="button" data-locdepart>SALÍ DE ' + esc(locName(s)) + '</button>')
+          : '<button class="btn go drv-locfin" type="button" data-locfinish>TERMINÉ EN ' + esc(locName(s)) + '</button>') : '') + '</div>').join('') +
       (internal ? '<button class="btn soft" type="button" id="drvAddOpen">+ AGREGAR PARADA</button><div class="drv-add" id="drvAdd" hidden><b class="drv-ft">NUEVA PARADA</b>' +
         '<div class="drv-type" role="radiogroup" aria-label="Tipo de parada"><b>TIPO DE PARADA</b><div class="drv-seg"><button type="button" class="btn dark" data-ntype="TAREA" aria-pressed="true">TAREA</button><button type="button" class="btn soft" data-ntype="UBICACION_INTERNA" aria-pressed="false">UBICACIÓN INTERNA</button></div></div>' +
         '<div data-nt="TAREA"><input class="ed" id="naName" placeholder="Destino / qué hay que hacer (obligatorio)"><input class="ed" id="naAddr" placeholder="Domicilio"></div>' +
@@ -296,9 +363,13 @@ export class DriverApp {
         '<div data-nt="TAREA"><input class="ed" id="naCon" placeholder="Contacto (opcional)"><input class="ed" id="naTel" inputmode="tel" placeholder="Teléfono (opcional)"></div>' +
         '<small>Se agrega al final del recorrido. No modifica paradas existentes, pedidos ni ubicaciones guardadas.</small><button class="btn dark" type="button" id="naSave">AGREGAR PARADA</button><span class="shiperr" id="naErr" hidden></span></div>' : '') +
       (r.operational_status === 'PUBLICADA' && !this.readOnly && r.vehicle_id ? '<label class="drv-km">KM INICIAL del vehículo ' + esc(r.vehicle_plate || '') + ' (obligatorio) <input class="ed" id="drvKmIni" inputmode="numeric"></label>' : '') +
-      '<div class="drv-foot">' + (r.operational_status === 'PUBLICADA' && !this.readOnly ? '<button class="btn go" type="button" id="drvStart">INICIAR RECORRIDO</button><small>Abrir la hoja no inicia el recorrido.</small>' : '') +
-      (running && r.vehicle_id ? '<label class="drv-km">KM FINAL del vehículo (inicial ' + (r.km_start ?? '—') + ') <input class="ed" id="drvKm" inputmode="numeric"></label>' : '') +
-      (running ? '<button class="btn go" type="button" id="drvFin"' + (pend ? ' disabled' : '') + '>FINALIZAR HOJA</button>' + (pend ? '<small>' + (pend === 1 ? 'Falta 1 ' + stopNoun(r, 1) : 'Faltan ' + pend + ' ' + stopNoun(r, pend)) + ' por resolver.</small>' : '') : '') +
+      '<div class="drv-foot">' + (r.operational_status === 'PUBLICADA' && !this.readOnly ? '<button class="btn go" type="button" id="drvStart">' + (isInternal(r) ? 'SALÍ DEL DEPÓSITO DIAMANTE' : 'INICIAR RECORRIDO') + '</button><small>Abrir la hoja no inicia el recorrido.</small>' : '') +
+      // V4.23 · Transportista INTERNO: LLEGUÉ A DIAMANTE → KM FINAL → FINALIZAR HOJA (sin firma, CUIL ni email; sin paradas nuevas)
+      (running && internal && !r.depot_arrived_at ? '<button class="btn go" type="button" id="drvDepot"' + (pend ? ' disabled' : '') + '>LLEGUÉ A DIAMANTE</button>' +
+        '<small>' + (pend ? (pend === 1 ? 'Falta 1 ' + stopNoun(r, 1) : 'Faltan ' + pend + ' ' + stopNoun(r, pend)) + ' por resolver antes de volver al depósito.' : 'Al llegar al depósito tocá LLEGUÉ A DIAMANTE; después cargás el KM FINAL y finalizás la hoja.') + '</small>' : '') +
+      (running && internal && r.depot_arrived_at ? '<small class="drv-note" id="drvDepotOk">Llegada a Diamante ' + hhmm(r.depot_arrived_at) + (r.depot_location && r.depot_location.outside_m ? ' · ⚠ fuera del radio (' + r.depot_location.outside_m + ' m)' : r.depot_location && r.depot_location.missing_reason ? ' · sin ubicación' : '') + '</small>' : '') +
+      (running && r.vehicle_id && (!internal || r.depot_arrived_at) ? '<label class="drv-km">KM FINAL del vehículo (inicial ' + (r.km_start ?? '—') + ') <input class="ed" id="drvKm" inputmode="numeric"></label>' : '') +
+      (running && (!internal || r.depot_arrived_at) ? '<button class="btn go" type="button" id="drvFin"' + (pend ? ' disabled' : '') + '>FINALIZAR HOJA</button>' + (pend ? '<small>' + (pend === 1 ? 'Falta 1 ' + stopNoun(r, 1) : 'Faltan ' + pend + ' ' + stopNoun(r, pend)) + ' por resolver.</small>' : '') : '') +
       (closed ? '<b class="drv-closed">HOJA FINALIZADA · solo lectura</b><button class="btn dark" type="button" id="drvPdf">DESCARGAR PDF</button>' +
         (!this.readOnly && this.canReturn(r) ? '<button class="btn soft" type="button" id="drvRet">DEVOLVER HOJA</button><div class="drv-form" id="drvRetForm" hidden><input class="ed" id="drvRetWhy" placeholder="Motivo (obligatorio)"><button class="btn dark" type="button" id="drvRetGo">ENVIAR SOLICITUD</button><span class="shiperr" hidden></span></div>' : '') : '') + '</div>';
     el.querySelector('#drvBack').onclick = () => { this.openId = null; this.render(); };
@@ -306,7 +377,13 @@ export class DriverApp {
     const st = el.querySelector('#drvStart'); if (st) st.onclick = async () => {
       const ki = el.querySelector('#drvKmIni'), km = ki ? ki.value.trim().replace(/\./g, '') : null;
       if (ki && !/^\d+$/.test(km)) { this.toast('Cargá el kilometraje inicial del vehículo.'); return; }
-      st.disabled = true; await this.act('start', { route: r.id, km: km ? Number(km) : null }); this.render(); };
+      st.disabled = true;
+      // V4.24 · hoja INTERNA: SALÍ DEL DEPÓSITO DIAMANTE = el MISMO inicio (start_route: hora, km, usuario, vehículo) + el GPS de la salida
+      const dep = isInternal(r) ? await this.locate(st.closest('.drv-foot') || el) : null;
+      if (isInternal(r) && !dep) { st.disabled = false; return; }
+      await this.act('start', { route: r.id, km: km ? Number(km) : null });
+      if (dep) await this.act('departure', { route: r.id, location: dep });
+      this.render(); };
     const fin = el.querySelector('#drvFin'); if (fin) fin.onclick = async () => {
       const kmI = el.querySelector('#drvKm'); const km = kmI ? kmI.value.trim() : null;
       if (kmI && (!km || Number(km) < Number(r.km_start || 0))) { this.toast(!km ? 'Cargá el kilometraje final.' : 'El kilometraje no puede ser menor a ' + r.km_start + '.'); return; }
@@ -315,6 +392,10 @@ export class DriverApp {
     const ret = el.querySelector('#drvRet'); if (ret) { const f = el.querySelector('#drvRetForm'); ret.onclick = () => { f.hidden = false; };
       el.querySelector('#drvRetGo').onclick = async () => { const why = el.querySelector('#drvRetWhy').value.trim(), er = f.querySelector('.shiperr'); if (!why) { er.textContent = 'Indicá el motivo.'; er.hidden = false; return; }
         try { await this.api.requestRouteReturn(r.id, why); this.toast('Solicitud enviada a Administración. La hoja no se modifica hasta que la resuelvan.'); f.hidden = true; } catch (e) { er.textContent = e.message; er.hidden = false; } }; }
+    // V4.23 · TERMINÉ EN la ubicación y LLEGUÉ A DIAMANTE: mismo GPS (o motivo sin ubicación) y misma cola sin conexión que la llegada
+    el.querySelectorAll('[data-locdepart]').forEach(b => b.onclick = async () => { const sid = b.closest('.drv-stop').dataset.s; b.disabled = true; const loc = await this.locate(b.closest('.drv-stop')); if (!loc) { b.disabled = false; return; } await this.act('locdepart', { route: r.id, stop: sid, location: loc }); this.render(); });
+    el.querySelectorAll('[data-locfinish]').forEach(b => b.onclick = async () => { const sid = b.closest('.drv-stop').dataset.s; b.disabled = true; const loc = await this.locate(b.closest('.drv-stop')); if (!loc) { b.disabled = false; return; } await this.act('locfinish', { route: r.id, stop: sid, location: loc }); this.render(); });
+    const dep = el.querySelector('#drvDepot'); if (dep) dep.onclick = async () => { dep.disabled = true; const loc = await this.locate(dep.closest('.drv-foot') || el); if (!loc) { dep.disabled = false; return; } await this.act('depot', { route: r.id, location: loc }); this.render(); };
     el.querySelectorAll('[data-arrive]').forEach(b => b.onclick = async () => { const sid = b.closest('.drv-stop').dataset.s; b.disabled = true; const loc = await this.locate(b.closest('.drv-stop')); if (!loc) { b.disabled = false; return; } await this.act('arrive', { route: r.id, stop: sid, location: loc }); this.render(); });
     el.querySelectorAll('.drv-stop').forEach(box => {
       const sid = box.dataset.s, st = r.stops.find(x => x.id === sid);
@@ -382,8 +463,9 @@ export class DriverApp {
     if (ev && ev.dni_upload) { ev.dni_storage_path = await this.api.uploadIdentityDoc(ev.cuil, ev.dni_upload); delete ev.dni_upload; this._sv(this.kQ, this.queue); }
     if (ev && ev.dni_blob) {   // foto guardada sin conexión (IndexedDB)
       const blob = await BLOBS.get(ev.dni_blob.key);
-      if (!blob) throw Object.assign(new Error('La foto del DNI guardada en el celular no está disponible: volvé a cargar la entrega.'), { code: 'DNI_LOST' });
-      ev.dni_storage_path = await this.api.uploadIdentityDoc(ev.cuil, { blob, mime: ev.dni_blob.mime, size: ev.dni_blob.size });
+      // V4.19: la foto del DNI ya no es obligatoria. Una entrega guardada sin conexión ANTES de la actualización la sigue subiendo
+      // si está; si se perdió, la entrega se envía igual sin la foto (nunca se le pide al chofer volver a cargarla).
+      if (blob) ev.dni_storage_path = await this.api.uploadIdentityDoc(ev.cuil, { blob, mime: ev.dni_blob.mime, size: ev.dni_blob.size });
       const k = ev.dni_blob.key; delete ev.dni_blob; this._sv(this.kQ, this.queue); BLOBS.del(k);
     }
     return this.api.setStopOutcome(a.stop, a.outcome, a.note, a.reason, op.op_id, a.extra);
@@ -412,7 +494,7 @@ export class DriverApp {
     });
   }
   // Resolver parada según su TIPO (stop_type), sin que el chofer elija formulario:
-  //  · PEDIDO (entrega comercial a un cliente): nombre y apellido + CUIL + foto del DNI + firma
+  //  · PEDIDO (entrega comercial a un cliente): nombre y apellido + CUIL + firma (sin foto del DNI, V4.19)
   //  · UBICACION_INTERNA (sucursal precargada, p. ej. Montecaseros / San Juan): nombre y apellido + firma (recepción interna)
   //  · TAREA: sin receptor ni firma (observación opcional)
   // Sin cobranza ni medio de pago: entregar NO es cobrar. Solo las hojas publicadas ANTES de este cambio con task COBRANZA/AMBAS
@@ -427,44 +509,26 @@ export class DriverApp {
     form.innerHTML = '<b class="drv-ft">' + outLabel(st, o) + '</b>' +
       (transfer && delivered ? '<div class="drv-rec"><b>RECEPCIÓN INTERNA DE TRASLADO</b><small>' + esc(st.client_name) + ((st.order_numbers || []).length ? ' · pedidos ' + esc(st.order_numbers.join(', ')) : '') + '</small></div>' : '') +
       (task && o === 'ENTREGADO' ? '<input class="ed" data-f="txt" placeholder="Observación (opcional)">' : '') +
-      (sign ? '<input class="ed" data-f="recv" placeholder="' + (transfer ? 'Nombre y apellido de quien recibe en la sucursal (obligatorio)' : 'Nombre y apellido de quien recibe (obligatorio)') + '"><div class="sigbox"><canvas width="600" height="240" data-sig></canvas><div class="sig-actions"><button type="button" class="btn soft" data-sigexpand>FIRMAR EN PANTALLA GRANDE</button><button type="button" class="linkbtn" data-sigclr>Borrar firma</button></div></div>' : '') +
-      // entrega comercial: CUIL + foto del DNI (ambos transportistas). Nunca en sucursal/ubicación interna ni en TAREA.
-      (sign && idReq ? '<input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Email del receptor (obligatorio)"><span class="drv-mailhint" data-mailhint></span>' +
-        '<input class="ed" data-f="cuil" inputmode="numeric" placeholder="CUIL de quien recibe (11 dígitos)"><span class="drv-dni" data-dni></span>' : '') +
+      (sign ? '<label class="drv-field" data-field="recv"><span class="drv-lbl">' + (transfer ? 'Nombre y apellido de quien recibe en la sucursal' : 'Nombre y apellido de quien recibe') + ' <b>*</b></span><input class="ed" data-f="recv" autocomplete="off" placeholder="Ej.: María Pérez"><small class="drv-ferr" data-ferr="recv" hidden></small></label>' +
+        // V4.24 · entrega comercial: CUIL (obligatorio) y email (OPCIONAL) con etiqueta fija, ANTES de la firma. Nunca en sucursal ni en TAREA.
+        (idReq ? '<label class="drv-field" data-field="cuil"><span class="drv-lbl">CUIL de quien recibe <b>*</b></span><input class="ed" data-f="cuil" inputmode="numeric" maxlength="13" autocomplete="off" placeholder="Ej.: 20-12345678-6"><span class="drv-cuilhint" data-cuilhint></span><small class="drv-ferr" data-ferr="cuil" hidden></small></label>' +
+          '<label class="drv-field" data-field="email"><span class="drv-lbl">Email de quien recibe <em class="drv-opt">OPCIONAL</em></span><input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Ej.: compras@cliente.com"><span class="drv-mailhint" data-mailhint></span><small class="drv-ferr" data-ferr="email" hidden></small></label>' : '') +
+        '<div class="sigbox" data-sigbox><img class="sig-prev" data-sigprev alt="Firma de quien recibe" hidden><span class="sig-empty" data-sigempty>Falta la firma de quien recibe</span><button type="button" class="btn dark sig-open" data-sigopen>FIRMAR</button></div>' : '') +
+      // entrega comercial: CUIL obligatorio (ambos transportistas). Sin foto del DNI. Nunca en sucursal/ubicación interna ni en TAREA.
+      
       (o === 'ENTREGA_PARCIAL' ? '<input class="ed" data-f="txt" placeholder="Observación (obligatoria)">' : o !== 'ENTREGADO' ? '<input class="ed" data-f="txt" placeholder="Motivo (obligatorio)">' : '') +
       '<button class="btn dark" type="button" data-save>GUARDAR</button><span class="shiperr" hidden></span>';
-    const er = form.querySelector('.shiperr'), fail = t => { er.textContent = t; er.hidden = false; };
+    const er = form.querySelector('.shiperr'), fail = t => { er.textContent = t; er.hidden = false;
+      form.querySelectorAll('[data-ferr]').forEach(x => { x.hidden = true; x.textContent = ''; });
+      const k = /CUIL/i.test(t) ? 'cuil' : /email/i.test(t) ? 'email' : /nombre/i.test(t) ? 'recv' : null, fe = k && form.querySelector('[data-ferr="' + k + '"]');
+      if (fe) { fe.textContent = t; fe.hidden = false; const inp = form.querySelector('[data-f="' + k + '"]'); if (inp) inp.focus(); } };
     form.addEventListener('input', () => { er.hidden = true; });   // el aviso se oculta apenas se corrige un dato
-    // firma táctil
-    const cv = form.querySelector('[data-sig]'); let drawn = false;
-    if (cv) { const ctx = cv.getContext('2d'); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#000E18'; let down = false;
-      const pos = e => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left) * cv.width / b.width, (e.clientY - b.top) * cv.height / b.height]; };
-      cv.onpointerdown = e => { down = true; cv.setPointerCapture(e.pointerId); ctx.beginPath(); ctx.moveTo(...pos(e)); };
-      cv.onpointermove = e => { if (!down) return; ctx.lineTo(...pos(e)); ctx.stroke(); drawn = true; };
-      cv.onpointerup = () => { down = false; keep(); };
-      const origin = cv.parentElement;
-      const expand = form.querySelector('[data-sigexpand]');
-      let modal = null;
-      const closeModal = () => {
-        if (!modal) return;
-        origin.insertBefore(cv, origin.firstChild);
-        modal.remove(); modal = null;
-        expand.focus();
-      };
-      expand.onclick = () => {
-        if (modal) return;
-        modal = document.createElement('div'); modal.className = 'drv-sign-modal';
-        modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); modal.setAttribute('aria-label', 'Firmar recepción');
-        modal.innerHTML = '<div class="drv-sign-panel"><b>FIRMA DE QUIEN RECIBE</b><p>Firmá con el dedo en el espacio de abajo.</p><div class="drv-sign-stage"></div><div class="drv-sign-controls"><button type="button" class="btn soft" data-modal-clear>BORRAR FIRMA</button><button type="button" class="btn dark" data-modal-done>LISTO</button></div></div>';
-        document.body.appendChild(modal);
-        modal.querySelector('.drv-sign-stage').appendChild(cv);
-        modal.querySelector('[data-modal-clear]').onclick = () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; };
-        modal.querySelector('[data-modal-done]').onclick = closeModal;
-        modal.onkeydown = ev => { if (ev.key === 'Escape') { ev.preventDefault(); closeModal(); } };
-        modal.querySelector('[data-modal-done]').focus();
-      };
-      form.querySelector('[data-sigclr]').onclick = () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; };
-    }
+    // FIRMA (V4.19): FIRMAR abre una ventana a pantalla completa con un lienzo propio del tamaño real de la pantalla.
+    // Los trazos se guardan en px de la ventana y se redibujan escalados de forma UNIFORME al girar (sin deformarse); al
+    // confirmar, se exporta recortada a lo dibujado y centrada en 1200×480 (misma proporción 5:2 que usan los documentos).
+    let sigData = null; const prevImg = form.querySelector('[data-sigprev]'), sigEmpty = form.querySelector('[data-sigempty]'), sigOpen = form.querySelector('[data-sigopen]');
+    const showSig = () => { if (!prevImg) return; prevImg.hidden = !sigData; if (sigData) prevImg.src = sigData; sigEmpty.hidden = !!sigData; sigOpen.textContent = sigData ? 'FIRMAR DE NUEVO' : 'FIRMAR'; };
+    if (sigOpen) sigOpen.onclick = () => openSignature(sigOpen, transfer ? 'FIRMA DE QUIEN RECIBE EN LA SUCURSAL' : 'FIRMA DE QUIEN RECIBE', png => { sigData = png; showSig(); keep(); er.hidden = true; });
     // Autocompletar con el perfil reutilizable (CUIL → DNI → cliente). Sin conexión, simplemente no se completa.
     const em = form.querySelector('[data-f="email"]'), hint = form.querySelector('[data-mailhint]'), rv = form.querySelector('[data-f="recv"]');
     const fill = async cuil => {
@@ -475,43 +539,19 @@ export class DriverApp {
       if (p.full_name && rv && !rv.value) rv.value = p.full_name;
     };
     if (em) { em.oninput = () => { em.dataset.auto = ''; hint.textContent = ''; }; fill(null); }
-    // DNI: si el CUIL ya tiene DNI no se pide foto
-    // DNI: si el CUIL ya tiene DNI registrado, se reutiliza (no se pide foto). Foto nueva: se procesa al aceptarla, con vista previa
-    let dni = null, dniRegistered = false, dniBusy = false, dniTok = 0, prevUrl = null; const cu = form.querySelector('[data-f="cuil"]'), saveBtn = form.querySelector('[data-save]');
-    const release = () => { if (prevUrl) { URL.revokeObjectURL(prevUrl); prevUrl = null; } };
-    form._release = () => { dniTok++; release(); dni = null; };   // cancelar/cerrar: libera la vista previa y descarta resultados en curso
-    if (cu) cu.onchange = async () => {
-      const n = cu.value.replace(/\D/g, ''), box2 = form.querySelector('[data-dni]');
-      if (n.length !== 11) { box2.textContent = 'El CUIL debe tener 11 dígitos.'; return; }
-      fill(n); keep();
-      dniRegistered = false;
-      const has = await this.api.cuilHasDni(n).catch(() => false);
-      dniRegistered = has;
-      form._release(); dniBusy = false; saveBtn.disabled = false;
-      box2.innerHTML = has ? '✓ DNI YA REGISTRADO (se reutiliza la identidad)' : 'CUIL nuevo · foto del DNI (obligatoria) <input type="file" accept="image/jpeg,image/png" capture="environment" data-dnifile><span class="drv-dnist" data-dnist></span><img class="drv-dniprev" data-dniprev alt="Vista previa del DNI" hidden>';
-      const fi = box2.querySelector('[data-dnifile]'), stt = box2.querySelector('[data-dnist]'), prev = box2.querySelector('[data-dniprev]');
-      if (fi) fi.onchange = async () => {
-        const f = fi.files[0], tok = ++dniTok; dni = null; release(); prev.hidden = true;
-        if (!f) { stt.textContent = ''; return; }
-        dniBusy = true; saveBtn.disabled = true; stt.textContent = 'Procesando foto…'; er.hidden = true;
-        try {
-          const p = await processDniPhoto(f);
-          if (tok !== dniTok) return;   // la reemplazaron mientras se procesaba: este resultado se descarta
-          if (p.size > 5242880) throw new Error('la imagen procesada supera 5 MB');
-          dni = p; prevUrl = URL.createObjectURL(p.blob); prev.src = prevUrl; prev.hidden = false;
-          stt.textContent = '✓ Foto lista · ' + kb(p.original) + ' → ' + kb(p.size) + ' (' + p.w + '×' + p.h + ')';
-        } catch (e) {
-          if (tok === dniTok) { stt.textContent = ''; fail('No se pudo procesar la foto del DNI: ' + (e.message || e) + '. Nombre, email, CUIL y firma se conservan: volvé a sacar la foto (si se repite, bajá la resolución de la cámara).'); }
-        } finally { if (tok === dniTok) { dniBusy = false; saveBtn.disabled = false; } fi.value = ''; }   // se suelta el archivo original
-      };
-    };
+    // CUIL obligatorio en la entrega comercial (ambos transportistas). Sin foto del DNI (V4.19).
+    const cu = form.querySelector('[data-f="cuil"]'), cuHint = form.querySelector('[data-cuilhint]');
+    form._release = () => {};
+    if (cu) cu.onchange = () => { const n = cu.value.replace(/\D/g, ''); cuHint.textContent = n && n.length !== 11 ? 'El CUIL debe tener 11 dígitos.' : ''; if (n.length === 11) fill(n); keep(); };
     // Los datos cargados sobreviven a una recarga (p. ej. Android cerró la página al volver de la cámara) y a un fallo de la foto
     const draftKey = 'okd_drv_form:' + st.id + ':' + o;
-    function keep() { try { sessionStorage.setItem(draftKey, JSON.stringify({ recv: rv ? rv.value : '', email: em ? em.value : '', cuil: cu ? cu.value : '', sig: cv && drawn ? cv.toDataURL('image/png') : null })); } catch (e) { } }
+    function keep() { try { sessionStorage.setItem(draftKey, JSON.stringify({ recv: rv ? rv.value : '', email: em ? em.value : '', cuil: cu ? cu.value : '', sig: sigData })); } catch (e) { } }
     form.addEventListener('input', keep);
     try { const d = JSON.parse(sessionStorage.getItem(draftKey) || 'null');
       if (d) { if (rv && d.recv) rv.value = d.recv; if (em && d.email) { em.value = d.email; em.dataset.auto = ''; } if (cu && d.cuil) { cu.value = d.cuil; cu.onchange(); }
-        if (cv && d.sig) { const im = new Image(); im.onload = () => { cv.getContext('2d').drawImage(im, 0, 0); drawn = true; }; im.src = d.sig; } } } catch (e) { }
+        if (d.sig && prevImg) { sigData = d.sig; showSig(); } } } catch (e) { }
+    // V4.23 · email SUGERIDO para ESTA entrega (de la hoja o del padrón por CUIT): se precarga; el chofer lo puede cambiar o borrar
+    if (em && !em.value && idReq && this.api.deliveryEmailSuggestion) this.api.deliveryEmailSuggestion(st.id).then(v => { if (v && !em.value) { em.value = v; em.dataset.auto = ''; keep(); } }).catch(() => { });
     form.querySelector('[data-save]').onclick = async ev => {
       er.hidden = true;
       const txt = (form.querySelector('[data-f="txt"]') || {}).value; const extra = {};
@@ -520,21 +560,19 @@ export class DriverApp {
       if (sign) {
         const recv = form.querySelector('[data-f="recv"]').value.trim();
         if (!recv) return fail(transfer ? 'Indicá quién recibe en la sucursal.' : 'Indicá el nombre de quien recibe.');
-        if (!drawn) return fail(transfer ? 'Falta la firma de quien recibe en la sucursal.' : 'Falta la firma de quien recibe.');
-        extra.evidence = { receiver_name: recv, signature_png_b64: cv.toDataURL('image/png').split(',')[1] };
+        if (!sigData) return fail(transfer ? 'Falta la firma de quien recibe en la sucursal: tocá FIRMAR.' : 'Falta la firma de quien recibe: tocá FIRMAR.');
+        extra.evidence = { receiver_name: recv, signature_png_b64: sigData.split(',')[1] };
         const mail = em ? em.value.trim().toLowerCase() : '';
-        if (idReq && !mail) return fail('El email del receptor es obligatorio.');
-        if (mail && !/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(mail)) return fail('El email del receptor no es válido.');
-        if (idReq) { const n = cu.value.replace(/\D/g, ''); if (n.length !== 11) return fail('El CUIL debe tener 11 dígitos.');
-          if (dniBusy) return fail('Esperá a que termine de procesarse la foto del DNI.');
-          if (!dniRegistered && !dni) return fail('La foto del DNI es obligatoria para un CUIL nuevo.'); extra.evidence.cuil = n; if (dni) extra.evidence.dni_upload = { blob: dni.blob, mime: dni.mime, size: dni.size }; }
+        // V4.21: el email es OPCIONAL. Si se carga, tiene que ser válido (se corrige o se borra); vacío → sin Recibido Conforme.
+        if (mail && !/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(mail)) return fail('El email del receptor no es válido: corregilo o borralo (es opcional).');
+        if (idReq) { const n = cu.value.replace(/\D/g, ''); if (!n) return fail('El CUIL de quien recibe es obligatorio.'); if (n.length !== 11) return fail('El CUIL debe tener 11 dígitos.'); extra.evidence.cuil = n; }
         if (mail) extra.evidence.email = mail;
       }
       ev.target.disabled = true;
       const loc = await this.locate(box); if (!loc) { ev.target.disabled = false; return; }
       extra.location = loc;
       const ok = await this.act('outcome', { route: r.id, stop: st.id, outcome: o, note: (o === 'ENTREGA_PARCIAL' || (task && o === 'ENTREGADO')) ? (String(txt || '').trim() || null) : null, reason: ['NO_ENTREGADO', 'REPROGRAMAR'].includes(o) ? txt : null, extra });
-      if (!ok) ev.target.disabled = false;   // falló: se conservan nombre, email, CUIL, firma y la foto procesada para reintentar
+      if (!ok) ev.target.disabled = false;   // falló: se conservan nombre, email, CUIL y firma para reintentar
       else { try { sessionStorage.removeItem(draftKey); } catch (e) { } if (form._release) form._release(); }
       this.render();
     };

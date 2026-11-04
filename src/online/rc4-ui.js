@@ -3,6 +3,7 @@
 // La pantalla solo muestra lo autorizado; el servidor valida cada acción igual (RLS + RPC).
 import { switcherHtml } from './role-view.js';
 import { esc } from './util.js';
+import { serviceInfo, intervalError } from './vehicle-service.js';
 import { hasPerm, ROLE_LABEL } from '../../supabase/functions/_shared/rules.js';
 
 export const RC4_ROLES = ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'];
@@ -20,6 +21,7 @@ export function roleNav(me) {
   if (me.role === 'ADMIN') return [
     ['#/dashboard', 'Dashboard'],
     ['#/historial', 'Hojas de ruta', [['#/despacho', 'Despacho'], ['#/borradores', 'Borradores'], ['#/historial', 'Hojas publicadas']]],
+    ['#/recorridos', 'Salida y recorrido'],   // V4.24 · módulo independiente (no es Vehículos ni inspección)
     ['#/solicitudes', 'Solicitudes', [['#/aprobaciones', 'Aprobaciones de ruta interna']]],
     ['#/conciliacion-noc', 'NOC'],
     ['#/informes', 'Informes'],
@@ -31,7 +33,7 @@ export function roleNav(me) {
       ['#/configuracion?sec=emails', 'Emails'], ['#/backup', 'Backup / Archivo']]]].filter(Boolean);
   if (me.role === 'SUPERVISOR_DESPACHO') return [
     ['#/dashboard', 'Dashboard'], ['#/nueva-hoja', 'Nueva hoja de ruta'], ['#/despacho', 'Despacho'], ['#/borradores', 'Borradores del equipo'],
-    (hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team')) && ['#/historial', 'Hojas publicadas'], canRequests(me) && ['#/solicitudes', 'Solicitudes / Aprobaciones'], ['#/notificaciones', 'Notificaciones'],
+    (hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team')) && ['#/historial', 'Hojas publicadas'], hasPerm(me, 'signatures.view') && ['#/recorridos', 'Salida y recorrido'], canRequests(me) && ['#/solicitudes', 'Solicitudes / Aprobaciones'], ['#/notificaciones', 'Notificaciones'],
     (hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/vehiculos', 'Vehículos'],
     (hasPerm(me, 'columns.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/config-operativa', 'Configuración operativa'],
     hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones']].filter(Boolean);
@@ -75,9 +77,21 @@ export function mobileNav(me, active) {
     return '<details class="mgrp"' + (open ? ' open' : '') + '><summary>' + esc(g) + '</summary>' + its.map(link).join('') + '</details>';
   }).join('');
 }
+// V4.20 · íconos del menú lateral (trazo simple, color del texto). Al plegar el menú quedan solo los íconos.
+const NAV_ICON_PATHS = {
+  dashboard: 'M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z', recorridos: 'M5 19a2 2 0 1 0 0-.01M19 5a2 2 0 1 0 0-.01M7 19h6a4 4 0 0 0 0-8H11a4 4 0 0 1 0-8h6', despacho: 'M3 7h13l5 5v5h-3M3 7v10h2M8 17h7M6.5 17a1.5 1.5 0 1 0 0 .01M17.5 17a1.5 1.5 0 1 0 0 .01',
+  'nueva-hoja': 'M12 5v14M5 12h14', borradores: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4', historial: 'M4 5h16M4 10h16M4 15h10M4 20h7',
+  solicitudes: 'M4 4h16v12H8l-4 4z', aprobaciones: 'M5 12l4 4L19 6', 'conciliacion-noc': 'M7 7h10M7 12h10M7 17h6M4 3h16v18H4z',
+  informes: 'M5 20V10M12 20V4M19 20v-7', comunicaciones: 'M3 6h18v12H3zM3 7l9 6 9-6', notificaciones: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20h4',
+  usuarios: 'M9 11a4 4 0 1 0 0-.01M2 21c0-4 3-6 7-6s7 2 7 6M17 11a3 3 0 1 0 0-.01M22 20c0-3-2-5-5-5', vehiculos: 'M3 13l2-6h14l2 6v5H3zM7 18v2M17 18v2M3 13h18',
+  auditoria: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14M21 21l-4.5-4.5', backup: 'M4 7c0-2 16-2 16 0v10c0 2-16 2-16 0zM4 7c0 2 16 2 16 0M4 12c0 2 16 2 16 0',
+  configuracion: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6M19 12l2-1-1-3-2 .4-1.5-1.5L17 5l-3-1-1 2h-2L10 4 7 5l.5 1.9L6 8.4 4 8l-1 3 2 1v0l-2 1 1 3 2-.4 1.5 1.5L7 19l3 1 1-2h2l1 2 3-1-.5-1.9 1.5-1.5 2 .4 1-3z',
+  'config-operativa': 'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M16 4v4M10 10v4M18 16v4' };
+const navIcon = h => { const k = String(ROUTE_OF(h) || h).replace('#/', ''), d = NAV_ICON_PATHS[k] || 'M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0';
+  return '<svg class="nico" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="' + d + '"/></svg>'; };
 function navLinks(me, active) {
   const a = String(active || '');
-  return roleNav(me).map(([h, l, sub]) => '<a href="' + h + '" data-nav="' + h + '" class="' + (NAV_MATCH(h, a) && !(sub || []).some(s => NAV_MATCH(s[0], a) && s[0] !== h) ? 'active' : '') + '"><span class="dot"></span>' + esc(l) + '</a>' +
+  return roleNav(me).map(([h, l, sub]) => '<a href="' + h + '" data-nav="' + h + '" title="' + esc(l) + '" class="' + (NAV_MATCH(h, a) && !(sub || []).some(s => NAV_MATCH(s[0], a) && s[0] !== h) ? 'active' : '') + '">' + navIcon(h) + '<span class="nlbl">' + esc(l) + '</span></a>' +
     (sub ? '<div class="sub">' + sub.map(([sh, sl]) => '<a href="' + sh + '" data-nav="' + sh + '" class="' + (NAV_MATCH(sh, a) ? 'active' : '') + '">' + esc(sl) + '</a>').join('') + '</div>' : '')).join('');
 }
 // Barra horizontal (encima del panel de Despacho) con los mismos destinos
@@ -86,17 +100,31 @@ export function roleTopNav(me, active) {
   const flat = []; roleNav(me).forEach(([h, l, sub]) => { flat.push([h, l]); (sub || []).forEach(s => { if (!flat.some(f => f[0] === s[0])) flat.push(s); }); });
   return '<nav class="adnav" id="adNav">' + flat.map(([h, l]) => '<a href="' + h + '" class="' + (ROUTE_OF(h) === a ? 'on' : '') + '" data-nav="' + h + '">' + esc(l.toUpperCase()) + '</a>').join('') + '</nav>';
 }
+// V4.20 · menú lateral PLEGABLE (solo íconos) y OCULTABLE (☰ para mostrarlo). La elección se recuerda en este navegador.
+const SIDE_KEY = 'okd_side_mode';
+export function sideMode() { try { const v = localStorage.getItem(SIDE_KEY); return ['full', 'mini', 'hidden'].includes(v) ? v : 'full'; } catch (e) { return 'full'; } }
+function wireSideMode(el) {
+  const app = el.querySelector('.rc4app'); if (!app) return;
+  const apply = m => { app.classList.toggle('side-mini', m === 'mini'); app.classList.toggle('side-hidden', m === 'hidden');
+    const f = app.querySelector('[data-sidefold]'); if (f) { f.textContent = m === 'mini' ? '»' : '«'; f.setAttribute('aria-label', m === 'mini' ? 'Desplegar menú' : 'Plegar menú'); f.title = f.getAttribute('aria-label'); }
+    try { localStorage.setItem(SIDE_KEY, m); } catch (e) { } };
+  apply(sideMode());
+  const fold = app.querySelector('[data-sidefold]'); if (fold) fold.onclick = () => apply(sideMode() === 'mini' ? 'full' : 'mini');
+  const hide = app.querySelector('[data-sidehide]'); if (hide) hide.onclick = () => apply('hidden');
+  const showB = app.querySelector('[data-sideshow]'); if (showB) showB.onclick = () => apply('full');
+}
 // Marco con menú lateral (V4/V2) dentro de #usersPanel
 export function appFrame(me, title, active, sub) {
   const el = document.getElementById('usersPanel'); el.hidden = false;
   const foot = { ADMIN: 'OK Despacho · Administración<br>Configuración global exclusiva Admin', SUPERVISOR_DESPACHO: 'Rol operativo de supervisión<br>Sin acceso a configuración global', OPERARIO_DEPOSITO: 'Operario Depósito<br>Preparación de hojas' }[me.role];
   const newBtn = me.role !== 'ADMIN' && hasPerm(me, 'routes.create') ? '<a class="btn primary" href="#/nueva-hoja" id="newRouteTop">+ NUEVA HOJA DE RUTA</a>' : '';
-  el.innerHTML = '<div class="rc4app"><aside class="rc4side"><div class="brand"><img class="logo" src="/icons/icon-192.png" alt="OK"><div><b>DESPACHO</b><small>' + esc(ROLE_LABEL[me.role] || me.role) + '</small></div><button class="rc4menu" type="button" aria-expanded="false" aria-label="Abrir menú"><span></span>MENÚ</button></div>' +
-    '<nav class="nav" id="adNav">' + navLinks(me, active) + '</nav><nav class="mnav" aria-label="Menú">' + mobileNav(me, active) + '</nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b>' + switcherHtml(me) + '<span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<div class="footer">' + foot + '</div></aside>' +
-    '<main class="rc4main"><div class="topbar"><div class="title"><h1>' + esc(title) + '</h1>' + (sub ? '<p>' + esc(sub) + '</p>' : '') + '</div>' +
+  el.innerHTML = '<div class="rc4app"><aside class="rc4side"><div class="brand"><img class="logo" src="/icons/icon-192.png" alt="OK"><div><b>DESPACHO</b><small>' + esc(ROLE_LABEL[me.role] || me.role) + '</small></div><button class="rc4fold" type="button" data-sidefold aria-label="Plegar menú" title="Plegar menú">«</button><button class="rc4menu" type="button" aria-expanded="false" aria-label="Abrir menú"><span></span>MENÚ</button></div>' +
+    '<nav class="nav" id="adNav">' + navLinks(me, active) + '</nav><nav class="mnav" aria-label="Menú">' + mobileNav(me, active) + '</nav>' + '<div class="rc4who"><b>' + esc(me.full_name) + '</b>' + switcherHtml(me) + '<span>' + esc(ROLE_LABEL[me.role] || me.role) + ' · ' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span><button class="rc4logout" type="button">Cerrar sesión</button></div>' + '<button class="rc4hide" type="button" data-sidehide title="Ocultar el menú (se vuelve a mostrar con ☰)">Ocultar menú</button>' + '<div class="footer">' + foot + '</div></aside>' +
+    '<main class="rc4main"><div class="topbar"><button class="rc4show" type="button" data-sideshow aria-label="Mostrar menú" title="Mostrar menú">☰</button><div class="title"><h1>' + esc(title) + '</h1>' + (sub ? '<p>' + esc(sub) + '</p>' : '') + '</div>' +
     '<div class="topact">' + newBtn + '<div class="userchip"><b>' + esc(me.full_name) + ' · ' + esc(ROLE_LABEL[me.role] || me.role) + '</b>' + switcherHtml(me) + '<br><span>' + (me.role === 'ADMIN' ? 'Acceso total' : esc(me.team_label || 'Equipo de Despacho')) + '</span></div>' +
     '<button class="tbtn" type="button" id="adLogout">Cerrar sesión</button></div></div><div id="adBody" class="rc4body"></div></main></div>';
   el.querySelector('#adLogout').onclick = () => window.OKD_LOGOUT && window.OKD_LOGOUT();
+  wireSideMode(el);
   return el.querySelector('#adBody');
 }
 const msg = (w, m) => { if (!m) return; const d = document.createElement('div'); d.className = 'up-msg ' + (m.err ? 'err' : 'ok'); d.id = 'adMsg'; d.textContent = m.text; w.prepend(d); };
@@ -350,16 +378,18 @@ export async function openVehicles(api, me, frame) {
       (canManageVehicles ? '' : '<p class="msg warn" id="vfNoPerm">Se quitó tu permiso para administrar vehículos: este formulario no se puede guardar. Lo que escribiste se conserva; podés copiarlo o tocar CANCELAR.</p>') +
       '<div class="row-form">' +
       [['vfName', 'Modelo / nombre (obligatorio)', fv ? fv.name : ''], ['vfPlate', 'Patente (obligatoria)', fv ? fv.plate : ''], ['vfBrand', 'Marca', fv ? fv.brand || '' : ''], ['vfModel', 'Modelo', fv ? fv.model || '' : ''],
-       ['vfType', 'Tipo', fv ? fv.type || '' : ''], ['vfYear', 'Año', fv ? (fv.year || '') : ''], ['vfInterval', 'Intervalo de service (km)', fv ? String(fv.service_interval_km || 10000) : '10000']]
+       ['vfType', 'Tipo', fv ? fv.type || '' : ''], ['vfYear', 'Año', fv ? (fv.year || '') : ''], ['vfInterval', 'Intervalo de service (km) · cada cuántos km se hace', fv ? String(fv.service_interval_km || 10000) : '10000']]
         .concat(fv ? [] : [['vfKm', 'Kilometraje inicial', '0']]).concat([['vfNotes', 'Observaciones', fv ? fv.notes || '' : '']])
         .map(([id, l, val]) => '<label>' + l + ' <input class="ed" id="' + id + '" data-orig="' + esc(String(val)) + '" value="' + esc(String(KF[id] != null && !RO.includes(id) ? KF[id] : val)) + '"' + (/Year|Interval|Km/.test(id) ? ' inputmode="numeric"' : '') +
           (RO.includes(id) ? ' readonly aria-readonly="true" data-ro' : '') + '></label>').join('') +
       '</div>' + (fv ? '<p class="rp-note" id="vfRoNote">Marca, modelo, tipo y año no se pueden cambiar al editar: el servidor no guarda esos cambios (solo se cargan en el alta).</p>' : '') +
       '<div class="uact"><button class="btn dark" type="button" id="vfSave"' + (canManageVehicles ? '' : ' disabled') + '>' + (fv ? 'GUARDAR CAMBIOS' : 'DAR DE ALTA') + '</button><button class="btn soft" type="button" id="vfCancel">CANCELAR</button></div>' +
       (fv ? '' : '<p class="rp-note">El vehículo nuevo queda ACTIVO. Los vehículos existentes nunca se activan solos.</p>') + '</div>' : '';
+    // V4.22: umbral de "service próximo" = "Avisar cuando falten … km" de las alertas (configuración APARTE del intervalo del vehículo)
+    let svcWarn = 1000; try { const ns = await api.notificationSettings(); if (ns && ns.service_warning_km != null) svcWarn = Number(ns.service_warning_km); } catch (e) { }
     const row = v => { const on = v.active !== false;
-      return '<tr data-vid="' + v.id + '"' + (on ? '' : ' class="veh-off"') + '><td><b>' + esc(v.name) + '</b>' + (v.habitual_driver_id === me.id ? ' <small>(asignado)</small>' : '') + (on ? '' : ' ' + pill('warn', 'Inactivo')) + '</td><td>' + esc(v.plate) + '</td><td>' + n0(v.current_km) + '</td><td>' + (v.next_service_km ? n0(v.next_service_km) : '—') + '</td><td>' +
-        (on ? (v.service_due ? pill('bad', 'Service requerido') : pill('ok', 'OK')) : pill('warn', 'Fuera de uso')) + '</td><td><div class="uact">' +
+      return '<tr data-vid="' + v.id + '"' + (on ? '' : ' class="veh-off"') + '><td><b>' + esc(v.name) + '</b>' + (v.habitual_driver_id === me.id ? ' <small>(asignado)</small>' : '') + (on ? '' : ' ' + pill('warn', 'Inactivo')) + '</td><td>' + esc(v.plate) + '</td><td>' + n0(v.current_km) + '</td><td>' + (si => si.suspicious ? '—' : n0(si.next) + '<br><small>' + (si.left <= 0 ? 'vencido hace ' + n0(-si.left) : 'faltan ' + n0(si.left)) + ' km · cada ' + n0(si.interval) + '</small>')(serviceInfo(v, svcWarn)) + '</td><td>' +
+        (on ? (si => si.suspicious ? pill('warn', 'Revisar intervalo') : si.due ? pill('bad', 'Service vencido') : si.soon ? pill('warn', 'Service próximo') : pill('ok', 'OK'))(serviceInfo(v, svcWarn)) : pill('warn', 'Fuera de uso')) + '</td><td><div class="uact">' +
         // un vehículo INACTIVO no recibe km, service ni correcciones; solo se edita o se activa (con administración)
         (on && canEnter ? '<input class="ed" data-km placeholder="Km actual" inputmode="numeric" value="' + esc(K.km[v.id] || '') + '"><button class="btn soft" type="button" data-rec>CARGAR KM</button>'
           : K.km[v.id] ? '<input class="ed" data-km value="' + esc(K.km[v.id]) + '" disabled><small class="msg warn" data-kmnoperm>Sin permiso para cargar km: lo escrito se conserva.</small>' : '') +
@@ -403,6 +433,7 @@ export async function openVehicles(api, me, frame) {
     const sv = w.querySelector('#vfSave'); if (sv) sv.onclick = async () => {
       if (!hasPerm(me, 'vehicles.manage')) { msg(w, { err: true, text: 'Sin permiso para administrar vehículos: no se guardó. Lo escrito se conserva.' }); return; }
       const g = id => (w.querySelector('#' + id) || {}).value || '', v = st.form.v;
+      const ie = intervalError(g('vfInterval')); if (ie) { msg(w, { err: true, text: ie }); return; }   // V4.22: no es el kilometraje
       const p = { name: g('vfName').trim(), plate: g('vfPlate').trim(), service_interval_km: Number(g('vfInterval')) || 10000, notes: g('vfNotes'), habitual_driver_id: v ? v.habitual_driver_id || '' : '' };
       // editar NO cambia el estado activo/inactivo ni envía marca/modelo/tipo/año (el servidor no los actualiza en la edición)
       if (v) Object.assign(p, { id: v.id, active: v.active !== false });
