@@ -1,0 +1,176 @@
+{
+ "formulario": "R SE 4.5.1-05",
+ "revision": "Rev:00",
+ "categorias": [
+  {
+   "categoria": "DOCUMENTACIÓN",
+   "controles": [
+    {
+     "n": 1,
+     "control": "Poliza de Seguro + Último Recibo de Pago",
+     "dato_extra": "Vence"
+    },
+    {
+     "n": 2,
+     "control": "Tarjeta Verde",
+     "dato_extra": null
+    },
+    {
+     "n": 3,
+     "control": "Listado de Conductores Autorizados",
+     "dato_extra": null
+    },
+    {
+     "n": 4,
+     "control": "Registro del último mantenimiento (Cam. de Aceite)",
+     "dato_extra": "Km"
+    },
+    {
+     "n": 5,
+     "control": "Copia de ultima verificación tecnica (RTO)",
+     "dato_extra": "Vence"
+    }
+   ]
+  },
+  {
+   "categoria": "ELEMENTOS DE SEGURIDAD",
+   "controles": [
+    {
+     "n": 6,
+     "control": "Extintor Cargado + Fecha de Vencimiento",
+     "dato_extra": "Vence"
+    },
+    {
+     "n": 7,
+     "control": "Botiquín",
+     "dato_extra": null
+    },
+    {
+     "n": 8,
+     "control": "Gato hidráulico, llave cruz y rueda de auxilio",
+     "dato_extra": null
+    },
+    {
+     "n": 9,
+     "control": "Cinturon de Seguridad",
+     "dato_extra": null
+    },
+    {
+     "n": 10,
+     "control": "Apoya-cabezas",
+     "dato_extra": null
+    },
+    {
+     "n": 11,
+     "control": "Freno de Mano",
+     "dato_extra": null
+    },
+    {
+     "n": 12,
+     "control": "Balizas Tipo Triángulo",
+     "dato_extra": null
+    }
+   ]
+  },
+  {
+   "categoria": "LUCES Y SEÑALES",
+   "controles": [
+    {
+     "n": 13,
+     "control": "Luz Alta y baja",
+     "dato_extra": null
+    },
+    {
+     "n": 14,
+     "control": "Luz de Posición",
+     "dato_extra": null
+    },
+    {
+     "n": 15,
+     "control": "Luz de Giro",
+     "dato_extra": null
+    },
+    {
+     "n": 16,
+     "control": "Balizas",
+     "dato_extra": null
+    },
+    {
+     "n": 17,
+     "control": "Luz de Freno",
+     "dato_extra": null
+    },
+    {
+     "n": 18,
+     "control": "Luz Interior",
+     "dato_extra": null
+    },
+    {
+     "n": 19,
+     "control": "Chapa Patente delantera y trasera",
+     "dato_extra": null
+    },
+    {
+     "n": 20,
+     "control": "Bocina",
+     "dato_extra": null
+    }
+   ]
+  },
+  {
+   "categoria": "MECÁNICA Y ESTADO GENERAL",
+   "controles": [
+    {
+     "n": 21,
+     "control": "Espejos Retovisores",
+     "dato_extra": null
+    },
+    {
+     "n": 22,
+     "control": "Cierre de Puertas, capot, compuertas",
+     "dato_extra": null
+    },
+    {
+     "n": 23,
+     "control": "Higiene General",
+     "dato_extra": null
+    },
+    {
+     "n": 24,
+     "control": "Estado de Cubiertas",
+     "dato_extra": null
+    },
+    {
+     "n": 25,
+     "control": "Nivel Aceite Motor",
+     "dato_extra": null
+    },
+    {
+     "n": 26,
+     "control": "Nivel de Liquido refrigerante",
+     "dato_extra": null
+    },
+    {
+     "n": 27,
+     "control": "Nivel de Liquido Limpia Parabrisas",
+     "dato_extra": null
+    },
+    {
+     "n": 28,
+     "control": "Parabrisas en condiciones aceptables",
+     "dato_extra": null
+    },
+    {
+     "n": 29,
+     "control": "Calefactor/ Desempañador en buen funcionamiento",
+     "dato_extra": null
+    },
+    {
+     "n": 30,
+     "control": "Estado General de Carrocería",
+     "dato_extra": null
+    }
+   ]
+  }
+ ]
+}

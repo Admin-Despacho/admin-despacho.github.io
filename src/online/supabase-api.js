@@ -1,3 +1,4 @@
+import { SupabaseInsp } from './supabase-insp.js';
 // Conexión real con el proyecto Supabase PROPIO de OK Despacho.
 // Solo usa la clave pública (anon). Todo lo administrativo pasa por la Edge Function admin-users.
 import { createClient } from '@supabase/supabase-js';
@@ -292,3 +293,4 @@ import { SupabaseAdmin } from './supabase-admin.js';
 import { SupabaseRC4 } from './supabase-rc4.js';
 Object.assign(SupabaseApi.prototype, SupabaseAdmin);
 Object.assign(SupabaseApi.prototype, SupabaseRC4);
+Object.assign(SupabaseApi.prototype, SupabaseInsp);   // V4.25 · inspecciones de vehículos

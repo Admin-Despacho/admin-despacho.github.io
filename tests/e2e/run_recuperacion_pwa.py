@@ -11,7 +11,7 @@ def res(n, ok, d=''): R.append((n, 'PASS' if ok else 'FAIL', str(d)[:320])); pri
 def use(b):
     if os.path.lexists(SERVE): os.unlink(SERVE)
     os.symlink(b, SERVE)
-def server(mode='pages'): s = subprocess.Popen([sys.executable, '/tmp/repro/ghpages_server.py', str(PORT), mode], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1); return s
+def server(mode='pages'): s = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ghpages_server.py'), str(PORT), mode], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1); return s
 ST = '''async()=>({boot:window.OKD_BOOT||null, booted:!!window.OKD_BOOTED, splash:!!document.getElementById("splash")&&!document.getElementById("splash").classList.contains("hide"),
   panel:!!document.getElementById("okdBootFail"), pin:!!document.getElementById("pinGate"), login:!!(document.getElementById("loginEmail")||{}).offsetParent,
   cache:(await caches.keys()).filter(k=>k.startsWith("okd-shell")).sort().join(",")})'''

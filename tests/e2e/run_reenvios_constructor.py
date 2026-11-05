@@ -1,7 +1,9 @@
 """E2E (modo demo, Chromium) · REENVÍOS con CONTROLES REALES del constructor: importar informes ficticios (selector de archivos) →
 agregar pedidos (#ids + BUSCAR) → PUBLICAR HOJA (#btnPublish) → resolver REVISAR (casillas, importes, forma de pago) → PUBLICAR (#pubGo);
 luego + NUEVA HOJA → volver a cargar el pedido NO ENTREGADO → publicar → el informe de Cristian no lo duplica. El pendiente y el
-entregado siguen bloqueados. Informes SINTÉTICOS (generate_synthetic_saldo_noc.py). Exit 0 PASS · 1 FAIL · 2 error."""
+entregado siguen bloqueados. Informes SINTÉTICOS (generate_synthetic_saldo_noc.py). Exit 0 PASS · 1 FAIL · 2 error.
+Sin service worker en sus contextos: esta prueba no evalúa la actualización (la cubren run_actualizacion_pwa / run_recuperacion_pwa) y así la recarga
+única de la primera instalación no se cruza con la carga del informe."""
 import asyncio, os, sys, re, traceback
 sys.path.insert(0, os.path.dirname(__file__))
 import run_cambiar_rol as cr
@@ -53,7 +55,7 @@ async def main():
         async with async_playwright() as p:
           b = await p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or None)
           try:
-            pg = await (await b.new_context(viewport={'width': 1366, 'height': 900})).new_page(); pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
+            pg = await (await b.new_context(viewport={'width': 1366, 'height': 900}, service_workers='block')).new_page(); pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
             await pg.goto(f'http://127.0.0.1:{cr.PORT}/'); await pg.evaluate('()=>localStorage.clear()')
             await pg.evaluate('()=>new Promise(r=>{const q=indexedDB.deleteDatabase("ok_despacho"); q.onsuccess=q.onerror=q.onblocked=()=>r()})')
             await cr.login(pg, 'admin@okdespacho.demo'); n0, m0, _ = await informe(pg)

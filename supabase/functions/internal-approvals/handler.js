@@ -16,6 +16,9 @@ async function handleRaw(req, deps) {
     const auth = req.headers.get('authorization') || ''; const who = auth.startsWith('Bearer ') ? await deps.getUserFromJwt(auth.slice(7)) : null;
     me = who && await deps.getProfile(who.id);
     if (!me) return json(401, { error: 'Sesión inválida.' });
+    // SEGURIDAD (todas las acciones): perfil ACTIVO, leído del servidor, ANTES de consultar datos o ejecutar cualquier acción.
+    // Deshabilitado / archivado / invitación pendiente → 403 genérico, sin envíos ni modificaciones.
+    if (me.status !== 'ACTIVO') return json(403, { error: 'Sin permiso.' });
   }
   const can = p => !me || hasPerm(me, p);
   if (action === 'send_queued' || action === 'retry') {
@@ -25,7 +28,8 @@ async function handleRaw(req, deps) {
     return json(200, { results: out });
   }
   if (action === 'send_customer_queued' || action === 'retry_customer') {
-    if (me && !(hasPerm(me, 'settings.manage') || hasPerm(me, 'routes.view_all'))) return json(403, { error: 'Sin permiso.' });
+    // Solo lectura no puede provocar envíos ni reintentos, aunque tenga routes.view_all.
+    if (me && (me.role === 'SOLO_LECTURA' || !(hasPerm(me, 'settings.manage') || hasPerm(me, 'routes.view_all')))) return json(403, { error: 'Sin permiso.' });
     return json(200, { results: await sendCustomerEmails({ store: deps.customerStore, provider: deps.provider, inlineLogo: deps.inlineLogo, onlyIds: action === 'retry_customer' ? body.job_ids : undefined }) });
   }
   // Email diario de PDFs de hojas (default 18:00 Mendoza): cola idempotente hoja+versión+destinatario; adjunta el PDF guardado
@@ -45,13 +49,33 @@ async function handleRaw(req, deps) {
     }
     return json(200, { results: out });
   }
+  // V4.25 · email de una inspección APROBADA a superiores: lo dispara SOLO el Superior que lo pidió y confirmó (o el cron para reintentos);
+  // usa el proveedor existente, un envío por destinatario con clave de idempotencia (un reintento no duplica). La aprobación nunca lo dispara.
+  if (action === 'send_inspection_emails') {
+    // seguridad: rol SUPERVISOR_DESPACHO **y** perfil ACTIVO, leídos del servidor (getProfile), ANTES de tocar pedidos o proveedor.
+    // Deshabilitado / sin permiso → 403 genérico: sin consultar pedidos, sin enviar, sin cambiar estados y sin revelar nada.
+    const activeSupervisor = p => !!p && p.role === 'SUPERVISOR_DESPACHO' && p.status === 'ACTIVO';
+    if (me && !activeSupervisor(me)) return json(403, { error: 'Sin permiso.' });
+    if (!deps.inspStore) return json(200, { results: [] });
+    const out = [];
+    for (const j of await deps.inspStore.pending(me ? me.id : null, Array.isArray(body.request_ids) ? body.request_ids : null)) {
+      if (me && j.requested_by !== me.id) continue;   // con usuario: SOLO sus propios pedidos (aunque el almacén devolviera otros)
+      if (!me && !activeSupervisor(await deps.getProfile(j.requested_by))) continue;   // cron: no se envía en nombre de un Superior que ya no está ACTIVO (queda intacto)
+      // Gmail exclusivo de Inspecciones; nunca cae al proveedor de otros correos.
+      if (!deps.sendInspectionGmail) throw new Error('Gmail de Inspecciones no configurado');
+      out.push(await deps.sendInspectionGmail(j));
+    }
+    return json(200, { results: out });
+  }
   if (action === 'send_service_alerts') {
-    // Puede invocarlo cualquier usuario autenticado: no acepta destinatarios ni contenido arbitrario,
-    // solo evalúa la configuración central y los vehículos registrados.
+    // Cualquier usuario autenticado y ACTIVO (o el cron): no acepta destinatarios ni contenido arbitrario,
+    // solo evalúa la configuración central y los vehículos registrados. (Antes no verificaba el estado del perfil.)
+    if (me && me.status !== 'ACTIVO') return json(403, { error: 'Sin permiso.' });
     return json(200, { results: await deps.runServiceAlerts() });
   }
   if (action === 'settings_get' || action === 'settings_set') {
-    if (!can('settings.manage')) return json(403, { error: 'Sin permiso.' });
+    // La clave de cron es exclusiva de tareas automáticas: no autoriza lectura/escritura de configuración.
+    if (!me || !hasPerm(me, 'settings.manage')) return json(403, { error: 'Sin permiso.' });
     if (action === 'settings_get') return json(200, { settings: await deps.getSettings() });
     const s = body.settings || {};
     if ((s.extra_emails || []).some(e => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))) return json(400, { error: 'Hay un email adicional inválido.' });

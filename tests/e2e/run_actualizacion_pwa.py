@@ -15,7 +15,7 @@ ST = '''async()=>({splash:!!document.getElementById("splash")&&!document.getElem
 LS = '()=>JSON.stringify(Object.keys(localStorage).sort().map(k=>[k,localStorage.getItem(k)]))'
 async def scenario(p, name, a, b, mode, after):
     use(a); shutil.rmtree(UD, ignore_errors=True); env = dict(os.environ); env['STALE_INDEX'] = a + '/index.html'
-    srv = subprocess.Popen([sys.executable, '/tmp/repro/ghpages_server.py', str(PORT), 'pages'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1)
+    srv = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ghpages_server.py'), str(PORT), 'pages'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1)
     try:
         mk = lambda: p.chromium.launch_persistent_context(UD, executable_path=os.environ.get('CHROMIUM_PATH'), viewport={'width': 412, 'height': 915}, is_mobile=True, has_touch=True,
                                                           geolocation={'latitude': -32.89, 'longitude': -68.84}, permissions=['geolocation'])
@@ -24,7 +24,7 @@ async def scenario(p, name, a, b, mode, after):
         await pg.evaluate('()=>{localStorage.setItem("qa_cola_offline", JSON.stringify([{op:"outcome",stop:"st-qa",id:"op-qa-1"}])); localStorage.setItem("qa_dato","NO_BORRAR");}')
         ls0 = await pg.evaluate(LS); before = await pg.evaluate(ST)
         use(b)   # ===== se publica la versión nueva =====
-        srv.terminate(); time.sleep(.5); srv = subprocess.Popen([sys.executable, '/tmp/repro/ghpages_server.py', str(PORT), mode], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1)
+        srv.terminate(); time.sleep(.5); srv = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ghpages_server.py'), str(PORT), mode], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1)
         await ctx.close(); ctx = await mk(); pg = ctx.pages[0] if ctx.pages else await ctx.new_page(); navs = []
         pg.on('framenavigated', lambda f: navs.append(f.url) if f == pg.main_frame else None)
         out = await after(pg, ctx)

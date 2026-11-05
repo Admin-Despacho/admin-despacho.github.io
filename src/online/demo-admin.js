@@ -86,6 +86,12 @@ export const DemoAdmin = {
     const by = id => ((this.db.users || []).find(u => u.id === id) || {}).full_name || null;
     return { stop, evidence, receipt, emails, outcome_by_name: by(stop.outcome_by) || by(e && e.created_by) };
   },
+  async routesListInfo(ids) {   // mismo dato que el modo online (fecha del snapshot publicado; salida y regreso reales; patente)
+    this._refresh(); const me = await this.me(); const vs = this.db.vehicles || [];
+    return (this.db.routes2 || []).filter(r => (ids || []).includes(r.id) && this._canViewRoute(me, r)).map(r => ({ id: r.id, started_at: r.started_at || null, depot_arrived_at: r.depot_arrived_at || null,
+      plate: (vs.find(v => v.id === r.vehicle_id) || {}).plate || null,
+      sheet_date: (((r.sheet_snapshot && r.sheet_snapshot.pdf_model && r.sheet_snapshot.pdf_model.data) || []).find(x => x && x.r && x.r.fecha) || { r: {} }).r.fecha || null }));
+  },
   async routeDetail(id) {
     this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all', 'routes.view_team', 'routes.view_own');
     const r = (this.db.routes2 || []).find(x => x.id === id); if (!r) throw err('No existe.', 'NOT_FOUND', 404);

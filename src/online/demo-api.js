@@ -1,3 +1,4 @@
+import { DemoInsp } from './demo-insp.js';
 // MODO DEMO: sin servidor. Mismo contrato que SupabaseApi y MISMAS reglas (rules.js).
 // Sirve para aceptación visual y pruebas automáticas cuando no hay proyecto Supabase configurado.
 import { validateUserAction, compatibleResponsables, hasPerm, canBeResponsable, userModules, canOperateAssigned } from '../../supabase/functions/_shared/rules.js';
@@ -955,3 +956,4 @@ export class DemoApi {
 // RC2: borradores, historial, configuración, auditoría, backup y dashboard (mismas reglas que la base)
 Object.assign(DemoApi.prototype, DemoAdmin);
 Object.assign(DemoApi.prototype, DemoRC4);
+Object.assign(DemoApi.prototype, DemoInsp);   // V4.25 · inspecciones de vehículos

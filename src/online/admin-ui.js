@@ -164,10 +164,20 @@ export async function openRecorridos(api, me) {
     const box = w.querySelector('#rcList'); let res;
     try { res = await api.searchRoutes({ limit: 50, offset: 0, carrier: 'INTERNO', from: w.querySelector('#rcFrom').value, to: w.querySelector('#rcTo').value }); } catch (e) { box.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; return; }
     const rows = (res.rows || res || []).filter(r => (r.carrier_kind || '') === 'INTERNO' || r.carrier_id === 'INTERNO');
-    box.innerHTML = '<div class="utable-wrap"><table class="utable" id="rcTable"><thead><tr><th>HOJA</th><th>RESPONSABLE</th><th>VEHÍCULO</th><th>SALIDA</th><th>REGRESO</th><th>ESTADO</th><th></th></tr></thead><tbody>' +
-      (rows.length ? rows.map(r => '<tr data-rid="' + r.id + '"><td>' + esc(r.number) + '</td><td>' + esc(r.responsable_name || '—') + '</td><td>' + esc(r.vehicle_plate || '—') + '</td><td>' + (r.started_at ? dt(r.started_at) : 'SIN REGISTRO') +
-        '</td><td>' + (r.depot_arrived_at ? dt(r.depot_arrived_at) : 'SIN REGISTRO') + '</td><td>' + esc(ST[r.operational_status] || r.operational_status) + '</td><td><button class="btn soft" type="button" data-rcview>VER RECORRIDO</button></td></tr>').join('')
-        : '<tr><td colspan="7">Sin hojas del Transportista Interno en esas fechas.</td></tr>') + '</tbody></table></div>';
+    // FECHA programada de la hoja (la "Fecha de la hoja" publicada) + salida/regreso REALES y patente: search_routes no los devuelve
+    // un ERROR de consulta (conexión o permisos) NO se muestra como SIN REGISTRO: se avisa y las celdas dicen NO DISPONIBLE
+    let info = {}, infoErr = null; try { (await api.routesListInfo(rows.map(r => r.id))).forEach(x => { info[x.id] = x; }); } catch (e) { infoErr = e.message || String(e); }
+    const dmy = v => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || '')); return m ? m[3] + '/' + m[2] + '/' + m[1] : (/^\d{2}\/\d{2}\/\d{4}$/.test(String(v || '')) ? String(v) : null); };
+    const val = (r, k) => (info[r.id] && info[r.id][k]) || r[k] || null, ND = '<span class="rc-nd">NO DISPONIBLE</span>';
+    const known = r => !infoErr && !!info[r.id];   // la consulta respondió por ESTA hoja: recién ahí "sin dato" es SIN REGISTRO
+    const cellDate = r => known(r) ? (dmy(info[r.id].sheet_date) || 'SIN REGISTRO') : ND;
+    const cellEv = (r, k) => known(r) ? (val(r, k) ? dt(val(r, k)) : 'SIN REGISTRO') : ND;
+    box.innerHTML = (infoErr ? '<div class="up-msg err" id="rcInfoErr" role="alert">No se pudo obtener la fecha programada, la salida y el regreso de las hojas (error de conexión o de permisos: ' + esc(infoErr) + '). Se muestran como NO DISPONIBLE; volvé a BUSCAR.</div>' : '') +
+      '<div class="utable-wrap"><table class="utable" id="rcTable"><thead><tr><th>HOJA</th><th>FECHA</th><th>RESPONSABLE</th><th>VEHÍCULO</th><th>SALIDA</th><th>REGRESO</th><th>ESTADO</th><th></th></tr></thead><tbody>' +
+      (rows.length ? rows.map(r => '<tr data-rid="' + r.id + '"><td>' + esc(r.number) + '</td><td data-fecha>' + cellDate(r) + '</td><td>' + esc(r.responsable_name || '—') + '</td><td>' + (known(r) ? esc(val(r, 'plate') || '—') : ND) +
+        '</td><td>' + cellEv(r, 'started_at') + '</td><td>' + cellEv(r, 'depot_arrived_at') + '</td><td>' + esc(ST[r.operational_status] || r.operational_status) +
+        '</td><td><button class="btn soft" type="button" data-rcview>VER RECORRIDO</button></td></tr>').join('')
+        : '<tr><td colspan="8">Sin hojas del Transportista Interno en esas fechas.</td></tr>') + '</tbody></table></div>';
     box.querySelectorAll('[data-rcview]').forEach(b => b.onclick = () => showRoute(b.closest('tr').dataset.rid)); };
   w.querySelector('#rcGo').onclick = () => { rcShow(false); list(); }; await list();
 }

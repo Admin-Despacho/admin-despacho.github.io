@@ -26,6 +26,7 @@ export function roleNav(me) {
     ['#/conciliacion-noc', 'NOC'],
     ['#/informes', 'Informes'],
     hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones'],
+    ['#/inspecciones', 'Inspecciones de vehículos'],   // V4.25
     ['#/auditoria', 'Auditoría'],
     ['#/usuarios', 'Usuarios y permisos'],
     // Transportistas, Vehículos, Emails y Backup son secciones de Configuración: van agrupados dentro de ella
@@ -35,6 +36,7 @@ export function roleNav(me) {
     ['#/dashboard', 'Dashboard'], ['#/nueva-hoja', 'Nueva hoja de ruta'], ['#/despacho', 'Despacho'], ['#/borradores', 'Borradores del equipo'],
     (hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team')) && ['#/historial', 'Hojas publicadas'], hasPerm(me, 'signatures.view') && ['#/recorridos', 'Salida y recorrido'], canRequests(me) && ['#/solicitudes', 'Solicitudes / Aprobaciones'], ['#/notificaciones', 'Notificaciones'],
     (hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/vehiculos', 'Vehículos'],
+    ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'].includes(me.role) && ['#/inspecciones', 'Inspecciones'],   // V4.25
     (hasPerm(me, 'columns.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/config-operativa', 'Configuración operativa'],
     hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones']].filter(Boolean);
   return [
@@ -42,6 +44,7 @@ export function roleNav(me) {
     (hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team')) ? ['#/historial', 'Hojas publicadas'] : hasPerm(me, 'routes.view_own') && ['#/historial', 'Mis hojas publicadas'], ['#/notificaciones', 'Notificaciones'], canRequests(me) && ['#/solicitudes', 'Solicitudes'],
     hasPerm(me, 'carriers.manage') && ['#/configuracion?sec=transportistas', 'Transportistas'],
     (hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/vehiculos', 'Vehículos / Kilometraje / Service'],
+    ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'].includes(me.role) && ['#/inspecciones', 'Inspecciones'],   // V4.25
     hasPerm(me, 'columns.view') && ['#/config-operativa', 'Columnas predeterminadas'],
     hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones']].filter(Boolean);
 }
@@ -79,7 +82,7 @@ export function mobileNav(me, active) {
 }
 // V4.20 · íconos del menú lateral (trazo simple, color del texto). Al plegar el menú quedan solo los íconos.
 const NAV_ICON_PATHS = {
-  dashboard: 'M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z', recorridos: 'M5 19a2 2 0 1 0 0-.01M19 5a2 2 0 1 0 0-.01M7 19h6a4 4 0 0 0 0-8H11a4 4 0 0 1 0-8h6', despacho: 'M3 7h13l5 5v5h-3M3 7v10h2M8 17h7M6.5 17a1.5 1.5 0 1 0 0 .01M17.5 17a1.5 1.5 0 1 0 0 .01',
+  dashboard: 'M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z', inspecciones: 'M9 4h6v3H9zM6 6H5v15h14V6h-1M8 12l2 2 4-4M8 17h8', recorridos: 'M5 19a2 2 0 1 0 0-.01M19 5a2 2 0 1 0 0-.01M7 19h6a4 4 0 0 0 0-8H11a4 4 0 0 1 0-8h6', despacho: 'M3 7h13l5 5v5h-3M3 7v10h2M8 17h7M6.5 17a1.5 1.5 0 1 0 0 .01M17.5 17a1.5 1.5 0 1 0 0 .01',
   'nueva-hoja': 'M12 5v14M5 12h14', borradores: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4', historial: 'M4 5h16M4 10h16M4 15h10M4 20h7',
   solicitudes: 'M4 4h16v12H8l-4 4z', aprobaciones: 'M5 12l4 4L19 6', 'conciliacion-noc': 'M7 7h10M7 12h10M7 17h6M4 3h16v18H4z',
   informes: 'M5 20V10M12 20V4M19 20v-7', comunicaciones: 'M3 6h18v12H3zM3 7l9 6 9-6', notificaciones: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20h4',
@@ -289,8 +292,9 @@ export async function openNotifications(api, me, frame) {
     w.innerHTML = '<section class="card"><div class="section-title"><h2>Notificaciones operativas</h2><span class="tag">' + (me.role === 'ADMIN' ? 'Todas' : me.role === 'SUPERVISOR_DESPACHO' ? 'Tuyas y de tu equipo' : 'Propias') + '</span></div>' +
       '<div class="tscroll"><table class="table" id="ntTable"><thead><tr><th>Fecha</th><th>Para</th><th>Aviso</th><th>Detalle</th><th></th></tr></thead><tbody>' +
       (list.map(n => '<tr data-id="' + n.id + '" class="' + (n.read_at ? 'dim' : '') + '"><td>' + esc(dt(n.created_at)) + '</td><td>' + esc(n.mine ? 'Vos' : n.user_name || '') + '</td><td><b>' + esc(n.title) + '</b></td><td>' + esc(n.body || '') + '</td><td>' +
-        (n.mine && !n.read_at ? '<button class="btn soft" type="button" data-read>MARCAR LEÍDA</button>' : '') + '</td></tr>').join('') || '<tr><td colspan="5">Sin notificaciones.</td></tr>') + '</tbody></table></div></section>';
+        (n.inspection_id ? '<button class="btn dark" type="button" data-insp="' + n.inspection_id + '">ABRIR INSPECCIÓN</button> ' : '') + (n.mine && !n.read_at ? '<button class="btn soft" type="button" data-read>MARCAR LEÍDA</button>' : '') + '</td></tr>').join('') || '<tr><td colspan="5">Sin notificaciones.</td></tr>') + '</tbody></table></div></section>';
     w.querySelectorAll('[data-read]').forEach(b => b.onclick = async () => { await api.markNotificationRead(b.closest('tr').dataset.id); draw(); });
+    w.querySelectorAll('[data-insp]').forEach(b => b.onclick = async () => { const tr = b.closest('tr'); try { await api.markNotificationRead(tr.dataset.id); } catch (e) { } location.hash = '#/inspecciones?id=' + b.dataset.insp; });   // V4.25: directo al registro
   };
   await draw();
 }

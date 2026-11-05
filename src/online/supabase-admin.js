@@ -16,6 +16,14 @@ export const SupabaseAdmin = {
     const rows = (await this._rpc('search_routes', { p: f })) || [];
     return { total: rows.length ? Number(rows[0].total_count) : 0, rows };
   },
+  // SALIDA Y RECORRIDO · datos del LISTADO que search_routes no devuelve: fecha programada de la hoja (snapshot publicado:
+  // sheet_snapshot.pdf_model.data[].r.fecha), salida y regreso REALES y patente. Solo lectura, con el mismo RLS de routes.
+  async routesListInfo(ids) {
+    if (!ids || !ids.length) return [];
+    const rows = await sel(this.sb.from('routes').select('id, started_at, depot_arrived_at, vehicle:vehicles(plate), pdf:sheet_snapshot->pdf_model->data').in('id', ids));
+    return rows.map(r => ({ id: r.id, started_at: r.started_at || null, depot_arrived_at: r.depot_arrived_at || null, plate: (r.vehicle && r.vehicle.plate) || null,
+      sheet_date: ((r.pdf || []).find(x => x && x.r && x.r.fecha) || { r: {} }).r.fecha || null }));
+  },
   async routeDetail(id) {
     const r = await sel(this.sb.from('routes').select('*, carriers(name), route_stops(*)').eq('id', id).single());
     const pdfs = await sel(this.sb.from('route_pdfs').select('*').eq('route_id', id).order('route_version'));

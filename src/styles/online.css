@@ -942,3 +942,23 @@ tr.main-row.flash{outline:3px solid #16d6e5}
 #pinGate.pin-lock .udialog header{background:#13212a;color:#fff;border-bottom:4px solid #10d7e7}
 /* botones del PIN dentro de la pantalla en celulares angostos (antes "INGRESAR CON CONTRASEÑA" quedaba cortado) */
 @media(max-width:480px){#pinGate .udialog footer{flex-wrap:wrap;gap:10px}#pinGate .udialog footer>span{display:none}#pinGate .udialog footer .btn{flex:1 1 100%;min-width:0;white-space:normal}}
+/* V4.25 · INSPECCIONES (Android primero): botones grandes BIEN/MAL/NO APLICA, categorías plegables, avance y barra inferior fija */
+.in-form .in-head{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:10px}.in-form .in-head label{display:flex;flex-direction:column;gap:4px;font-weight:700}
+.in-form select,.in-form input,.in-form textarea{min-height:48px;border:2px solid #9fb3bc;border-radius:12px;padding:10px 12px;font-size:16px;background:#fff;width:100%;box-sizing:border-box}
+.in-prog{height:12px;border-radius:999px;background:#e1e8eb;overflow:hidden;margin:12px 0 4px}.in-prog>div{height:100%;background:#10d7e7;transition:width .2s}
+.in-progt{margin:0 0 10px;font-size:14px}.in-progt small{display:block;color:#667680}
+.in-cat{background:#fff;border:1px solid #d9e3e8;border-radius:12px;margin:0 0 10px;overflow:hidden}
+.in-cat>summary{cursor:pointer;padding:14px 16px;font-weight:800;letter-spacing:.04em;background:#07151b;color:#fff;border-bottom:3px solid #10d7e7;display:flex;justify-content:space-between}
+.in-ctrl{padding:12px 14px;border-top:1px solid #eef3f5}.in-ctrl.mal{background:#fff6f5}.in-ctrl.focus{outline:3px solid #10d7e7}
+.in-q{font-size:15.5px;margin-bottom:8px}.in-res,.in-def{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.in-def{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px}
+.in-b,.in-d{min-height:52px;border-radius:12px;border:2px solid #c3d1d7;background:#fff;font-weight:800;font-size:15px;color:#07151b}
+.in-b.BIEN.on{background:#0b7a45;border-color:#0b7a45;color:#fff}.in-b.MAL.on{background:#b42318;border-color:#b42318;color:#fff}.in-b.NO_APLICA.on{background:#667680;border-color:#667680;color:#fff}
+.in-d.on{background:#7a3e00;border-color:#7a3e00;color:#fff}.in-obs,.in-x{display:flex;flex-direction:column;gap:4px;margin-top:8px;font-weight:700;font-size:14px}
+.in-bar{position:sticky;bottom:0;display:grid;grid-template-columns:1fr 1.4fr;gap:10px;background:#eef3f5;padding:10px 0 calc(10px + env(safe-area-inset-bottom,0px));z-index:5}
+.in-bar .btn{min-height:54px}.in-st{display:inline-block;border-radius:999px;padding:3px 10px;font-weight:800;font-size:12px;background:#e1e8eb}
+.in-st.PENDIENTE{background:#fff4e5;color:#7a3e00}.in-st.APROBADA{background:#e7f7ee;color:#0b7a45}.in-st.RECHAZADA{background:#fdecea;color:#b42318}
+.in-dt tr.mal td{background:#fff6f5}.in-acts{flex-wrap:wrap}
+@media(max-width:600px){.in-form .in-head{grid-template-columns:1fr}}
+
+/* SALIDA Y RECORRIDO · dato no disponible por error de consulta (distinto de SIN REGISTRO) */
+.rc-nd{color:#7a3e00;font-weight:800;font-size:12px;letter-spacing:.03em}

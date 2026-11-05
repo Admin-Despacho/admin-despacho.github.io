@@ -3,6 +3,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { json } from '../_shared/http.js';
 import { handle } from './handler.js';
 import { resendBody, inlineLogoFrom } from '../_shared/resend-body.js';
+import { pgStore, gmailProvider } from '../comm-dispatcher/adapters.js';
+import { inspectionGmailSender, GMAIL_HOLD } from './inspection-gmail.js';
 import * as logoModule from '../_shared/ok-accesorios-logo.js';
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 const must = <T>(r: { data: T; error: any }) => { if (r.error) throw new Error(r.error.message); return r.data; };
@@ -30,13 +32,43 @@ const sheetStore = {
     return { number: p.route_number, file_name: p.file_name, bytes: new Uint8Array(await f.data.arrayBuffer()) }; },
   async updateJob(id: string, patch: any) { must(await admin.from('sheet_email_jobs').update(patch).eq('id', id)); }
 };
+// V4.25 · pedidos de email de inspecciones (vehicle_inspection_email_requests): pendientes o con error, hasta 5 intentos
+const inspStore = {
+  async pending(by: string | null, ids: number[] | null) {
+    let q = admin.from('vehicle_inspection_email_requests').select('*').in('status', ['PENDIENTE_ENVIO', 'ERROR']).lt('retry_count', 5).order('id');
+    if (by) q = q.eq('requested_by', by); if (ids && ids.length) q = q.in('id', ids);
+    return ((must(await q) || []) as any[]).filter(j => !String(j.error || '').startsWith(GMAIL_HOLD));
+  },
+  async update(id: number, p: Record<string, unknown>) { must(await admin.from('vehicle_inspection_email_requests').update(p).eq('id', id)); },
+};
 const provider = { async send(m: any) {
   const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { authorization: 'Bearer ' + Deno.env.get('RESEND_API_KEY'), 'content-type': 'application/json', 'idempotency-key': m.idempotencyKey },
     body: JSON.stringify(resendBody(m, Deno.env.get('REPORT_FROM'))) });
   const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error('Resend ' + r.status + ': ' + (j.message ?? 'error')); return { id: j.id };
 } };
+// Reutiliza la conexión y el control de cuota de Comunicaciones, sin ejecutar su despachador.
+const gmailStore = pgStore(admin);
+const gmail = gmailProvider(gmailStore, { clientId: Deno.env.get('GOOGLE_CLIENT_ID') ?? '', clientSecret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '' });
+const sendInspectionGmail = inspectionGmailSender({
+  provider: gmail, gmailStore,
+  async claim(j: any, lock: string) {
+    let q = admin.from('vehicle_inspection_email_requests').update({status:'ERROR', error:lock}).eq('id',j.id).eq('status',j.status).eq('retry_count',j.retry_count);
+    q = j.error === null ? q.is('error',null) : q.eq('error',j.error);
+    return !!must(await q.select('id').maybeSingle());
+  },
+  async finish(j: any, lock: string, patch: any) {
+    const row = must(await admin.from('vehicle_inspection_email_requests').update(patch).eq('id',j.id).eq('error',lock).select('id').maybeSingle());
+    if (!row) throw new Error('Se perdió la reserva del pedido de inspección');
+  },
+  async authorized(j: any) {
+    const p = must(await admin.from('profiles').select('role,status').eq('id',j.requested_by).single()) as any;
+    const i = must(await admin.from('vehicle_inspections').select('status').eq('id',j.inspection_id).single()) as any;
+    return p.role === 'SUPERVISOR_DESPACHO' && p.status === 'ACTIVO' && i.status === 'APROBADA';
+  },
+  async audit(j: any, action: string, after: any) { must(await admin.from('audit_log').insert({actor_id:j.requested_by,action,target_type:'inspection_email',target_id:String(j.id),after})); },
+});
 const deps = {
-  cronSecret: Deno.env.get('CRON_SECRET') ?? '', appUrl: (Deno.env.get('APP_URL') ?? '').replace(/\/$/, ''), store, customerStore, sheetStore, provider,
+  cronSecret: Deno.env.get('CRON_SECRET') ?? '', appUrl: (Deno.env.get('APP_URL') ?? '').replace(/\/$/, ''), store, customerStore, sheetStore, inspStore, provider, sendInspectionGmail,
   inlineLogo: inlineLogoFrom(logoModule),   // RC4.1: logo del Recibido Conforme embebido por CID (no depende de APP_URL)
   async sheetVia() { const r = must(await admin.from('notification_settings').select('sheet_email_via').eq('id', 'DEFAULT').single()) as any; return r && r.sheet_email_via || 'RESEND'; },
   async queueSheetEmails() { must(await admin.rpc('queue_sheet_emails', { p_day: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Mendoza' }).format(new Date()) })); },
