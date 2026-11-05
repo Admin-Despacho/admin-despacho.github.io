@@ -3,7 +3,7 @@ import { esc, fmtDate, fmtDay } from './util.js';
 import { ROLES, ASSIGNABLE_ROLES, ROLE_LABEL, hasPerm, compatibleResponsables, MODULES, MODULE_LABEL, roleModules, ROLE_PERMISSIONS, SENSITIVE_PERMISSIONS } from '../../supabase/functions/_shared/rules.js';
 import { PERM_GROUPS, PERM_LABEL, appFrame, isRc4 } from './rc4-ui.js';
 // RC4: roles que tienen superior asignado y qué roles pueden ser su superior
-const SUP_ROLES = { OPERARIO_DEPOSITO: ['SUPERVISOR_DESPACHO', 'ADMIN'], SUPERVISOR_DESPACHO: ['ADMIN'] };
+const SUP_ROLES = { OPERARIO_DEPOSITO: ['SUPERVISOR_DESPACHO', 'ADMIN'], SUPERVISOR_DESPACHO: ['ADMIN'], TRANSPORTISTA_INTERNO: ['SUPERVISOR_DESPACHO', 'ADMIN'] };
 import { openAccount } from './account-ui.js';
 
 const STATUS_LABEL = { ACTIVO: 'ACTIVO', DESHABILITADO: 'DESHABILITADO', ARCHIVADO: 'ARCHIVADO', INVITACION_PENDIENTE: 'INVITACIÓN PENDIENTE' };
@@ -228,7 +228,8 @@ export class UsersPanel {
         } else {
           const payload = { user_id: u.id, ...data };
           if (!self) { payload.role = r; if (r === 'TRANSPORTISTA') payload.carriers = carriers; }
-          if (r === 'TRANSPORTISTA_INTERNO') payload.supervisor_user_id = mm.querySelector('#nuSup').value || null;
+          // La jerarquía usa la RPC que valida los permisos efectivos del superior en la base.
+          // Los perfiles de listUsers no incluyen los overrides individuales de permisos.
           payload.disabled_modules = this.disabledFrom(mm, r);
           await this.api.action('edit', payload);
           if (SUP_ROLES[r] && hasPerm(this.me, 'users.assign_supervisor') && !self) { const ns = mm.querySelector('#nuSup').value || null; if (ns !== (u.supervisor_user_id || null)) await this.api.setUserSupervisor(u.id, ns); }
