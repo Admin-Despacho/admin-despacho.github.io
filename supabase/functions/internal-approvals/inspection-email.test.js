@@ -1,4 +1,4 @@
-// V4.25 · send_inspection_emails (Deno) · seguridad: SOLO Superior Despacho ACTIVO; deshabilitados / sin permiso / sin sesión → sin ningún efecto.
+// V4.25 · send_inspection_emails (Deno) · seguridad: Administrador General y Superior Despacho ACTIVOS; deshabilitados / sin permiso / sin sesión → sin ningún efecto.
 // El entorno simulado REGISTRA cada acceso (consultas al almacén, envíos al proveedor, actualizaciones) para probar la ausencia de efectos.
 import { handle } from './handler.js';
 import { inspectionGmailSender } from './inspection-gmail.js';
@@ -6,12 +6,13 @@ const assert = (c, m) => { if (!c) throw new Error(m); };
 const PROFILES = {
   'u-sup1': { role: 'SUPERVISOR_DESPACHO', status: 'ACTIVO' }, 'u-sup2': { role: 'SUPERVISOR_DESPACHO', status: 'ACTIVO' },
   'u-supoff': { role: 'SUPERVISOR_DESPACHO', status: 'DESHABILITADO' }, 'u-op1': { role: 'OPERARIO_DEPOSITO', status: 'ACTIVO' },
-  'u-opoff': { role: 'OPERARIO_DEPOSITO', status: 'DESHABILITADO' }, 'u-admin': { role: 'ADMIN', status: 'ACTIVO' },
+  'u-adminoff': { role:'ADMIN',status:'DESHABILITADO' }, 'u-opoff': { role: 'OPERARIO_DEPOSITO', status: 'DESHABILITADO' }, 'u-admin': { role: 'ADMIN', status: 'ACTIVO' },
   'u-drv': { role: 'TRANSPORTISTA', status: 'ACTIVO' }, 'u-ro': { role: 'SOLO_LECTURA', status: 'ACTIVO' } };
 const REQS = () => [
   { id: 1, requested_by: 'u-sup1', recipients: ['a@ok.test', 'b@ok.test'], subject: 'S1', body: 'Cuerpo <1>', status: 'PENDIENTE_ENVIO', retry_count: 0 },
   { id: 2, requested_by: 'u-sup2', recipients: ['c@ok.test'], subject: 'S2', body: 'x', status: 'PENDIENTE_ENVIO', retry_count: 0 },
-  { id: 3, requested_by: 'u-supoff', recipients: ['d@ok.test'], subject: 'S3', body: 'y', status: 'PENDIENTE_ENVIO', retry_count: 0 }];
+  { id: 3, requested_by: 'u-supoff', recipients: ['d@ok.test'], subject: 'S3', body: 'y', status: 'PENDIENTE_ENVIO', retry_count: 0 },
+  { id:4, requested_by:'u-admin',recipients:['admin-qa@ok.test'],subject:'Admin QA',body:'QA',status:'PENDIENTE_ENVIO',retry_count:0 }];
 // user: id del JWT (null = sin JWT válido); storeLeaks: el almacén devuelve TODO sin filtrar (simula un error del almacén)
 const mk = ({ user, fail = false, storeLeaks = false } = {}) => {
   const log = { pending: 0, sent: [], upd: [] }; const reqs = REQS();
@@ -49,8 +50,8 @@ Deno.test('IE-04 Superior Despacho DESHABILITADO → 403 genérico: NO consulta 
   // no revela nada: respuesta IDÉNTICA a la de cualquier usuario sin permiso (403 estándar del sistema), sin pedidos, destinatarios ni datos del perfil
   const o = mk({ user: 'u-op1' }); const ro = await call(o.deps, { action: 'send_inspection_emails', request_ids: [3] }); const bo = await ro.json();
   assert(JSON.stringify(b) === JSON.stringify(bo) && !/d@ok\.test|S3|DESHABILITADO|u-supoff|request/i.test(JSON.stringify(b)), 'el cuerpo no debe revelar nada: ' + JSON.stringify(b) + ' vs ' + JSON.stringify(bo)); });
-Deno.test('IE-05 SIN PERMISO (Administrador, Transportista, Solo lectura, Operario deshabilitado) → 403 sin ningún efecto', async () => {
-  for (const u of ['u-admin', 'u-drv', 'u-ro', 'u-opoff']) { const t = mk({ user: u }); const r = await call(t.deps, { action: 'send_inspection_emails', request_ids: [1, 2, 3] });
+Deno.test('IE-05 SIN PERMISO (Administrador deshabilitado, Transportista, Solo lectura, Operario deshabilitado) → 403 sin ningún efecto', async () => {
+  for (const u of ['u-adminoff', 'u-drv', 'u-ro', 'u-opoff']) { const t = mk({ user: u }); const r = await call(t.deps, { action: 'send_inspection_emails', request_ids: [1, 2, 3] });
     assert(r.status === 403 && noEffects(t.log), u + ': debía 403 sin efectos'); } });
 Deno.test('IE-06 ENTRE EQUIPOS: el Superior 1 pide pedidos del Superior 2; aunque el almacén los devolviera, no se envían ni se modifican', async () => {
   const t = mk({ user: 'u-sup1', storeLeaks: true }); const j = await (await call(t.deps, { action: 'send_inspection_emails', request_ids: [2, 3] })).json();
@@ -64,3 +65,5 @@ Deno.test('IE-08 SIN JWT o JWT INVÁLIDO → 401 sin acceso al almacén ni al pr
   const a = mk({ user: null }); const r1 = await call(a.deps, { action: 'send_inspection_emails' }, {}); assert(r1.status === 401 && noEffects(a.log), 'sin JWT');
   const b = mk({ user: null }); const r2 = await call(b.deps, { action: 'send_inspection_emails' }, { authorization: 'Bearer invalido' }); assert(r2.status === 401 && noEffects(b.log), 'JWT inválido');
   const c = mk({}); const r3 = await call(c.deps, { action: 'send_inspection_emails' }, { 'x-cron-secret': 'otra' }); assert(r3.status === 401 && noEffects(c.log), 'cron con clave incorrecta'); });
+
+Deno.test('IE-09 Administrador ACTIVO: Gmail para su solicitud, sin despachar pedidos de otros usuarios', async()=>{const t=mk({user:'u-admin',storeLeaks:true});const r=await call(t.deps,{action:'send_inspection_emails',request_ids:[1,2,4]});const b=await r.json();assert(r.status===200&&t.log.sent.length===1&&b.results[0].id===4,'Admin scoped sender');});

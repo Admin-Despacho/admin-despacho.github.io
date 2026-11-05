@@ -4,7 +4,7 @@ import { json } from '../_shared/http.js';
 import { handle } from './handler.js';
 import { resendBody, inlineLogoFrom } from '../_shared/resend-body.js';
 import { pgStore, gmailProvider } from '../comm-dispatcher/adapters.js';
-import { inspectionGmailSender, GMAIL_HOLD } from './inspection-gmail.js';
+import { inspectionGmailSender, GMAIL_HOLD, canEmailInspection } from './inspection-gmail.js';
 import * as logoModule from '../_shared/ok-accesorios-logo.js';
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 const must = <T>(r: { data: T; error: any }) => { if (r.error) throw new Error(r.error.message); return r.data; };
@@ -62,8 +62,8 @@ const sendInspectionGmail = inspectionGmailSender({
   },
   async authorized(j: any) {
     const p = must(await admin.from('profiles').select('role,status').eq('id',j.requested_by).single()) as any;
-    const i = must(await admin.from('vehicle_inspections').select('status').eq('id',j.inspection_id).single()) as any;
-    return p.role === 'SUPERVISOR_DESPACHO' && p.status === 'ACTIVO' && i.status === 'APROBADA';
+    const i = must(await admin.from('vehicle_inspections').select('status,created_by,team_supervisor_id').eq('id',j.inspection_id).single()) as any;
+    return canEmailInspection(p, i, j.requested_by);
   },
   async audit(j: any, action: string, after: any) { must(await admin.from('audit_log').insert({actor_id:j.requested_by,action,target_type:'inspection_email',target_id:String(j.id),after})); },
 });

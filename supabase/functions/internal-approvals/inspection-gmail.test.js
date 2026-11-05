@@ -1,5 +1,20 @@
-import { inspectionGmailSender, GMAIL_HOLD } from './inspection-gmail.js';
+import { inspectionGmailSender, GMAIL_HOLD, canEmailInspection } from './inspection-gmail.js';
 const assert = (x,m='assertion')=>{if(!x)throw Error(m);};
+Deno.test('Current Gmail scope: active Admin all teams; Supervisor own team only even after Admin demotion',()=>{
+ const foreign={status:'APROBADA',created_by:'other',team_supervisor_id:'other-team'};
+ assert(canEmailInspection({role:'ADMIN',status:'ACTIVO'},foreign,'user'));
+ assert(!canEmailInspection({role:'SUPERVISOR_DESPACHO',status:'ACTIVO'},foreign,'user'));
+ assert(canEmailInspection({role:'SUPERVISOR_DESPACHO',status:'ACTIVO'},{...foreign,team_supervisor_id:'user'},'user'));
+ assert(canEmailInspection({role:'SUPERVISOR_DESPACHO',status:'ACTIVO'},{...foreign,created_by:'user'},'user'));
+});
+Deno.test('Gmail: disabled Admin/Supervisor, unapproved inspections and other roles denied',()=>{
+ const own={status:'APROBADA',created_by:'user',team_supervisor_id:'user'};
+ for(const role of ['ADMIN','SUPERVISOR_DESPACHO']){
+  assert(!canEmailInspection({role,status:'DESHABILITADO'},own,'user'));
+  assert(!canEmailInspection({role,status:'ACTIVO'},{...own,status:'PENDIENTE'},'user'));
+ }
+ for(const role of ['OPERARIO_DEPOSITO','TRANSPORTISTA_INTERNO','TRANSPORTISTA','SOLO_LECTURA'])assert(!canEmailInspection({role,status:'ACTIVO'},own,'user'));
+});
 const fixture = (options={}) => {
   const job={id:1,inspection_id:'qa',requested_by:'sup',status:'ERROR',error:'old error',retry_count:2,recipients:['qa@example.invalid','QA@example.invalid'],subject:'Inspección QA',body:'<script>test</script>'};
   let row=structuredClone(job),posts=0;const log=[];

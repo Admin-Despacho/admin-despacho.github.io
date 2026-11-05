@@ -49,18 +49,18 @@ async function handleRaw(req, deps) {
     }
     return json(200, { results: out });
   }
-  // V4.25 · email de una inspección APROBADA a superiores: lo dispara SOLO el Superior que lo pidió y confirmó (o el cron para reintentos);
+  // V4.25 · email de inspección APROBADA: lo pide y confirma un Admin o Superior ACTIVO (o el cron reintenta);
   // usa el proveedor existente, un envío por destinatario con clave de idempotencia (un reintento no duplica). La aprobación nunca lo dispara.
   if (action === 'send_inspection_emails') {
-    // seguridad: rol SUPERVISOR_DESPACHO **y** perfil ACTIVO, leídos del servidor (getProfile), ANTES de tocar pedidos o proveedor.
+    // Seguridad: ADMIN (Administrador General) o SUPERVISOR_DESPACHO y perfil ACTIVO, leídos del servidor antes de acceder a pedidos.
     // Deshabilitado / sin permiso → 403 genérico: sin consultar pedidos, sin enviar, sin cambiar estados y sin revelar nada.
-    const activeSupervisor = p => !!p && p.role === 'SUPERVISOR_DESPACHO' && p.status === 'ACTIVO';
-    if (me && !activeSupervisor(me)) return json(403, { error: 'Sin permiso.' });
+    const activeInspectorSender = p => !!p && ['ADMIN', 'SUPERVISOR_DESPACHO'].includes(p.role) && p.status === 'ACTIVO';
+    if (me && !activeInspectorSender(me)) return json(403, { error: 'Sin permiso.' });
     if (!deps.inspStore) return json(200, { results: [] });
     const out = [];
     for (const j of await deps.inspStore.pending(me ? me.id : null, Array.isArray(body.request_ids) ? body.request_ids : null)) {
       if (me && j.requested_by !== me.id) continue;   // con usuario: SOLO sus propios pedidos (aunque el almacén devolviera otros)
-      if (!me && !activeSupervisor(await deps.getProfile(j.requested_by))) continue;   // cron: no se envía en nombre de un Superior que ya no está ACTIVO (queda intacto)
+      if (!me && !activeInspectorSender(await deps.getProfile(j.requested_by))) continue;   // cron: no se envía en nombre de un solicitante que ya no está ACTIVO (queda intacto)
       // Gmail exclusivo de Inspecciones; nunca cae al proveedor de otros correos.
       if (!deps.sendInspectionGmail) throw new Error('Gmail de Inspecciones no configurado');
       out.push(await deps.sendInspectionGmail(j));

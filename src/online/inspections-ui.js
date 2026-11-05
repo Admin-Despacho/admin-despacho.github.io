@@ -1,5 +1,5 @@
 // V4.25 · VEHÍCULOS Y SERVICE → INSPECCIONES (formulario R SE 4.5.1-05 Rev:00 · 30 controles EXACTOS del Excel original).
-// Operario Depósito y Superior Despacho realizan; solo el Superior (de su equipo) aprueba o rechaza. Sin fotografías, cámara, adjuntos ni firmas.
+// Administrador General: operación completa; Operario realiza y Superior revisa su equipo. Sin fotografías, cámara, adjuntos ni firmas.
 // Borrador automático en el celular + sincronización sin duplicados (client_id). Los Excel se generan con los registros GUARDADOS.
 import CONTROLS from './inspection-controls.json';
 import { esc } from './util.js';
@@ -10,8 +10,10 @@ const RES = { BIEN: 'BIEN', MAL: 'MAL', NO_APLICA: 'NO APLICA' }, DEF = { FALTAN
 const dt = iso => iso ? new Date(iso).toLocaleString('es-AR', { timeZone: 'America/Argentina/Mendoza', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => (Math.random() * 16 | 0).toString(16)));
 const loadExcelJS = () => window.ExcelJS ? Promise.resolve(window.ExcelJS) : new Promise((ok, ko) => { const s = document.createElement('script'); s.src = '/legacy/exceljs.min.js'; s.onload = () => ok(window.ExcelJS); s.onerror = () => ko(new Error('No se pudo cargar el generador de Excel.')); document.head.appendChild(s); });
-const canDo = me => ['OPERARIO_DEPOSITO', 'SUPERVISOR_DESPACHO'].includes(me.role);
-const canReview = (me, i) => me.role === 'SUPERVISOR_DESPACHO' && i.status === 'PENDIENTE' && (i.created_by === me.id || i.team_supervisor_id === me.id);
+const activeAdmin = me => me.status === 'ACTIVO' && me.role === 'ADMIN';
+const canDo = me => me.status === 'ACTIVO' && ['ADMIN', 'OPERARIO_DEPOSITO', 'SUPERVISOR_DESPACHO'].includes(me.role);
+const canEmail = me => me.status === 'ACTIVO' && ['ADMIN', 'SUPERVISOR_DESPACHO'].includes(me.role);
+const canReview = (me, i) => me.status === 'ACTIVO' && i.status === 'PENDIENTE' && (activeAdmin(me) || (me.role === 'SUPERVISOR_DESPACHO' && (i.created_by === me.id || i.team_supervisor_id === me.id)));
 const noSupervisor = me => me.role === 'OPERARIO_DEPOSITO' && 'supervisor_user_id' in me && !me.supervisor_user_id;   // sin Superior asignado: borrador sí, envío no
 
 // ---------- borrador local (sobrevive al cierre de la app) y cola de sincronización (sin duplicados) ----------
@@ -33,7 +35,7 @@ async function flushQueue(api, me) {   // envía en orden; cada operación es id
 
 export async function openInspections(api, me, frame) {
   const w = frame(me, 'Inspecciones de vehículos', '#/inspecciones');
-  const tabs = [canDo(me) && ['nueva', 'NUEVA INSPECCIÓN'], canDo(me) && ['mias', 'MIS INSPECCIONES'], me.role === 'SUPERVISOR_DESPACHO' && ['pend', 'PENDIENTES'], ['hist', 'HISTORIAL DE INSPECCIONES']].filter(Boolean);
+  const tabs = [canDo(me) && ['nueva', 'NUEVA INSPECCIÓN'], canDo(me) && ['mias', 'MIS INSPECCIONES'], canEmail(me) && ['pend', 'PENDIENTES'], ['hist', 'HISTORIAL DE INSPECCIONES']].filter(Boolean);
   const h = new URLSearchParams(location.hash.split('?')[1] || '');
   w.innerHTML = '<div class="up-head"><h2>INSPECCIONES DE VEHÍCULOS</h2><span class="tag">R SE 4.5.1-05 · Rev:00</span></div>' +
     '<div class="htabs" role="tablist" id="inTabs">' + tabs.map(([k, l]) => '<button type="button" role="tab" data-intab="' + k + '">' + l + '</button>').join('') +
@@ -160,7 +162,7 @@ export async function openInspections(api, me, frame) {
       '<details class="dt-more"><summary>AUDITORÍA (' + events.length + ')</summary>' + events.map(e => '<p>' + esc(dt(e.at)) + ' · <b>' + esc(e.action) + '</b> · ' + esc(e.actor_name || '') + '</p>').join('') + '</details>' +
       '<div class="uact in-acts">' + (canReview(me, i) ? '<button type="button" class="btn dark" id="inOk">APROBAR</button><button type="button" class="btn soft" id="inNo">RECHAZAR</button>' : '') +
       '<button type="button" class="btn soft" id="inXls">DESCARGAR EXCEL</button>' + (canDo(me) && ['APROBADA', 'RECHAZADA'].includes(i.status) ? '<button type="button" class="btn soft" id="inRev">NUEVA REVISIÓN</button>' : '') +
-      (me.role === 'SUPERVISOR_DESPACHO' && i.status === 'APROBADA' ? '<button type="button" class="btn soft" id="inMail">PREPARAR EMAIL PARA SUPERIORES</button>' : '') + '</div><div id="inExtra"></div></div></section>';
+      (canEmail(me) && i.status === 'APROBADA' ? '<button type="button" class="btn soft" id="inMail">PREPARAR EMAIL PARA SUPERIORES</button>' : '') + '</div><div id="inExtra"></div></div></section>';
     const act = async (f, okMsg) => { try { await f(); msg(okMsg); await detailView(id); } catch (e) { msg(e.message, true); } };
     const ok = pane.querySelector('#inOk'); if (ok) ok.onclick = () => confirm('¿Aprobar la inspección ' + i.number + '?') && act(() => api.inspReview(id, 'APROBADA', null), 'Inspección aprobada.');
     const no = pane.querySelector('#inNo'); if (no) no.onclick = () => { pane.querySelector('#inExtra').innerHTML = '<label class="in-obs">Motivo del rechazo (obligatorio)<textarea id="inWhy" rows="2"></textarea></label><button type="button" class="btn dark" id="inNoGo">CONFIRMAR RECHAZO</button>';

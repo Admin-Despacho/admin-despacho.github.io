@@ -3,6 +3,9 @@ import { buildMime, base64url, validEmail } from '../_shared/comms-core.js';
 // Gmail no admite claves de idempotencia. La reserva CAS persiste antes del HTTP;
 // si hay aceptación incierta o progreso parcial, nunca se libera automáticamente.
 export const GMAIL_HOLD = 'GMAIL_INSPECTION_HOLD:';
+// Revalidar el alcance actual antes del HTTP, también si el autor del pedido cambió de rol.
+export const canEmailInspection = (profile, inspection, actorId) => !!profile && profile.status === 'ACTIVO' && inspection?.status === 'APROBADA'
+  && (profile.role === 'ADMIN' || (profile.role === 'SUPERVISOR_DESPACHO' && (inspection.created_by === actorId || inspection.team_supervisor_id === actorId)));
 export function inspectionGmailSender({ provider, gmailStore, claim, finish, authorized, audit }) {
   return async j => {
     if (String(j.error || '').startsWith(GMAIL_HOLD)) return { id:j.id, status:'ERROR', held:true };
