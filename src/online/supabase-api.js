@@ -188,7 +188,7 @@ export class SupabaseApi {
   async departInternalLocation(stop, location, opId) { return this._rpc('depart_internal_location', { p_stop: stop, p_location: location, p_op_id: opId }); }
   async recordDeparture(route, location, opId) { return this._rpc('record_route_departure', { p_route: route, p_location: location, p_op_id: opId }); }
   async arriveDepot(route, location, opId) { return this._rpc('arrive_depot', { p_route: route, p_location: location, p_op_id: opId }); }
-  async deliveryEmailSuggestion(stop) { try { return await this._rpc('delivery_email_suggestion', { p_stop: stop }); } catch (e) { return null; } }
+  async deliveryEmailSuggestion(stop) { try { return await this._rpc('delivery_email_suggestion2', { p_stop: stop }); } catch (e2) { /* V4.26 no aplicada: sugerencia de V4.23 */ } try { return await this._rpc('delivery_email_suggestion', { p_stop: stop }); } catch (e) { return null; } }
   async arriveStop(stop, location, opId) { return this._rpc('arrive_stop', { p_stop: stop, p_location: location, p_op_id: opId }); }
   async deliveryIdentityLookup(stopId, cuil, dni) { return this._rpc('delivery_identity_lookup', { p_stop: stopId, p_cuil: cuil || null, p_dni: dni || null }); }
   async cuilHasDni(cuil) { return this._rpc('cuil_has_dni', { p_cuil: cuil }); }

@@ -49,7 +49,7 @@ Deno.test('MAILC-04 emails al cliente: sin DNI/CUIL/GPS/firma/notas; parcial ind
   const { customerEmail, sendCustomerEmails } = await import('../_shared/customer-email.js');
   const stop = { client_name: 'Cliente Uno', order_numbers: ['90001'], outcome_note: 'NOTA INTERNA', receiver_cuil: '20123456786' };
   const p = customerEmail({ kind: 'PARTIAL', stop }), w = customerEmail({ kind: 'ON_THE_WAY', stop });
-  ok(p.html.includes('parte') && w.subject.includes('va en camino') && !/NOTA INTERNA|20123456786|DNI|CUIL|GPS|firma|\d{1,2}:\d{2}/i.test(p.html + w.html), 'contenido');
+  ok(p.html.includes('parte') && w.subject.includes('está en camino')   /* V4.26: texto aprobado para la salida real */ && !/NOTA INTERNA|20123456786|DNI|CUIL|GPS|firma|\d{1,2}:\d{2}/i.test(p.html + w.html), 'contenido');
   const jobs = [{ id: 'c1', kind: 'DELIVERED', recipient: 'a@b.c', idempotency_key: 'k', status: 'QUEUED' }]; let fail = 1; const sent = [];
   const st = { listJobs: async q => jobs.filter(j => q.statuses.includes(j.status)), stopFor: async () => stop, updateJob: async (id, x) => Object.assign(jobs[0], x) };
   const prov = { send: async m => { if (fail-- > 0) throw new Error('caído'); sent.push(m); return { id: 'p' }; } };

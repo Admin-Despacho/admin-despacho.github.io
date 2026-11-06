@@ -71,6 +71,9 @@ async def main():
           o = await scenario(p, 'U4', OLD, V241, 'pages', u4)
           res('U4 SIN CONEXIÓN después de actualizar: arranca desde la caché (sin panel) y conserva datos y cola', o['st'] and o['st']['booted'] and not o['st']['panel'] and not o['st']['splash'] and o['ls_igual'], o)
         async def u5(pg, ctx):
+            await reopen(pg, ctx, 15)   # el nuevo contexto abre about:blank: navegar antes de usar localStorage
+            # La sesión DEMO es por pestaña; su pérdida al cerrar el contexto no es pérdida de sesión Supabase.
+            if await pg.locator('#loginEmail').is_visible(): await dp.login(pg, 'gabriel@okdespacho.demo')
             uid = await pg.evaluate('async()=>{try{return (await window.OKD_ONLINE.api.me()).id}catch(e){return null}}')
             await pg.evaluate('(uid)=>{localStorage.setItem("okd_pin_v1_"+uid+"_cfg", JSON.stringify({salt:"00", v:"x"})); localStorage.setItem("okd_pin_v1_"+uid+"_last", JSON.stringify({at:0, day:"2000-01-01"}));}', uid)
             await pg.reload(); await pg.wait_for_timeout(26000); return {'st': await pg.evaluate(ST)}

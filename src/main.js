@@ -158,7 +158,7 @@ function closeOverlay() { const p = $('#usersPanel'); p.hidden = true; p.innerHT
 const cfgSec = () => new URLSearchParams(location.hash.split('?')[1] || '').get('sec') || '';
 function show403() {
   const p = $('#usersPanel'); p.hidden = false;
-  p.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Acceso</span></div></header><div class="up-wrap"><div class="auth-card" id="e403"><h3>403 · ACCESO NO AUTORIZADO</h3><p>Tu usuario no tiene permiso para este módulo.</p><button class="btn dark" type="button" id="b403">VOLVER</button></div></div>';
+  p.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261120" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Acceso</span></div></header><div class="up-wrap"><div class="auth-card" id="e403"><h3>403 · ACCESO NO AUTORIZADO</h3><p>Tu usuario no tiene permiso para este módulo.</p><button class="btn dark" type="button" id="b403">VOLVER</button></div></div>';
   p.querySelector('#b403').onclick = () => { history.replaceState(null, '', location.pathname); closeOverlay(); };
 }
 // Error al cargar los permisos del usuario: aviso claro con REINTENTAR (misma sesión), sin panel ni acciones habilitadas
@@ -166,7 +166,7 @@ function show403() {
 // este usuario en esta sesión y vuelve si se restituye el permiso (la ruta queda en #/vehiculos para recuperarlo).
 function showVehBlocked(saved) {
   const p = $('#usersPanel'); if (!p) return; p.hidden = false;
-  p.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Vehículos</span></div></header>' +
+  p.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261120" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Vehículos</span></div></header>' +
     '<div class="up-wrap"><div class="card" id="vehBlocked"><h3>SE QUITÓ TU ACCESO A VEHÍCULOS</h3><p class="msg warn">Ya no podés consultar ni modificar vehículos.' +
     (saved ? ' Lo que estabas escribiendo quedó guardado solo en esta sesión y se recupera si te devuelven el permiso.' : '') +
     '</p><button class="btn dark" type="button" id="vehBlockedBack">VOLVER AL INICIO</button></div></div>';
@@ -345,7 +345,7 @@ function showLogin(note) {
 if (api.mode === 'demo') $('#demoBanner').hidden = false;
 window.OKD_ONLINE = { api };
 // La splash se oculta apenas termina la inicialización real (sesión restaurada y primera pantalla elegida): sin demoras artificiales
-window.OKD_BUILD = import.meta.env.VITE_OKD_BUILD_TAG || 'rc4.1.2-admin-dashboard-hotfix'; // identificador del build (diagnóstico)
+window.OKD_BUILD = import.meta.env.VITE_OKD_BUILD_TAG || 'V4.26'; // identificador del build (diagnóstico)
 async function syncServerConfig() {
   const set = (st, msg) => {
     window.OKD_CFG_STATE = st;

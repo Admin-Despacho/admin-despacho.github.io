@@ -21,7 +21,7 @@ export class UsersPanel {
       const w = appFrame(this.me, 'Usuarios y permisos', '#/usuarios', 'Roles, jerarquía, accesos y permisos por usuario');
       w.innerHTML = '<div class="up-wrap rc4-users-wrap" id="upWrap"></div>';
     } else {
-      this.el.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Administración</span></div><div class="sp"></div>' +
+      this.el.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261120" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>Administración</span></div><div class="sp"></div>' +
         '<button class="who-chip linkchip" type="button" id="upMe">' + esc(this.me.full_name) + ' · <b>' + esc(ROLE_LABEL[this.me.role] || this.me.role) + '</b></button>' +
         '<button class="tbtn" type="button" id="upClose">Volver al panel</button></header><div class="up-wrap" id="upWrap"></div>';
       this.el.querySelector('#upClose').addEventListener('click', () => this.close());
@@ -37,58 +37,122 @@ export class UsersPanel {
     this.render();
   }
   carrierName(id) { const c = this.carriers.find(x => x.id === id); return c ? c.name : id; }
+  // ================= V4.26 · DISEÑO V3 APROBADO: pestañas uniformes · búsqueda FIJA · tarjetas sin desplazamiento lateral · panel de edición con TODAS las acciones =================
+  // (La lógica de cada acción —doAction, openEdit con el Superior vía setUserSupervisor, openPermissions, withActiveRoutes— es la misma de antes.)
+  initials(n) { return String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase(); }
+  render() {
+    const canManage = hasPerm(this.me, 'users.manage'); this.tab = this.tab || 'usuarios';
+    const w = this.el.querySelector('#upWrap'), opt = (v, l, sel) => '<option value="' + esc(v) + '"' + (v === sel ? ' selected' : '') + '>' + esc(l) + '</option>';
+    const tabs = [['usuarios', 'Usuarios (' + this.users.filter(u => u.status !== 'ARCHIVADO').length + ')'], ['roles', 'Roles y permisos'], ['jerarquia', 'Jerarquía y equipos'], ['actividad', 'Actividad']];
+    w.innerHTML = '<div class="v3-card"><nav class="v3-tabs" role="tablist">' + tabs.map(([k, l]) => '<button type="button" role="tab" data-v3tab="' + k + '" aria-selected="' + (this.tab === k) + '">' + esc(l) + '</button>').join('') + '</nav>' +
+      (this.msg ? '<div class="up-msg ' + (this.msg.err ? 'err' : 'ok') + '" id="upMsg">' + esc(this.msg.text) + '</div>' : '') + '<div id="v3Pane"></div></div>';
+    w.querySelectorAll('[data-v3tab]').forEach(b => b.onclick = () => { this.tab = b.dataset.v3tab; this.render(); });
+    const pane = w.querySelector('#v3Pane');
+    if (this.tab === 'roles') return this.renderRoles(pane);
+    if (this.tab === 'jerarquia') return this.renderHierarchy(pane);
+    if (this.tab === 'actividad') return this.renderActivity(pane);
+    pane.innerHTML = '<div class="v3-sticky"><div class="v3-title"><div><h2>Usuarios</h2><p>Elegí «Editar» para ver todas las opciones aquí mismo</p></div>' + (canManage ? '<button class="btn go" id="upNew" type="button">+ Nuevo usuario</button>' : '') + '</div>' +
+      '<div class="v3-filters"><input id="ufSearch" type="search" placeholder="Buscar nombre, email o teléfono" value="' + esc(this.f.q) + '">' +
+      '<select id="ufRole">' + opt('', 'Todos los roles', this.f.role) + ROLES.map(r => opt(r, ROLE_LABEL[r], this.f.role)).join('') + '</select>' +
+      '<select id="ufStatus">' + opt('', 'Todos los estados', this.f.status) + Object.keys(STATUS_LABEL).map(x => opt(x, STATUS_LABEL[x], this.f.status)).join('') + '</select>' +
+      '<select id="ufCarrier">' + opt('', 'Todos los transportistas', this.f.carrier) + this.carriers.map(c => opt(c.id, c.name, this.f.carrier)).join('') + '</select>' +
+      '<span class="ufcount" id="ufCount"></span></div></div>' +
+      '<div class="v3-grid"><div class="v3-list"><div class="v3-head"><span>USUARIO</span><span>CONTACTO</span><span>ROL</span><span>ACCIÓN</span></div><div id="upBody"></div></div><aside class="v3-side" id="upSide"></aside></div>';
+    this.renderRows(); this.renderSide();
+    const n = pane.querySelector('#upNew'); if (n) n.addEventListener('click', () => { this.sel = null; this.renderSide(); this.openEdit(null); });
+    pane.querySelector('#ufSearch').addEventListener('input', e => { this.f.q = e.target.value; this.renderRows(); });
+    [['#ufRole', 'role'], ['#ufStatus', 'status'], ['#ufCarrier', 'carrier']].forEach(([q, k]) => pane.querySelector(q).addEventListener('change', e => { this.f[k] = e.target.value; this.renderRows(); }));
+    this.layoutEditor();
+  }
   filtered() {
-    const q = this.f.q.trim().toLowerCase();
+    const q = this.f.q.trim().toLowerCase(), qd = q.replace(/\D/g, '');
     return this.users.filter(u =>
-      (!q || u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)) &&
-      (!this.f.role || u.role === this.f.role) &&
-      (!this.f.status || u.status === this.f.status) &&
+      (!q || u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (qd.length >= 3 && String(u.phone || '').replace(/\D/g, '').includes(qd))) &&
+      (!this.f.role || u.role === this.f.role) && (!this.f.status || u.status === this.f.status) &&
       (!this.f.carrier || (this.f.carrier === 'INTERNO' ? u.role === 'TRANSPORTISTA_INTERNO' : (u.carriers || []).includes(this.f.carrier)))
     ).sort((a, b) => (a.status === 'ARCHIVADO') - (b.status === 'ARCHIVADO') || a.full_name.localeCompare(b.full_name, 'es'));
   }
-  render() {
-    const canManage = hasPerm(this.me, 'users.manage');
-    const w = this.el.querySelector('#upWrap');
-    const opt = (v, l, sel) => '<option value="' + esc(v) + '"' + (v === sel ? ' selected' : '') + '>' + esc(l) + '</option>';
-    w.innerHTML =
-      '<div class="up-head"><h2>USUARIOS</h2><span class="sp"></span>' + (canManage ? '<button class="btn go" id="upNew" type="button">NUEVO USUARIO</button>' : '') + '</div>' +
-      (this.msg ? '<div class="up-msg ' + (this.msg.err ? 'err' : 'ok') + '" id="upMsg">' + esc(this.msg.text) + '</div>' : '') +
-      '<div class="ufilters">' +
-        '<input id="ufSearch" placeholder="Buscar por nombre o email" value="' + esc(this.f.q) + '">' +
-        '<select id="ufRole">' + opt('', 'Todos los roles', this.f.role) + ROLES.map(r => opt(r, ROLE_LABEL[r], this.f.role)).join('') + '</select>' +
-        '<select id="ufStatus">' + opt('', 'Todos los estados', this.f.status) + Object.keys(STATUS_LABEL).map(s => opt(s, STATUS_LABEL[s], this.f.status)).join('') + '</select>' +
-        '<select id="ufCarrier">' + opt('', 'Todos los transportistas', this.f.carrier) + this.carriers.map(c => opt(c.id, c.name, this.f.carrier)).join('') + '</select>' +
-        '<span class="ufcount" id="ufCount"></span>' +
-      '</div>' +
-      '<div class="utable-wrap"><table class="utable"><thead><tr><th>NOMBRE</th><th>EMAIL</th><th>TELÉFONO</th><th>ROL</th><th>TRANSPORTISTA / EMPRESA</th><th>ESTADO</th><th>ÚLTIMO ACCESO</th><th>CREADO</th>' + (canManage ? '<th>ACCIONES</th>' : '') + '</tr></thead><tbody id="upBody"></tbody></table></div>';
-    this.renderRows();
-    const n = w.querySelector('#upNew'); if (n) n.addEventListener('click', () => this.openEdit(null));
-    w.querySelector('#ufSearch').addEventListener('input', e => { this.f.q = e.target.value; this.renderRows(); });
-    [['#ufRole', 'role'], ['#ufStatus', 'status'], ['#ufCarrier', 'carrier']].forEach(([s, k]) => w.querySelector(s).addEventListener('change', e => { this.f[k] = e.target.value; this.renderRows(); }));
+  subtitle(u) {
+    const sup = u.supervisor_user_id ? (this.users.find(x => x.id === u.supervisor_user_id) || {}).full_name : '';
+    if (u.role === 'TRANSPORTISTA_INTERNO') return 'Transporte interno' + (sup ? ' · Superior: ' + sup : '');
+    if ((u.carriers || []).length) return (u.carriers || []).map(c => this.carrierName(c)).join(', ');
+    if (SUP_ROLES[u.role]) return sup ? 'Superior: ' + sup : 'Pendiente de superior';
+    return ROLE_LABEL[u.role] || u.role;
   }
   renderRows() {
-    const canManage = hasPerm(this.me, 'users.manage');
-    const rows = this.filtered();
+    const rows = this.filtered(), body = this.el.querySelector('#upBody'); if (!body) return;
     this.el.querySelector('#ufCount').textContent = rows.length + ' de ' + this.users.length;
-    const b = (act, id, label, cls) => '<button class="btn ' + (cls || 'soft') + '" type="button" data-act="' + act + '" data-id="' + id + '">' + label + '</button>';
-    this.el.querySelector('#upBody').innerHTML = rows.map(u => {
+    body.innerHTML = rows.map(u => {
       const self = u.id === this.me.id;
-      const carr = u.role === 'TRANSPORTISTA_INTERNO' ? 'TRANSPORTE INTERNO' : (u.carriers || []).map(c => this.carrierName(c)).join(', ') || '—';
-      let act = '';
-      if (canManage) {
-        act = '<div class="uact">' + (u.status !== 'ARCHIVADO' ? b('edit', u.id, 'EDITAR', 'dark') : '');
-        if (u.status === 'INVITACION_PENDIENTE') act += b('resend_invite', u.id, 'REENVIAR INVITACIÓN') + b('cancel_invite', u.id, 'CANCELAR INVITACIÓN');
-        if (u.status === 'ACTIVO') act += b('reset_password', u.id, 'RESTABLECER CONTRASEÑA') + b('revoke_sessions', u.id, 'CERRAR SESIONES ABIERTAS') + (self ? '' : b('disable', u.id, 'DESHABILITAR'));
-        if (u.status === 'DESHABILITADO' || u.status === 'ARCHIVADO') act += b('reactivate', u.id, 'REACTIVAR');
-        if (!self && u.status !== 'ARCHIVADO') act += b('remove', u.id, 'ELIMINAR / ARCHIVAR', 'danger');
-        if (!self && u.status !== 'ARCHIVADO' && hasPerm(this.me, 'users.manage_permissions')) act += b('perms', u.id, 'PERMISOS');
-        act += '</div>';
-      }
-      return '<tr class="' + (u.status === 'ARCHIVADO' ? 'dim' : '') + '" data-uid="' + u.id + '"><td><b>' + esc(u.full_name) + '</b>' + (self ? ' <span style="color:var(--muted);font-size:11.5px">(vos)</span>' : '') +
-        (u.supervisor_user_id ? '<br><small class="usup" style="color:var(--muted)">Superior: ' + esc((this.users.find(x => x.id === u.supervisor_user_id) || {}).full_name || '—') + '</small>' : '') + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.phone || '—') + '</td><td>' + esc(ROLE_LABEL[u.role] || u.role) + '</td><td>' + esc(carr) + '</td>' +
-        '<td><span class="ust ' + u.status + '">' + esc(STATUS_LABEL[u.status] || u.status) + '</span></td><td>' + esc(fmtDate(u.last_sign_in_at)) + '</td><td>' + esc(fmtDay(u.created_at)) + '</td>' + (canManage ? '<td>' + act + '</td>' : '') + '</tr>';
-    }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No hay usuarios con esos filtros.</td></tr>';
-    this.el.querySelectorAll('#upBody [data-act]').forEach(btn => btn.addEventListener('click', () => this.doAction(btn.dataset.act, btn.dataset.id)));
+      return '<article class="v3-row' + (u.id === this.sel ? ' sel' : '') + (u.status === 'ARCHIVADO' ? ' dim' : '') + '" data-uid="' + u.id + '"><div class="v3-who"><span class="v3-av">' + esc(this.initials(u.full_name)) + '</span><div><b>' + esc(u.full_name) + '</b>' + (self ? ' <small>(vos)</small>' : '') +
+        '<small class="usup">' + esc(this.subtitle(u)) + '</small></div></div><div class="v3-contact">' + esc(u.email) + '<small>' + esc(u.phone || '') + '</small></div>' +
+        '<div class="v3-role"><span class="v3-chip">' + esc(ROLE_LABEL[u.role] || u.role) + '</span><span class="ust ' + u.status + '">' + esc(STATUS_LABEL[u.status] || u.status) + '</span></div>' +
+        '<div class="v3-act"><button class="btn soft" type="button" data-pick="' + u.id + '">' + (hasPerm(this.me, 'users.manage') && u.status !== 'ARCHIVADO' ? 'Editar →' : 'Ver →') + '</button></div></article>';
+    }).join('') || '<p class="v3-empty">No hay usuarios con esos filtros.</p>';
+    body.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => this.pick(b.dataset.pick));
+  }
+  pick(id) {
+    this.sel = id; this.renderRows(); this.renderSide();
+    this.layoutEditor();
+    const side = this.el.querySelector('#upSide');
+    if (side && innerWidth <= 1100) requestAnimationFrame(() => side.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+  layoutEditor() {
+    const bar = this.el.querySelector('.rc4side'), search = this.el.querySelector('.v3-sticky'), side = this.el.querySelector('#upSide');
+    const barHeight = bar && getComputedStyle(bar).position === 'sticky' && innerWidth <= 900 ? bar.getBoundingClientRect().height : 0;
+    this.el.style.setProperty('--v3-shell-height', barHeight + 'px');
+    if (side) side.style.scrollMarginTop = (barHeight + (search ? search.getBoundingClientRect().height : 0) + 12) + 'px';
+  }
+  renderSide() {
+    const side = this.el.querySelector('#upSide'); if (!side) return;
+    const u = this.users.find(x => x.id === this.sel);
+    if (!u) { side.innerHTML = '<div class="v3-side-empty">Elegí un usuario para ver y usar todas sus acciones.</div>'; return; }
+    const canManage = hasPerm(this.me, 'users.manage'), self = u.id === this.me.id;
+    const b = (act, label, cls) => '<button class="btn ' + (cls || 'soft') + '" type="button" data-act="' + act + '" data-id="' + u.id + '">' + label + '</button>';
+    let acc = '';   // MISMAS acciones y MISMAS condiciones que la versión anterior
+    if (canManage) {
+      if (u.status !== 'ARCHIVADO') acc += b('edit', 'EDITAR', 'dark');
+      if (u.status === 'INVITACION_PENDIENTE') acc += b('resend_invite', 'REENVIAR INVITACIÓN') + b('cancel_invite', 'CANCELAR INVITACIÓN');
+      if (u.status === 'ACTIVO') acc += b('reset_password', 'RESTABLECER CONTRASEÑA') + b('revoke_sessions', 'CERRAR SESIONES ABIERTAS', 'soft wide');
+      if (!self && u.status !== 'ARCHIVADO' && hasPerm(this.me, 'users.manage_permissions')) acc += b('perms', 'PERMISOS ▾', 'ghost wide');
+      let risky = '';
+      if (u.status === 'ACTIVO' && !self) risky += b('disable', 'DESHABILITAR');
+      if (u.status === 'DESHABILITADO' || u.status === 'ARCHIVADO') risky += b('reactivate', 'REACTIVAR');
+      if (!self && u.status !== 'ARCHIVADO') risky += b('remove', 'ELIMINAR / ARCHIVAR', 'danger');
+      if (risky) acc += '<hr class="v3-sep">' + risky;
+    }
+    side.innerHTML = '<header class="v3-side-head"><div><h3>' + (canManage ? 'Editar usuario' : 'Usuario') + '</h3><p>Todas las acciones disponibles en este panel</p></div><button type="button" class="v3-x" id="upSideX" aria-label="Cerrar">×</button></header>' +
+      '<div class="v3-side-body"><div class="v3-who big"><span class="v3-av">' + esc(this.initials(u.full_name)) + '</span><div><b>' + esc(u.full_name) + '</b><small>' + esc(u.email) + '</small></div></div>' +
+      '<dl class="v3-facts"><dt>Rol</dt><dd>' + esc(ROLE_LABEL[u.role] || u.role) + '</dd><dt>Estado</dt><dd>' + esc(STATUS_LABEL[u.status] || u.status) + '</dd><dt>Equipo</dt><dd>' + esc(this.subtitle(u)) + '</dd>' +
+      '<dt>Último acceso</dt><dd>' + esc(fmtDate(u.last_sign_in_at) || '—') + '</dd><dt>Creado</dt><dd>' + esc(fmtDay(u.created_at) || '—') + '</dd></dl>' +
+      (acc ? '<h4 class="v3-sub">ACCIONES DE CUENTA</h4><div class="v3-actions">' + acc + '</div><p class="v3-note">Las acciones piden confirmación y quedan registradas en la auditoría.</p>' : '') +
+      '<div id="upInline"></div></div>';
+    side.querySelector('#upSideX').onclick = () => { this.sel = null; this.renderRows(); this.renderSide(); };
+    side.querySelectorAll('[data-act]').forEach(btn => btn.addEventListener('click', () => this.doAction(btn.dataset.act, btn.dataset.id)));
+    if (canManage && u.status !== 'ARCHIVADO' && !this.noAutoEdit) this.openEdit(u);   // DATOS DEL USUARIO en el mismo panel (mismo editor y mismas validaciones que antes)
+    this.noAutoEdit = false;
+  }
+  renderRoles(pane) {
+    pane.innerHTML = '<div class="v3-sticky"><div class="v3-title"><div><h2>Roles y permisos</h2><p>Permisos base de cada rol (los permisos individuales se ajustan desde «Editar» → PERMISOS)</p></div></div></div>' +
+      '<div class="v3-cards">' + ROLES.map(r => { const perms = ROLE_PERMISSIONS[r] || [], n = this.users.filter(u => u.role === r && u.status !== 'ARCHIVADO').length;
+        return '<article class="v3-box"><header><b>' + esc(ROLE_LABEL[r]) + '</b><span class="v3-chip">' + n + ' usuario' + (n === 1 ? '' : 's') + '</span></header>' +
+          '<p class="v3-mods">' + (roleModules(r).map(m => esc(MODULE_LABEL[m] || m)).join(' · ') || 'Sin módulos de administración') + '</p>' +
+          '<details><summary>' + perms.length + ' permisos</summary><ul>' + perms.map(p => '<li>' + esc(PERM_LABEL[p] || p) + '</li>').join('') + '</ul></details></article>'; }).join('') + '</div>';
+  }
+  renderHierarchy(pane) {
+    const act = this.users.filter(u => u.status !== 'ARCHIVADO'), heads = act.filter(u => u.role === 'ADMIN' || u.role === 'SUPERVISOR_DESPACHO');
+    const box = (title, sub, list) => '<article class="v3-box"><header><b>' + esc(title) + '</b><span class="v3-chip">' + list.length + '</span></header><p class="v3-mods">' + esc(sub) + '</p>' +
+      (list.length ? '<ul class="v3-members">' + list.map(u => '<li><span class="v3-av sm">' + esc(this.initials(u.full_name)) + '</span>' + esc(u.full_name) + ' <small>' + esc(ROLE_LABEL[u.role] || u.role) + '</small></li>').join('') + '</ul>' : '<p class="v3-empty">Sin integrantes</p>') + '</article>';
+    const orphans = act.filter(u => SUP_ROLES[u.role] && !u.supervisor_user_id);
+    pane.innerHTML = '<div class="v3-sticky"><div class="v3-title"><div><h2>Jerarquía y equipos</h2><p>Quién depende de cada Superior (se asigna desde «Editar» → Superior asignado)</p></div></div></div>' +
+      '<div class="v3-cards">' + heads.map(h => box(h.full_name, ROLE_LABEL[h.role], act.filter(u => u.supervisor_user_id === h.id))).join('') +
+      (orphans.length ? box('Sin superior asignado', 'Requieren asignación (por ejemplo, para enviar inspecciones)', orphans) : '') + '</div>';
+  }
+  renderActivity(pane) {
+    const list = this.users.slice().sort((a, b) => String(b.last_sign_in_at || '').localeCompare(String(a.last_sign_in_at || '')));
+    pane.innerHTML = '<div class="v3-sticky"><div class="v3-title"><div><h2>Actividad</h2><p>Último acceso de cada usuario (el detalle de acciones está en Auditoría)</p></div></div></div>' +
+      '<div class="v3-list"><div id="upActBody">' + list.map(u => '<article class="v3-row"><div class="v3-who"><span class="v3-av">' + esc(this.initials(u.full_name)) + '</span><div><b>' + esc(u.full_name) + '</b><small>' + esc(ROLE_LABEL[u.role] || u.role) + '</small></div></div>' +
+        '<div class="v3-contact">Último acceso<small>' + esc(fmtDate(u.last_sign_in_at) || 'nunca') + '</small></div><div class="v3-role"><span class="ust ' + u.status + '">' + esc(STATUS_LABEL[u.status] || u.status) + '</span></div><div></div></article>').join('') + '</div></div>';
   }
   say(text, err) { this.msg = { text, err: !!err }; }
   async run(fn, okText) {
@@ -188,14 +252,16 @@ export class UsersPanel {
     m.id = 'permModal';
   }
   modal(title, bodyHtml, onSave, saveLabel) {
-    const m = document.createElement('div'); m.className = 'umodal';
+    const host = this.sel && this.el.querySelector('#upInline');   // V3: el editor vive en el panel lateral
+    const m = document.createElement('div'); m.className = host ? 'umodal up-inpanel' : 'umodal';
     m.innerHTML = '<div class="udialog" role="dialog" aria-modal="true"><header><b>' + esc(title) + '</b></header><div class="body">' + bodyHtml + '<div class="up-msg err" id="umErr" hidden></div></div><footer><button class="btn ghost" type="button" id="umCancel">Cancelar</button>' + (onSave ? '<button class="btn dark" type="button" id="umSave">' + esc(saveLabel || 'GUARDAR') + '</button>' : '') + '</footer></div>';
-    this.el.appendChild(m);
-    m.querySelector('#umCancel').addEventListener('click', () => m.remove());
+    if (host) { host.innerHTML = ''; host.appendChild(m); } else this.el.appendChild(m);
+    m.querySelector('#umCancel').addEventListener('click', () => { m.remove(); if (host && this.sel) this.renderSide(); });
     const s = m.querySelector('#umSave');
     if (s) s.addEventListener('click', async () => {
       const err = m.querySelector('#umErr'); err.hidden = true; s.disabled = true;
-      try { await onSave(m); m.remove(); } catch (e) { err.textContent = e.message; err.hidden = false; } finally { s.disabled = false; }
+      if (host) this.noAutoEdit = true;   // V3: tras GUARDAR el panel muestra el resumen (EDITAR lo reabre). Se marca ANTES: onSave recarga y redibuja el panel
+      try { await onSave(m); m.remove(); } catch (e) { this.noAutoEdit = false; err.textContent = e.message; err.hidden = false; } finally { s.disabled = false; }
     });
     return m;
   }

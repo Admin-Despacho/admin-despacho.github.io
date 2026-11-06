@@ -34,7 +34,7 @@ export function navHtml(me, active) {
 function frame(me, title, active) {
   if (isRc4(me)) return appFrame(me, title, active);   // RC4: menú lateral (diseño V4 / V2 aprobado)
   const el = document.getElementById('usersPanel'); el.hidden = false;
-  el.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261019" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>' + esc(title) + '</span></div><div class="sp"></div>' +
+  el.innerHTML = '<header class="top"><img class="brandtile" src="/icons/icon-192.png?v=20261120" alt="OK Accesorios"><div class="ttl"><b>DESPACHO</b><span>' + esc(title) + '</span></div><div class="sp"></div>' +
     '<span class="who-chip">' + esc(me.full_name) + ' · <b>' + esc(ROLE_LABEL[me.role] || me.role) + '</b></span>' + switcherHtml(me) + '<button class="tbtn" type="button" id="adLogout">Cerrar sesión</button></header>' + navHtml(me, active) + '<div class="up-wrap ad-wrap" id="adBody"></div>';
   el.querySelector('#adLogout').onclick = () => window.OKD_LOGOUT && window.OKD_LOGOUT();
   return el.querySelector('#adBody');
@@ -194,7 +194,8 @@ export async function openHistory(api, me) {
     '<input id="hfFrom" type="date"><input id="hfTo" type="date"><button class="btn dark" type="button" id="hfGo">BUSCAR</button></div></details>' +
     // V4.20: VER HOJA abre la hoja en una PESTAÑA interna (arriba), sin desplazarse al final; LISTADO vuelve a la lista donde estaba
     '<div class="htabs" id="hTabs" role="tablist"><button type="button" role="tab" data-htab="list" aria-selected="true">LISTADO</button>' +
-    '<button type="button" role="tab" data-htab="detail" aria-selected="false" hidden></button></div><div id="hList"></div><div id="hDetail" hidden></div>';
+    '<button type="button" role="tab" data-htab="detail" aria-selected="false" hidden></button><button type="button" role="tab" data-htab="search" aria-selected="false" class="bs-tab">BUSCAR ENTREGA</button></div>' +
+    '<div id="hList"></div><div id="hDetail" hidden></div><div id="hSearch" hidden></div>';
   // Filtros, página, plegado y hoja abierta se CONSERVAN al cambiar de vista y volver (en esta sesión del navegador)
   const SK = 'okd_hist_state', loadSt = () => { try { return JSON.parse(sessionStorage.getItem(SK) || '{}'); } catch (e) { return {}; } };
   const saveSt = p => { try { sessionStorage.setItem(SK, JSON.stringify({ ...loadSt(), ...p })); } catch (e) { } };
@@ -203,9 +204,63 @@ export async function openHistory(api, me) {
   if (st0.f) { f = { ...f, ...st0.f }; Object.entries(FIELDS).forEach(([k, sel]) => { const el = w.querySelector(sel); if (el && st0.f[k] != null) el.value = st0.f[k]; }); }
   const fold = w.querySelector('#hFold'); if (st0.fold === false) fold.open = false; fold.addEventListener('toggle', () => saveSt({ fold: fold.open }));
   const tL = w.querySelector('[data-htab="list"]'), tD = w.querySelector('[data-htab="detail"]'); let listScroll = 0;
-  const show = which => { const det = which === 'detail'; w.querySelector('#hList').hidden = det; fold.hidden = det; w.querySelector('#hDetail').hidden = !det;
-    tL.setAttribute('aria-selected', String(!det)); tD.setAttribute('aria-selected', String(det)); if (!det) { saveSt({ view: 'list' }); window.scrollTo(0, listScroll); } };
+  const tS = w.querySelector('[data-htab="search"]');
+  const show = which => { const det = which === 'detail', srch = which === 'search'; w.querySelector('#hList').hidden = det || srch; fold.hidden = det || srch; w.querySelector('#hDetail').hidden = !det; w.querySelector('#hSearch').hidden = !srch;
+    tL.setAttribute('aria-selected', String(!det && !srch)); tD.setAttribute('aria-selected', String(det)); tS.setAttribute('aria-selected', String(srch));
+    if (!det && !srch) { saveSt({ view: 'list' }); window.scrollTo(0, listScroll); } };
   tL.onclick = () => show('list'); tD.onclick = () => show('detail');
+  // ===== V4.26 · BUSCAR ENTREGA (diseño aprobado): pedido · factura · NDP · hoja; hojas activas, finalizadas e históricas; MISMA visibilidad que las hojas =====
+  const OUT = { ENTREGADO: ['Entregado', 'ok'], ENTREGA_PARCIAL: ['Entrega parcial', 'part'], NO_ENTREGADO: ['No entregado', 'bad'], REPROGRAMAR: ['Reprogramado', 'part'], PENDIENTE: ['Pendiente', 'pend'] };
+  const outcomeOf = x => x.outcome === 'PENDIENTE' && x.route_status === 'EN_CURSO' ? ['En reparto · aún NO recibido', 'pend'] : x.outcome === 'PENDIENTE' && x.route_status === 'CANCELADA' ? ['Hoja cancelada', 'bad'] : (OUT[x.outcome] || [x.outcome, 'pend']);
+  const searchPane = () => {
+    const box = w.querySelector('#hSearch'); if (box.dataset.ready) return; box.dataset.ready = '1';
+    box.innerHTML = '<section class="bs-card"><div class="bs-sticky"><h3>¿El cliente no recibió su pedido?</h3><p>Ingresá el número de <b>pedido web</b>, <b>factura</b>, <b>NDP</b> o <b>hoja</b> y comprobá el estado, quién lo transportó y quién firmó la recepción.</p>' +
+      '<form class="bs-form" id="bsForm" autocomplete="off"><input id="bsQ" inputmode="text" placeholder="Ej.: 26340 · FCB 0002-00012345 · 0001-00000777 · 01-000024" aria-label="Pedido, factura, NDP u hoja"><button class="btn dark" type="submit">BUSCAR</button></form></div>' +
+      '<div id="bsRes" aria-live="polite"></div></section>';
+    box.querySelector('#bsForm').onsubmit = async e => {
+      e.preventDefault(); const q = box.querySelector('#bsQ').value.trim(), out = box.querySelector('#bsRes'); out.innerHTML = '<p class="rp-note">Buscando…</p>';
+      let rows; try { rows = await api.searchDeliveries(q); } catch (err) { out.innerHTML = '<p class="up-msg err">' + esc(/QUERY_TOO_SHORT/.test(err.message) ? 'Ingresá al menos 3 dígitos del pedido, factura o NDP.' : err.message) + '</p>'; return; }
+      if (!rows.length) { out.innerHTML = '<p class="bs-empty">No se encontró ninguna entrega para «' + esc(q) + '» en las hojas que podés ver.</p>'; return; }
+      const tries = {}; rows.forEach(x => (x.order_numbers || []).forEach(o => { tries[o] = (tries[o] || 0) + 1; }));
+      const seen = {}, ord = rows.slice().sort((a, b) => String(a.published_at).localeCompare(String(b.published_at)));
+      ord.forEach(x => { const o = (x.order_numbers || [])[0]; seen[o] = (seen[o] || 0) + 1; x._try = tries[o] > 1 ? seen[o] + ' de ' + tries[o] : ''; });
+      out.innerHTML = '<p class="bs-count">Resultado de búsqueda · ' + rows.length + ' entrega' + (rows.length === 1 ? '' : 's') + '</p>' + rows.map(x => { const [ol, oc] = outcomeOf(x);
+        return '<article class="bs-res" data-stop="' + x.stop_id + '"><header><span class="bs-ped">PEDIDO ' + esc((x.order_numbers || []).join(' + ')) + '</span><span class="bs-st ' + oc + '">● ' + esc(ol) + '</span>' +
+          (x._try ? '<span class="bs-try">INTENTO ' + esc(x._try) + '</span>' : '') + '<span class="bs-date">' + esc(x.sheet_date ? x.sheet_date.split('-').reverse().join('/') : dt(x.published_at)) + '</span></header>' +
+          '<div class="bs-grid"><div><span>CLIENTE</span><b>' + esc(x.client_name || '—') + '</b><small>' + esc(x.address || '') + (x.docs ? ' · ' + esc(x.docs) : '') + '</small></div>' +
+          '<div><span>HOJA / TRANSPORTISTA</span><b>' + esc(x.route_number) + '</b><small>' + esc(x.carrier || '') + (x.responsable ? ' · ' + esc(x.responsable) : '') + '</small><small>Publicada ' + dt(x.published_at) + (x.started_at ? ' · Salió ' + dt(x.started_at) : '') + (x.completed_at ? ' · Cerró ' + dt(x.completed_at) : '') + '</small></div>' +
+          '<div><span>QUIÉN RECIBIÓ</span>' + (x.signatures_visible ? (x.receiver_name ? '<b>' + esc(x.receiver_name) + '</b><small>CUIL ' + esc(x.receiver_cuil || '—') + ' · ' + dt(x.received_at) + '</small>' : '<b>—</b><small>' + (x.outcome === 'PENDIENTE' ? 'Todavía sin recepción' : 'Sin firma registrada') + '</small>')
+            : '<b>' + (x.received_at ? 'Recepción registrada' : '—') + '</b><small>Firma y CUIL visibles solo con permiso de firmas</small>') + '</div></div>' +
+          '<footer><span>' + (x.signatures_visible && x.has_receipt ? '✓ Constancia de recepción disponible' + (x.receipt_number ? ' · N.º ' + esc(x.receipt_number) : '') : x.outcome_note ? 'Observación: ' + esc(x.outcome_note) : '') + '</span>' +
+          (x.signatures_visible && x.received_at ? '<button class="btn soft" type="button" data-bs-print>IMPRIMIR CONSTANCIA</button><button class="btn dark" type="button" data-bs-view data-rid="' + x.route_id + '">VER CONSTANCIA Y FIRMA →</button>' : '<button class="btn soft" type="button" data-bs-view data-rid="' + x.route_id + '">VER HOJA →</button>') + '</footer></article>'; }).join('');
+      out.querySelectorAll('[data-bs-view]').forEach(b => b.onclick = async () => { const sid = b.closest('[data-stop]').dataset.stop; await detail(b.dataset.rid);
+        const btn = w.querySelector('#hDetail tr[data-stop="' + sid + '"] [data-delivery-detail]'); if (btn) { btn.click(); setTimeout(() => (w.querySelector('#deliveryTraceBox') || btn).scrollIntoView({ block: 'start' }), 600); } });
+      out.querySelectorAll('[data-bs-print]').forEach(b => b.onclick = async () => { const sid = b.closest('[data-stop]').dataset.stop, x = rows.find(r => r.stop_id === sid);
+        try { const tr = await api.deliveryTrace(sid); printReceipt(x, tr); } catch (err) { alert(err.message); } });
+    };
+  };
+  const signatureSrc = raw => {
+    if (!raw) return '';
+    const s = String(raw);
+    if (s.startsWith('\\x')) {
+      const hex = s.slice(2); let bin = '';
+      for (let i = 0; i < hex.length; i += 2) bin += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+      return 'data:image/png;base64,' + btoa(bin);
+    }
+    return 'data:image/png;base64,' + s;
+  };
+  // constancia imprimible: datos de deliveryTrace (exige signatures.view en el servidor); se imprime SOLO la constancia
+  const printReceipt = (x, tr) => {
+    const ev = tr.evidence || {}, rc = tr.receipt || {}, sig = ev.signature_png ? signatureSrc(ev.signature_png) : '';
+    const d = document.createElement('div'); d.className = 'bs-print'; d.innerHTML = '<div class="bs-paper"><header><img src="/brand/ok-accesorios-negro.png" alt="OK Accesorios"><div><b>CONSTANCIA DE ENTREGA</b><small>' + (rc.receipt_number ? 'Recibido Conforme N.º ' + esc(rc.receipt_number) : 'OK Despacho') + '</small></div></header>' +
+      '<dl><dt>Pedido</dt><dd>' + esc((x.order_numbers || []).join(' + ')) + '</dd><dt>Comprobante</dt><dd>' + esc(x.docs || '—') + '</dd><dt>Cliente</dt><dd>' + esc(x.client_name || '') + '</dd><dt>Domicilio</dt><dd>' + esc(x.address || '') + '</dd>' +
+      '<dt>Hoja</dt><dd>' + esc(x.route_number) + ' · ' + esc(x.carrier || '') + '</dd><dt>Resultado</dt><dd>' + esc(outcomeOf(x)[0]) + '</dd><dt>Recibió</dt><dd>' + esc(ev.receiver_name || '—') + '</dd><dt>CUIL</dt><dd>' + esc(ev.receiver_cuil || '—') + '</dd>' +
+      '<dt>Fecha y hora</dt><dd>' + dt(x.received_at) + '</dd></dl>' + (sig ? '<figure><img src="' + sig + '" alt="Firma"><figcaption>Firma del receptor (original)</figcaption></figure>' : '') +
+      '<p class="bs-foot">Emitida desde OK Despacho · ' + esc(new Date().toLocaleString('es-AR')) + '</p></div><div class="bs-print-bar"><button class="btn dark" type="button" id="bsP">IMPRIMIR</button><button class="btn soft" type="button" id="bsC">CERRAR</button></div>';
+    document.body.appendChild(d); document.body.classList.add('bs-printing'); const close = () => { d.remove(); document.body.classList.remove('bs-printing'); };
+    d.querySelector('#bsC').onclick = close; d.querySelector('#bsP').onclick = () => window.print();
+  };
+  tS.onclick = () => { searchPane(); show('search'); setTimeout(() => { const i = w.querySelector('#bsQ'); if (i) i.focus(); }, 50); };
   const list = async m => {
     const box = w.querySelector('#hList'); let res = { total: 0, rows: [] };
     try { res = await api.searchRoutes(f); } catch (e) { m = { err: true, text: e.message }; }
@@ -249,16 +304,7 @@ export async function openHistory(api, me) {
       (active ? '<button class="btn soft" type="button" id="hResend">REENVIAR NOTIFICACIÓN</button>' + (hasPerm(me, 'routes.cancel') ? '<input class="ed" id="hCancelWhy" placeholder="Motivo de cancelación"><button class="btn danger" type="button" id="hCancel">CANCELAR</button>' : '') : '') + '</div><div id="hAuditBox"></div></section>';
     msgBox(box.querySelector('#hSheet'), m);
     const again = t => detail(id, t);
-    const signatureSrc = raw => {
-      if (!raw) return '';
-      const s = String(raw);
-      if (s.startsWith('\\x')) {
-        const hex = s.slice(2); let bin = '';
-        for (let i = 0; i < hex.length; i += 2) bin += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
-        return 'data:image/png;base64,' + btoa(bin);
-      }
-      return 'data:image/png;base64,' + s;
-    };
+
     let geoQueue = Promise.resolve();
     const geoLabelFallback = loc => {
       if (!loc) return 'Sin registro';
@@ -441,6 +487,42 @@ const CFG = {
       '<div class="uact"><button class="btn soft" type="button" id="ceTpl">DESCARGAR PLANTILLA EXCEL</button><label class="btn dark" for="ceFile">IMPORTAR EMAILS DESDE EXCEL</label><input type="file" id="ceFile" accept=".xlsx" hidden></div>' +
       '<div id="cePrev"></div><h3 class="dsub">BUSCAR / EDITAR</h3><div class="ufilters"><input id="ceQ" placeholder="CUIT, nombre o email"><button class="btn soft" type="button" id="ceGo">BUSCAR</button></div><div id="ceList"></div>' +
       '<h3 class="dsub">AGREGAR O CAMBIAR</h3><div class="ufilters"><input id="ceCuit" placeholder="CUIT (11 dígitos)" inputmode="numeric"><input id="ceName" placeholder="Nombre o razón social"><input id="ceMail" placeholder="Email"><button class="btn dark" type="button" id="ceSave">GUARDAR</button></div>';
+    // ===== V4.26 · PADRÓN COMPLETO DE CLIENTES (listado_clientes.xlsx): CUIT · DNI · nombre exacto e inequívoco. Vista previa del servidor → APLICAR (CONSERVAR) =====
+    sec.insertAdjacentHTML('beforeend', '<h3 class="dsub">PADRÓN COMPLETO DE CLIENTES</h3><p class="rp-note">Importa el listado de clientes (Razón Social · Nombre · Tipo Doc. · Número · eMail). ' +
+      'Asocia por <b>CUIT/CUIL</b> (dígito verificador), <b>DNI</b> y <b>nombre exacto</b> solo si es único en el padrón. Los correos ya cargados <b>no se modifican</b> y las coincidencias dudosas quedan para revisión. ' +
+      'No envía ningún correo.</p><div class="uact"><label class="btn dark" for="cpFile">IMPORTAR PADRÓN (.xlsx)</label><input type="file" id="cpFile" accept=".xlsx" hidden></div><div id="cpPrev"></div>');
+    const loadSheetJS = () => window.XLSX ? Promise.resolve(window.XLSX) : new Promise((ok, ko) => { const t = document.createElement('script'); t.src = '/legacy/xlsx.full.min.js'; t.onload = () => ok(window.XLSX); t.onerror = () => ko(new Error('No se pudo cargar el lector de Excel.')); document.head.appendChild(t); });
+    sec.querySelector('#cpFile').onchange = async e => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return; const box = sec.querySelector('#cpPrev'); box.innerHTML = '<p class="rp-note">Analizando ' + esc(f.name) + '…</p>';
+      try {
+        const [X, P] = await Promise.all([loadSheetJS(), import('./padron-clientes.js')]);
+        const wb = X.read(await f.arrayBuffer(), { type: 'array' }), m = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
+        const an = P.analyzePadron(m), r = an.resumen, pv = await api.clientPadronImport(an.rows, false, f.name);   // VISTA PREVIA del servidor (no escribe)
+        const sinNombre = an.cuit.length + an.dni.length, val = r.con_correo_valido;
+        box.innerHTML = '<div class="card cp-res"><b>VISTA PREVIA · ' + esc(f.name) + '</b><table class="utable"><tbody>' + [
+            ['Clientes del padrón', r.filas], ['Con correo válido / sin correo / correo inválido', val + ' / ' + r.sin_correo + ' / ' + r.correo_invalido],
+            ['Asociables por CUIT/CUIL · por DNI', r.por_CUIT + ' · ' + r.por_DNI], ['Claves por nombre exacto (de ' + r.clientes_con_clave_por_nombre + ' clientes)', r.claves_de_nombre],
+            ['Pendientes de revisión (no se asocian)', r.pendientes], ['Nombres ambiguos (no se asocian)', r.nombres_ambiguos], ['Filas enviadas al servidor', r.filas_para_importar],
+            ['NUEVAS que se agregarían', pv.nuevos], ['Ya existentes que se CONSERVAN sin cambios', pv.conservados_existentes], ['Rechazadas por el servidor', pv.rechazados]
+          ].map(([k, v]) => '<tr><td>' + esc(k) + '</td><td><b>' + esc(String(v)) + '</b></td></tr>').join('') + '</tbody></table>' +
+          '<div class="uact"><button class="btn soft" type="button" id="cpRep">DESCARGAR INFORME (pendientes, ambiguos, sin correo)</button>' +
+          '<button class="btn dark" type="button" id="cpApply"' + (pv.nuevos ? '' : ' disabled') + '>APLICAR · AGREGAR ' + pv.nuevos + ' CORREOS</button></div></div>';
+        sec.querySelector('#cpRep').onclick = async () => {
+          const XE = await loadExcelJS(), w = new XE.Workbook(), add = (name, cols, rows) => { const ws = w.addWorksheet(name); ws.columns = cols.map(c => ({ header: c, key: c, width: 28 })); rows.forEach(x => ws.addRow(cols.map(c => Array.isArray(x[c]) ? x[c].join(' · ') : x[c]))); ws.getRow(1).font = { bold: true }; };
+          add('RESUMEN', ['dato', 'valor'], Object.entries({ ...r, nuevas_segun_servidor: pv.nuevos, conservadas_existentes: pv.conservados_existentes, rechazadas_servidor: pv.rechazados }).map(([dato, valor]) => ({ dato, valor })));
+          add('PENDIENTES DE REVISIÓN', ['fila', 'razon_social', 'nombre', 'tipo_doc', 'documento', 'email_original', 'motivo'], an.pendientes);
+          add('NOMBRES AMBIGUOS', ['nombre', 'filas'], Object.entries(an.nombres_ambiguos).map(([nombre, filas]) => ({ nombre, filas: filas.map(String) })));
+          add('SIN CORREO', ['fila', 'razon_social', 'nombre', 'tipo_doc', 'documento'], an.sin_email);
+          add('CORREO INVÁLIDO', ['fila', 'razon_social', 'nombre', 'tipo_doc', 'documento', 'email_original'], an.invalidos);
+          add('RECHAZOS DEL SERVIDOR', ['fila', 'motivo'], pv.rechazos || []);
+          const buf = await w.xlsx.writeBuffer(), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); a.download = 'Informe_padron_clientes.xlsx'; a.click(); };
+        sec.querySelector('#cpApply').onclick = async () => {
+          if (!confirm('Se agregarán ' + pv.nuevos + ' correos nuevos. Los ' + pv.conservados_existentes + ' ya existentes NO se modifican. No se envía ningún correo. ¿Continuar?')) return;
+          try { const ap = await api.clientPadronImport(an.rows, true, f.name);
+            again({ text: 'Padrón importado: ' + ap.nuevos + ' correos nuevos, ' + ap.conservados_existentes + ' existentes conservados sin cambios, ' + ap.rechazados + ' rechazados.' }); }
+          catch (err) { box.insertAdjacentHTML('beforeend', '<p class="up-msg err">' + esc(err.message) + '</p>'); } };
+      } catch (err) { box.innerHTML = '<p class="up-msg err">' + esc(err.message) + '</p>'; }
+    };
     sec.querySelector('#ceTpl').onclick = async () => { const X = await loadExcelJS(), wb = new X.Workbook(), ws = wb.addWorksheet('Emails de clientes');
       ws.addRow(['CUIT', 'Nombre o razón social', 'Email']); ws.getRow(1).font = { bold: true }; ws.columns = [{ width: 18 }, { width: 40 }, { width: 36 }];
       const buf = await wb.xlsx.writeBuffer(), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); a.download = 'plantilla_emails_clientes.xlsx'; a.click(); };

@@ -711,7 +711,10 @@ export class DemoApi {
   async deliveryEmailSuggestion(stopId) {
     this._refresh(); const r = (this.db.routes2 || []).find(x => x.stops.some(st => st.id === stopId)); if (!r) return null;
     const st = r.stops.find(x => x.id === stopId); if ((st.stop_type || 'PEDIDO') !== 'PEDIDO') return null;
-    return (st.customer_email || '').trim() || ((this.db.clientEmails || {})[st.client_key] || {}).email || null;
+    // V4.26: el correo de la hoja manda; si no, padrón por CUIT (V4.23) → DNI → nombre EXACTO (misma normalización que el constructor)
+    const al = this.db.clientEmailAliases || { DNI: {}, NOMBRE: {} }, nn = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+    return (st.customer_email || '').trim() || ((this.db.clientEmails || {})[st.client_key] || {}).email || (/^\d{7,8}$/.test(st.client_key || '') && (al.DNI[st.client_key] || {}).email)
+      || (al.NOMBRE[nn(st.client_key)] || {}).email || (al.NOMBRE[nn(st.client_name)] || {}).email || null;
   }
   async finalizeRoute(id, kmEnd) {
     this._net(); this._refresh(); const { r, me } = this._mine(id);

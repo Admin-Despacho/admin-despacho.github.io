@@ -18,6 +18,8 @@ export const SupabaseAdmin = {
   },
   // SALIDA Y RECORRIDO · datos del LISTADO que search_routes no devuelve: fecha programada de la hoja (snapshot publicado:
   // sheet_snapshot.pdf_model.data[].r.fecha), salida y regreso REALES y patente. Solo lectura, con el mismo RLS de routes.
+  // V4.26 · BUSCAR ENTREGA: pedido / factura / NDP / hoja; MISMA visibilidad que las hojas; receptor, CUIL y firma solo con signatures.view (servidor)
+  async searchDeliveries(q) { const { data, error } = await this.sb.rpc('search_deliveries', { p_query: q }); if (error) throw Object.assign(new Error(error.message), { code: (String(error.message).match(/^[A-Z_]+/) || [])[0] }); return data || []; },
   async routesListInfo(ids) {
     if (!ids || !ids.length) return [];
     const rows = await sel(this.sb.from('routes').select('id, started_at, depot_arrived_at, vehicle:vehicles(plate), pdf:sheet_snapshot->pdf_model->data').in('id', ids));
@@ -55,6 +57,8 @@ export const SupabaseAdmin = {
   async clientEmailsPreview(rows) { const { data, error } = await this.sb.rpc('client_emails_preview', { p_rows: rows }); if (error) throw new Error(error.message); return data; },
   async clientEmailsApply(rows, mode, file) { const { data, error } = await this.sb.rpc('client_emails_apply', { p_rows: rows, p_mode: mode, p_file: file }); if (error) throw new Error(error.message); return data; },
   async clientEmailUpsert(cuit, name, email) { const { data, error } = await this.sb.rpc('client_email_upsert', { p_cuit: cuit, p_name: name, p_email: email }); if (error) throw new Error(error.message); return data; },
+  // V4.26 · padrón completo (CUIT · DNI · nombre exacto): el servidor re-valida y CONSERVA lo existente; p_apply=false es vista previa sin escribir
+  async clientPadronImport(rows, apply, fileName) { const { data, error } = await this.sb.rpc('client_padron_import', { p: { file_name: fileName || null, rows }, p_apply: !!apply }); if (error) throw new Error(error.message); return data; },
   async clientEmailsList(q) { let r = this.sb.from('client_emails').select('*').order('client_name').limit(200); const t = String(q || '').trim();
     if (t) r = r.or('cuit.ilike.%' + t.replace(/[^0-9a-zA-Z@._ -]/g, '') + '%,client_name.ilike.%' + t.replace(/[^0-9a-zA-Z@._ -]/g, '') + '%,email.ilike.%' + t.replace(/[^0-9a-zA-Z@._ -]/g, '') + '%');
     const { data, error } = await r; if (error) throw new Error(error.message); return data || []; },

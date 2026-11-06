@@ -45,7 +45,7 @@ async def main():
         assert result['user']['role'] == 'TRANSPORTISTA_INTERNO'
         assert result['user']['supervisor_user_id'] == 'supervisor'
         assert result['calls'][-1] == {'rpc': True, 'id': 'driver', 'sup': 'supervisor'}
-        await page.click('tr[data-uid="driver"] [data-act="edit"]')
+        await page.click('[data-pick="driver"]')   # V4.26 (diseño V3): se elige al usuario en su tarjeta y el editor se abre en el panel
         assert await page.input_value('#nuSup') == 'supervisor'
         await page.click('#umCancel')
         # A new panel reads persisted state; it does not depend on the previous instance.

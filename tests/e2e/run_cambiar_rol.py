@@ -91,8 +91,9 @@ async def main():
             await pg.evaluate('()=>{location.hash="#/usuarios"}'); await pg.wait_for_timeout(2000); await dismiss(pg)
             label = None
             for k in ('op', 'ad', 'ro'):
-                row = pg.locator('tr', has_text=[u for u in USERS if u[0] == k][0][1]).first
-                await row.locator('[data-a="perms"], [data-act="perms"], button:has-text("PERMISOS"), button:has-text("Permisos")').first.click(); await pg.wait_for_timeout(900)
+                row = pg.locator('.v3-row', has_text=[u for u in USERS if u[0] == k][0][1]).first   # V4.26 (diseño V3): tarjeta → panel
+                await row.locator('[data-pick]').click(); await pg.wait_for_timeout(500)
+                await pg.locator('#upSide [data-act="perms"]').first.click(); await pg.wait_for_timeout(900)
                 box = pg.locator('#permModal [data-perm="routes.receive_internal"]'); label = label or (await pg.locator('#permModal label:has([data-perm="routes.receive_internal"])').inner_text()).strip()
                 await box.check(); await pg.locator('#permModal button', has_text='GUARDAR PERMISOS').click(); await pg.wait_for_timeout(1300)
             st = await pg.evaluate(f'()=>{{const d=JSON.parse(localStorage.getItem("{K}")); return Object.fromEntries(d.users.filter(u=>/@example\\.invalid$/.test(u.email)).map(u=>[u.email.split("@")[0], {{role:u.role, ov:u.permission_overrides||{{}}}}]))}}')
@@ -186,7 +187,8 @@ async def main():
             await pg.goto(f'http://127.0.0.1:{PORT}/'); await pg.evaluate(f'(s)=>localStorage.setItem("{K}", s)', DBSTATE[0]); await login(pg, 'admin@okdespacho.demo')
             pub2 = await pg.evaluate(PUB, ids['op'])
             await pg.evaluate('()=>{location.hash="#/usuarios"}'); await pg.wait_for_timeout(2000); await dismiss(pg)
-            await pg.locator('tr', has_text='Operario QA').first.locator('[data-a="perms"], [data-act="perms"], button:has-text("PERMISOS"), button:has-text("Permisos")').first.click(); await pg.wait_for_timeout(1200)
+            await pg.locator('.v3-row', has_text='Operario QA').first.locator('[data-pick]').click(); await pg.wait_for_timeout(500)   # V4.26 (diseño V3)
+            await pg.locator('#upSide [data-act="perms"]').first.click(); await pg.wait_for_timeout(1200)
             pend = await pg.evaluate('()=>(document.getElementById("permPending")||{}).innerText||""')
             still = await pg.evaluate(f'()=>JSON.parse(localStorage.getItem("{K}")).routes2.find(r=>r.id==="{rt["op"]["id"]}").responsable_id')
             res('CR-13 sin el permiso se rechaza una nueva asignación', 'error' in pub2, pub2)

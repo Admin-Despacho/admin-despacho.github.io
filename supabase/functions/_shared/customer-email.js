@@ -64,8 +64,9 @@ export function receiptEmail({ receipt, stop, inlineLogo }) {
 }
 export function customerEmail({ kind, stop }) {
   const orders = (stop.order_numbers || []).filter(Boolean).join(' + ');
-  const subject = kind === 'ON_THE_WAY' ? 'OK Accesorios · Tu pedido va en camino' : kind === 'PARTIAL' ? 'OK Accesorios · Entregamos parte de tu pedido' : 'OK Accesorios · Tu pedido fue entregado';
-  const body = kind === 'ON_THE_WAY' ? 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' es la próxima entrega de nuestro reparto. Llegaremos en el transcurso de la jornada.'
+  const subject = kind === 'ON_THE_WAY' ? 'OK Accesorios · Tu pedido está en camino' : kind === 'PARTIAL' ? 'OK Accesorios · Entregamos parte de tu pedido' : 'OK Accesorios · Tu pedido fue entregado';
+  // V4.26: se envía al confirmarse la SALIDA REAL del reparto (y como máximo una vez por cliente/parada y hoja, con todos sus pedidos): no promete ser la próxima entrega
+  const body = kind === 'ON_THE_WAY' ? 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' ya salió de nuestro depósito y está en camino. Lo vas a recibir en el transcurso de la jornada de reparto.'
     : kind === 'PARTIAL' ? 'Entregamos <b>parte</b> de tu pedido' + (orders ? ' ' + esc(orders) : '') + '. Nos vamos a comunicar para coordinar el resto.'
     : 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' fue entregado. ¡Gracias por tu compra!';
   const html = '<!doctype html><html lang="es"><body style="margin:0;background:#eef2f4;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:20px 8px;">' +

@@ -86,6 +86,34 @@ export const DemoAdmin = {
     const by = id => ((this.db.users || []).find(u => u.id === id) || {}).full_name || null;
     return { stop, evidence, receipt, emails, outcome_by_name: by(stop.outcome_by) || by(e && e.created_by) };
   },
+  async searchDeliveries(q) {   // V4.26 (demo): mismas reglas que search_deliveries
+    this._refresh(); const me = await this.me(); if (!me || me.status !== 'ACTIVO') throw err('FORBIDDEN', 'FORBIDDEN', 403);
+    q = String(q || '').trim(); const dg = q.replace(/\D/g, '');
+    if (dg.length < 3 && !/^\d{2}-\d{6}$/.test(q)) throw err('QUERY_TOO_SHORT: ingresá al menos 3 dígitos', 'QUERY_TOO_SHORT', 400);
+    const strip = x => String(x || '').replace(/^0+/, ''), parts = d => { const m = String(d || '').replace(/[^0-9-]/g, '').split('-'); return m.length >= 2 ? { pv: strip(m[0]), n: strip(m[1]) } : null; };
+    const qn = q.includes('-') ? strip((q.replace(/[^0-9-]/g, '').split('-')[1]) || '') : strip(dg), qpv = q.includes('-') ? strip(q.replace(/[^0-9-]/g, '').split('-')[0]) : null;
+    const out = [];
+    const C = this._carriers(), U = this.db.users || [];
+    for (const r of (this.db.routes2 || []).filter(x => x.operational_status !== 'BORRADOR' && (me.role==='ADMIN'||this._canViewRoute(me, x))).sort((a, b) => String(b.published_at).localeCompare(String(a.published_at)))) {
+      const sig=me.role==='ADMIN'||(me.role==='SUPERVISOR_DESPACHO'&&hasPerm(me,'signatures.view')&&(this._routeBelongsTo(r,me.id)||[...this._teamOf(me.id)].some(u=>this._routeBelongsTo(r,u))));
+      const data = ((r.sheet_snapshot && r.sheet_snapshot.pdf_model && r.sheet_snapshot.pdf_model.data) || []).map(x => x && x.r).filter(Boolean);
+      for (const s of r.stops.filter(x => (x.stop_type || 'PEDIDO') === 'PEDIDO')) {
+        const ords = s.order_numbers || [], rows = data.filter(x => ords.includes(String(x.mainOrder)) || ords.includes(String(x.shipOrder)));
+        const docs = [...new Set(rows.flatMap(x => [ords.includes(String(x.mainOrder)) && x.mainDoc, ords.includes(String(x.shipOrder)) && x.shipDoc]).filter(Boolean))];
+        const hit = ords.includes(dg) || r.number === q || (qn && docs.some(d => { const p = parts(d); return p && p.n === qn && (qpv == null || p.pv === qpv); }));
+        if (!hit) continue;
+        const e = (this.db.evidence || {})[s.id], rc = (this.db.receipts || {})[s.id];
+        out.push({ route_id: r.id, route_number: r.number, route_status: r.operational_status, carrier: (C.find(c => c.id === r.carrier_id) || {}).name || r.carrier_id,
+          responsable: (U.find(u => u.id === r.responsable_id) || {}).full_name || null, published_at: r.published_at, started_at: r.started_at || null, completed_at: r.completed_at || null,
+          sheet_date: (data.find(x => x.fecha) || {}).fecha || null, stop_id: s.id, client_name: s.client_name, address: s.address, order_numbers: ords, docs: docs.join(' · ') || null,
+          outcome: s.outcome, outcome_note: s.outcome_note || null, arrived_at: s.arrived_at || null, received_at: e ? (e.created_at || e.at || null) : null, has_receipt: !!rc, signatures_visible: sig,
+          receiver_name: sig && e ? e.receiver_name : null, receiver_cuil: sig && e ? (e.cuil || e.receiver_cuil || null) : null, has_signature: sig ? !!(e && e.signature_png_b64) : null,
+          receipt_number: sig && rc ? (rc.receipt_number || rc.number || null) : null, receipt_at: sig && rc ? (rc.generated_at || rc.at || null) : null });
+        if (out.length >= 30) return out;
+      }
+    }
+    return out;
+  },
   async routesListInfo(ids) {   // mismo dato que el modo online (fecha del snapshot publicado; salida y regreso reales; patente)
     this._refresh(); const me = await this.me(); const vs = this.db.vehicles || [];
     return (this.db.routes2 || []).filter(r => (ids || []).includes(r.id) && this._canViewRoute(me, r)).map(r => ({ id: r.id, started_at: r.started_at || null, depot_arrived_at: r.depot_arrived_at || null,
@@ -208,6 +236,25 @@ export const DemoAdmin = {
     if (!/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(e)) throw err('EMAIL_INVALID: el email no es válido', 'EMAIL_INVALID', 400);
     const db = this.db.clientEmails = this.db.clientEmails || {}; db[c] = { cuit: c, client_name: String(name || '').trim() || (db[c] || {}).client_name || null, email: e, source: 'MANUAL', updated_at: new Date().toISOString(), updated_by: me.id };
     this._save(); return db[c];
+  },
+  async clientPadronImport(rows, apply, fileName) {   // V4.26 (demo): mismas reglas que client_padron_import (re-valida; CONSERVAR; claves ambiguas no se asocian)
+    this._refresh(); const me = await this._ceAdmin(); const ce = this.db.clientEmails = this.db.clientEmails || {}; const al = this.db.clientEmailAliases = this.db.clientEmailAliases || { DNI: {}, NOMBRE: {} };
+    const { normName, cuitOk } = await import('./padron-clientes.js'); const EM = /^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i;
+    const key = x => { const t = String(x.tipo || '').toUpperCase(); return t + '|' + (t === 'NOMBRE' ? normName(x.clave) : String(x.clave || '').replace(/\D/g, '')); };
+    const mails = {}; (rows || []).forEach(x => { (mails[key(x)] = mails[key(x)] || new Set()).add(String(x.email || '').trim().toLowerCase()); });
+    let ins = 0, kept = 0; const rej = [];
+    for (const x of rows || []) {
+      const t = String(x.tipo || '').toUpperCase(), e = String(x.email || '').trim().toLowerCase(), k = key(x).split('|')[1], n = String(x.nombre || '').trim() || null;
+      if (!EM.test(e)) { rej.push({ fila: x.fila, motivo: 'correo inválido' }); continue; }
+      if (mails[key(x)].size > 1) { rej.push({ fila: x.fila, motivo: 'clave con correos distintos (ambigua)' }); continue; }
+      if (t === 'CUIT') { if (!cuitOk(k)) { rej.push({ fila: x.fila, motivo: 'CUIT/CUIL inválido' }); continue; }
+        if (ce[k]) { kept++; continue; } if (apply) ce[k] = { cuit: k, client_name: n, email: e, source: 'EXCEL', updated_at: new Date().toISOString(), updated_by: me.id }; ins++; }
+      else if (t === 'DNI' || t === 'NOMBRE') { if ((t === 'DNI' && !/^\d{7,8}$/.test(k)) || (t === 'NOMBRE' && !/^[A-Z0-9]+( [A-Z0-9]+)+$/.test(k))) { rej.push({ fila: x.fila, motivo: t + ' con formato inválido' }); continue; }
+        if (al[t][k]) { kept++; continue; } if (apply) al[t][k] = { email: e, client_name: n, source: 'PADRON' }; ins++; }
+      else rej.push({ fila: x.fila, motivo: 'tipo de clave desconocido' });
+    }
+    if (apply) this._save();
+    return { nuevos: ins, conservados_existentes: kept, rechazados: rej.length, rechazos: rej, aplicado: !!apply };
   },
   async clientEmailsList(q) { this._refresh(); await this._ceAdmin(); const t = String(q || '').toLowerCase().trim();
     return Object.values(this.db.clientEmails || {}).filter(x => !t || [x.cuit, x.client_name, x.email].some(v => String(v || '').toLowerCase().includes(t.replace(/[^0-9a-z@._ -]/g, '')))).sort((a, b) => String(a.client_name || '').localeCompare(String(b.client_name || ''))); },
