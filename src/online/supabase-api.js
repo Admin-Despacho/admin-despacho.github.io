@@ -226,11 +226,20 @@ export class SupabaseApi {
     const { routeDiff } = await import('../../supabase/functions/_shared/internal-route.js');
     const { data, error } = await this.sb.from('route_approval_requests').select('*, routes(*, route_stops(*))').eq('status', 'PENDING');
     if (error) throw new Error(error.message);
-    const ids = [...new Set((data || []).map(a => a.routes.responsable_id))];
+    const ids = [...new Set((data || []).filter(a => a.routes).map(a => a.routes.responsable_id))];   // V4.27: la hoja puede venir oculta por la RLS
     const { data: ps } = ids.length ? await this.sb.from('profiles').select('id, full_name').in('id', ids) : { data: [] };
-    return (data || []).map(a => { const r = { ...a.routes, stops: a.routes.route_stops }; return { ...a, route: r, driver_name: ((ps || []).find(p => p.id === r.responsable_id) || {}).full_name, diff: routeDiff(r) }; });
+    // V4.27: si la RLS ocultara la hoja (publicada fuera del equipo del Superior), esa fila se OMITE en lugar de romper toda la pantalla
+    const out = [];
+    for (const a of data || []) { if (!a.routes) continue; const r = { ...a.routes, stops: a.routes.route_stops }; out.push({ ...a, route: r, driver_name: ((ps || []).find(p => p.id === r.responsable_id) || {}).full_name, diff: routeDiff(r) }); }
+    return out;
   }
-  async reviewApproval(id, decision, note) { await this._rpc('review_route_approval', { p_request: id, p_decision: decision, p_note: note || null }); await this._ir({ action: 'send_queued' }).catch(() => null); }
+  // V4.27 · detalle de UNA solicitud de ruta interna pendiente (misma lectura que la pantalla de aprobaciones; RLS sin cambios)
+  async internalApprovalDetail(id) {
+    const a = (await this.pendingApprovals()).find(x => x.id === id);
+    if (!a) throw new Error('La solicitud ya no está pendiente o la hoja no está a tu alcance.');
+    return a;
+  }
+  async reviewApproval(id, decision, note) { await this._rpc('review_route_approval', { p_request: id, p_decision: decision, p_note: note || null }); } // V4.27: la decisión no despacha correos, tampoco los pendientes históricos.
   async sendQueuedApprovalEmails(ids) { return (await this._ir(ids ? { action: 'retry', job_ids: ids } : { action: 'send_queued' })).results; }
   async customerEmailJobs() { const { data } = await this.sb.from('customer_email_jobs').select('*').order('queued_at', { ascending: false }).limit(100); return data || []; }
   async approvalEmailJobs() { const { data } = await this.sb.from('approval_email_jobs').select('*').order('queued_at', { ascending: false }).limit(100); return data || []; }

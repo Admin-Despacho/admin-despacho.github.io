@@ -10,8 +10,12 @@ import { hasPerm, ROLE_LABEL } from '../supabase/functions/_shared/rules.js';
 import { ensurePinGate, startPinLockWatcher } from './online/session-pin.js';
 import { initPushNotifications, revokePushOnLogout } from './online/push-notifications.js';
 import { canSwitch, viewMode, switchTo, switcherHtml, wireSwitcher, checkRevoked, watchRevocation } from './online/role-view.js';
+import { initStickyHeader } from './online/sticky-header.js';   // V4.27: cabecera, buscador y filtros fijos (solo presentación)
+try { initStickyHeader(); } catch (e) { /* nunca bloquea el arranque */ }
 
 const api = createApi();
+import { initApprovalsBell } from './online/approvals-bell.js';   // V4.27: campana de aprobaciones (solo lectura y navegación)
+try { initApprovalsBell(api); } catch (e) { /* nunca bloquea el arranque */ }
 const $ = s => document.querySelector(s);
 const show = id => ['#auth', '#noPanel', '#operario'].forEach(s => { $(s).hidden = s !== id; });
 let legacyLoaded = false;
@@ -345,7 +349,7 @@ function showLogin(note) {
 if (api.mode === 'demo') $('#demoBanner').hidden = false;
 window.OKD_ONLINE = { api };
 // La splash se oculta apenas termina la inicialización real (sesión restaurada y primera pantalla elegida): sin demoras artificiales
-window.OKD_BUILD = import.meta.env.VITE_OKD_BUILD_TAG || 'V4.26'; // identificador del build (diagnóstico)
+window.OKD_BUILD = import.meta.env.VITE_OKD_BUILD_TAG || 'V4.27'; // identificador del build (diagnóstico)
 async function syncServerConfig() {
   const set = (st, msg) => {
     window.OKD_CFG_STATE = st;

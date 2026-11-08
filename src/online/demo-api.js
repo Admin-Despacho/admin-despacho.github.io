@@ -753,20 +753,27 @@ export class DemoApi {
     return (this.db.approvals || []).filter(a => a.status === 'PENDING').map(a => { const r = this.db.routes2.find(x => x.id === a.route_id);
       return { ...a, route: JSON.parse(JSON.stringify(r)), driver_name: (this._user(r.responsable_id) || {}).full_name, diff: routeDiff(r) }; });
   }
+  async internalApprovalDetail(id) {   // V4.27 (demo): Superior asignado (con permiso) · Administración · solicitante
+    this._refresh(); const me = await this.me(); const a = (this.db.approvals || []).find(x => x.id === id); if (!a) throw err('No existe.', 'NOT_FOUND', 404);
+    const ok = (hasPerm(me, 'can_approve_internal_route_changes') && (a.supervisor_user_id === me.id || hasPerm(me, 'users.manage'))) || a.requested_by === me.id;
+    if (!ok) throw err('FORBIDDEN', 'FORBIDDEN', 403);
+    const r = this.db.routes2.find(x => x.id === a.route_id); return { ...a, route: JSON.parse(JSON.stringify(r)), driver_name: (this._user(r.responsable_id) || {}).full_name, diff: routeDiff(r) };
+  }
   async reviewApproval(id, decision, note) {
     this._refresh(); const me = await this.me();
     if (!hasPerm(me, 'can_approve_internal_route_changes')) throw err('FORBIDDEN', 'FORBIDDEN', 403);
     const a = (this.db.approvals || []).find(x => x.id === id); if (!a) throw err('No existe.', 'NOT_FOUND', 404);
     if (a.status !== 'PENDING') throw err('La solicitud ya fue resuelta.', 'NOT_PENDING', 409);
+    if (a.requested_by === me.id) throw err('SELF_APPROVAL: no se pueden aprobar ni observar los propios cambios', 'SELF_APPROVAL', 403);   // V4.27 (= servidor)
+    if (!a.supervisor_user_id && me.role !== 'ADMIN') throw err('FORBIDDEN: sin superior asignado la resuelve Administración', 'FORBIDDEN', 403);
     if (a.supervisor_user_id && a.supervisor_user_id !== me.id && !hasPerm(me, 'users.manage')) throw err('La revisa el superior asignado o Administración.', 'FORBIDDEN', 403);
     if (decision === 'OBSERVED' && !String(note || '').trim()) throw err('Para solicitar aclaración hay que indicar el motivo.', 'NOTE_REQUIRED', 400);
     Object.assign(a, { status: decision, reviewed_by: me.id, reviewed_at: new Date().toISOString(), review_note: note || null });
     const rr = this.db.routes2.find(x => x.id === a.route_id); rr.reviewed_at = a.reviewed_at;
     const r = this.db.routes2.find(x => x.id === a.route_id); r.approval_status = decision === 'APPROVED' ? 'APROBADA' : 'OBSERVADA'; r.review_note = note || null;
     this._audit(me, decision === 'APPROVED' ? 'INTERNAL_ROUTE_APPROVED' : 'INTERNAL_ROUTE_OBSERVED', r.id, null, { note });
-    if (decision === 'APPROVED') this._notif(r.responsable_id, r, 'INTERNAL_ROUTE_APPROVED', 'HOJA APROBADA · ' + r.number, 'Tu hoja fue aprobada.');
-    if (decision === 'OBSERVED') { this._notif(r.responsable_id, r, 'INTERNAL_ROUTE_OBSERVED', 'ACLARACIÓN SOLICITADA · HOJA ' + r.number, note); this._queueEmails(r, 'INTERNAL_ROUTE_OBSERVED', [this._user(r.responsable_id).email]); }
-    this._save(); await this.sendQueuedApprovalEmails();
+    // V4.27 (decisión de Dirección Técnica): aprobar u observar ya NO notifica ni envía correo al transportista
+    this._save(); // V4.27: una decisión no despacha la cola de correos existente.
   }
   // Cola de emails (mismo servicio que la Edge Function internal-approvals). Una falla no revierte la hoja.
   async sendQueuedApprovalEmails(onlyIds) {

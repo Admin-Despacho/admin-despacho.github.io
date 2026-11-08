@@ -241,6 +241,7 @@ export async function openRequests(api, me, frame) {
   const w = frame(me, isRc4(me) ? 'Solicitudes / Aprobaciones' : 'Solicitudes', '#/solicitudes');
   const approver = me.role === 'ADMIN' || hasPerm(me, 'requests.approve_team') || hasPerm(me, 'requests.reject_team') || hasPerm(me, 'requests.observe_team');
   let filter = approver ? 'asignadas' : 'mias';
+  const aprId = decodeURIComponent((location.hash.match(/[?&]apr=([^&]+)/) || [])[1] || '');   // V4.27: viene de la campana
   const wantNew = /nueva=1/.test(location.hash);
   let vehicles = []; try { vehicles = hasPerm(me, 'vehicle_mileage.view') || hasPerm(me, 'vehicles.view') ? await api.listVehicles() : []; } catch (e) { vehicles = []; }
   const draw = async m => {
@@ -256,11 +257,14 @@ export async function openRequests(api, me, frame) {
       F.map(([k, l]) => '<button type="button" class="btn ' + (k === filter ? 'dark' : 'soft') + '" data-f="' + k + '">' + l + '</button>').join('') + '</div>' +
       '<div class="tscroll"><table class="table" id="rqTable"><thead><tr><th>Fecha</th><th>Tipo</th><th>Solicitante</th><th>Resuelve</th><th>Hoja</th><th>Motivo</th><th>Estado</th><th>Respuesta</th><th></th></tr></thead><tbody>' +
       (list.map(q => { const [l, c] = ST_LABEL[q.status] || [q.status, 'info'], own = q.requested_by === me.id;
-        const can = !own && ['PENDING', 'OBSERVED'].includes(q.status) && (me.role === 'ADMIN' || q.supervisor_user_id === me.id);
-        return '<tr data-id="' + q.id + '"><td>' + esc(dt(q.requested_at)) + '</td><td>' + esc(REQ_LABEL[q.request_type] || q.request_type) + (q.request_type === 'CORRECCION_KM' && q.payload ? '<br><small>' + n0(q.payload.km) + ' km</small>' : '') + '</td><td>' + esc(q.requested_by_name || '') +
+        const intl = q.request_type === 'INTERNAL_ROUTE_CHANGE';   // V4.27: cambios de ruta interna → circuito review_route_approval
+        const can = !intl && !own && ['PENDING', 'OBSERVED'].includes(q.status) && (me.role === 'ADMIN' || q.supervisor_user_id === me.id);
+        const canInt = intl && !own && q.status === 'PENDING' && (me.role === 'ADMIN' || q.supervisor_user_id === me.id) && hasPerm(me, 'can_approve_internal_route_changes');
+        return '<tr data-id="' + q.id + '"' + (intl ? ' data-internal="1"' : '') + '><td>' + esc(dt(q.requested_at)) + '</td><td>' + esc(intl ? 'Cambios de ruta interna' : (REQ_LABEL[q.request_type] || q.request_type)) + (q.request_type === 'CORRECCION_KM' && q.payload ? '<br><small>' + n0(q.payload.km) + ' km</small>' : '') + '</td><td>' + esc(q.requested_by_name || '') +
           '</td><td>' + esc(q.approver_name || 'Admin General') + (q.escalated ? ' <small>(escalada)</small>' : '') + '</td><td>' + esc(q.route_number || '—') + '</td><td>' + esc(q.reason || '') + '</td><td>' + pill(c, l) + '</td><td>' + esc(q.review_note || '—') + '</td><td>' +
+          (canInt ? '<button class="btn dark" type="button" data-irv>REVISAR CAMBIOS</button>' : '') +
           (can ? '<div class="uact"><input class="ed" data-note placeholder="Nota (obligatoria para observar/rechazar)"><button class="btn soft" type="button" data-d="APPROVED">APROBAR</button><button class="btn soft" type="button" data-d="OBSERVED">OBSERVAR</button><button class="btn danger" type="button" data-d="REJECTED">RECHAZAR</button></div>'
-            : own && ['PENDING', 'OBSERVED'].includes(q.status) ? '<button class="btn soft" type="button" data-cancel>CANCELAR</button>' : '') + '</td></tr>'; }).join('') || '<tr><td colspan="9">Sin solicitudes en este filtro.</td></tr>') + '</tbody></table></div></section></div>';
+            : !intl && own && ['PENDING', 'OBSERVED'].includes(q.status) ? '<button class="btn soft" type="button" data-cancel>CANCELAR</button>' : '') + '</td></tr>'; }).join('') || '<tr><td colspan="9">Sin solicitudes en este filtro.</td></tr>') + '</tbody></table></div></section></div>';
     msg(w, m);
     w.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { filter = b.dataset.f; draw(); });
     const ty = w.querySelector('#rqType'); const syncKm = () => w.querySelectorAll('.kmonly').forEach(x => { x.hidden = !ty || ty.value !== 'CORRECCION_KM'; });
@@ -279,9 +283,39 @@ export async function openRequests(api, me, frame) {
       try { await api.resolveOperationalRequest(tr.dataset.id, b.dataset.d, note, 'ui-' + tr.dataset.id + '-' + b.dataset.d); draw({ text: 'Solicitud ' + ST_LABEL[b.dataset.d][0].toLowerCase() + ' (auditada).' }); }
       catch (e) { draw({ err: true, text: /ALREADY_RESOLVED/.test(e.message) ? 'Otra persona ya resolvió esta solicitud. Se recargó el estado real.' : e.message.replace(/^[A-Z_]+:\s*/, '') }); }
     });
+    // V4.27 · REVISAR CAMBIOS de una hoja interna: muestra lo modificado y resuelve con review_route_approval (controles del servidor:
+    // permiso, Superior asignado o Administración, sin doble resolución, motivo obligatorio al observar, auditoría y estado de la hoja)
+    w.querySelectorAll('[data-irv]').forEach(b => b.onclick = async () => {
+      const tr = b.closest('tr'), id = tr.dataset.id, open = tr.nextElementSibling && tr.nextElementSibling.classList.contains('irv-row');
+      if (open) { tr.nextElementSibling.remove(); return; }
+      let a; try { a = await api.internalApprovalDetail(id); } catch (e) { draw({ err: true, text: e.message.replace(/^[A-Z_]+:\s*/, '') }); return; }
+      if (!a || a.status !== 'PENDING') { draw({ err: true, text: 'La solicitud ya no está pendiente. Se recargó el estado real.' }); return; }
+      const r = a.route, d = a.diff, mk = m => '<span class="apr-mark' + (m.startsWith('PARADA AGREGADA') ? ' add' : m.startsWith('INCIDENCIA') ? ' inc' : '') + '">' + esc(m) + '</span>';
+      const row = document.createElement('tr'); row.className = 'irv-row';
+      row.innerHTML = '<td colspan="9"><div class="apr-item irv-box"><b>HOJA ' + esc(r.number) + '</b> · ' + esc(a.driver_name || '') + (r.completed_at ? ' · ' + esc(dt(r.completed_at)) : '') +
+        ' · <b>' + esc(r.operational_status === 'COMPLETADA' ? 'COMPLETADA · PENDIENTE DE APROBACIÓN' : 'PENDIENTE DE APROBACIÓN') + '</b> · ' + (a.modification_count || 0) + ' modificación(es) · versión ' + esc(String(a.route_version || r.version || '')) +
+        '<div class="apr-cols"><div><h4>RUTA PUBLICADA ORIGINAL</h4><ol>' + d.original.map(o => '<li>' + esc(o.client_name) + (o.bultos ? ' · ' + o.bultos + ' bultos' : '') + '</li>').join('') + '</ol></div>' +
+        '<div><h4>RUTA REAL EJECUTADA</h4><ol>' + d.executed.map(x => '<li>' + esc(x.client_name) + (x.action !== 'ENTREGA' ? ' · ' + esc(x.action) : '') + (x.bultos ? ' · ' + x.bultos + ' bultos' : '') + x.marks.map(mk).join('') + '</li>').join('') + '</ol></div></div>' +
+        ((r.events || []).length ? '<p class="rp-note">Cambios: ' + r.events.map(e => (e.type === 'INTERNAL_STOP_ADDED' ? 'parada agregada' : 'reordenamiento') + ' ' + esc(dt(e.at || e.created_at)) + (e.offline ? ' (sin conexión)' : '')).join(' · ') + '</p>' : '') +
+        '<div class="uact"><button class="btn go" type="button" data-irok>APROBAR</button><input class="ed" data-irnote placeholder="Motivo (obligatorio para observar)" style="min-width:240px"><button class="btn soft" type="button" data-irobs>OBSERVAR</button></div></div></td>';
+      tr.after(row);
+      const decide = async dec => { const note = row.querySelector('[data-irnote]').value.trim();
+        if (dec === 'OBSERVED' && !note) { row.querySelector('[data-irnote]').focus(); draw({ err: true, text: 'Para observar hay que indicar el motivo.' }); return; }
+        try { await api.reviewApproval(id, dec, note); dispatchEvent(new Event('okd:approvals-changed')); draw({ text: 'Hoja ' + r.number + (dec === 'APPROVED' ? ' APROBADA' : ' OBSERVADA') + ' (auditada).' }); }
+        catch (e) { draw({ err: true, text: /NOT_PENDING/.test(e.message) ? 'Otra persona ya resolvió esta solicitud. Se recargó el estado real.' : e.message.replace(/^[A-Z_]+:\s*/, '') }); } };
+      row.querySelector('[data-irok]').onclick = () => decide('APPROVED'); row.querySelector('[data-irobs]').onclick = () => decide('OBSERVED');
+    });
     w.querySelectorAll('[data-cancel]').forEach(b => b.onclick = async () => { try { await api.cancelOperationalRequest(b.closest('tr').dataset.id); draw({ text: 'Solicitud cancelada.' }); } catch (e) { draw({ err: true, text: e.message }); } });
   };
   await draw();
+  if (aprId) {   // abrir la solicitud indicada por la campana (si sigue pendiente) y marcar leída su notificación existente
+    if (!w.querySelector('#rqTable tr[data-id="' + aprId + '"]') && me.role === 'ADMIN') { filter = 'todas'; await draw(); }
+    const b = w.querySelector('#rqTable tr[data-id="' + aprId + '"] [data-irv]');
+    if (b) { b.click(); setTimeout(() => { const box = w.querySelector('.irv-box'); if (box) box.scrollIntoView({ block: 'center' }); }, 500); }
+    else msg(w, { text: 'Esa solicitud ya fue resuelta o no te corresponde. Se muestra el estado real.' });
+    try { const q = (await api.listOperationalRequests(filter)).find(x => x.id === aprId);
+      if (q && api.listNotifications && api.markNotificationRead) for (const n of (await api.listNotifications()).filter(n => n.type === 'INTERNAL_ROUTE_APPROVAL_REQUEST' && n.route_id === q.route_id && !n.read_at && (n.mine || n.user_id === me.id))) await api.markNotificationRead(n.id); } catch (e) { /* aviso: no bloquea */ }
+  }
 }
 
 // ===================== NOTIFICACIONES =====================

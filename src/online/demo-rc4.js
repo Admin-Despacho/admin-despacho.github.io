@@ -108,9 +108,15 @@ export const DemoRC4 = {
   _visibleRequest(me, q) { return q.requested_by === me.id || q.supervisor_user_id === me.id || isAdmin(me) || (hasPerm(me, 'requests.view_team') && this._teamOf(me.id).has(q.requested_by)); },
   async listOperationalRequests(filter) {
     this._refresh(); const me = await this.me();
-    return (this.db.opRequests || []).filter(q => this._visibleRequest(me, q) && (!filter || filter === 'todas' || (filter === 'pendientes' && q.status === 'PENDING') || (filter === 'asignadas' && q.status === 'PENDING' && (q.supervisor_user_id === me.id || (q.escalated && isAdmin(me)))) || (filter === 'mias' && q.requested_by === me.id)))
+    // V4.27: los cambios de ruta interna (db.approvals) también aparecen, con las MISMAS reglas que en línea
+    const ints = (this.db.approvals || []).filter(a => me.role === 'ADMIN' || a.supervisor_user_id === me.id || a.requested_by === me.id).map(a => { const r = (this.db.routes2 || []).find(x => x.id === a.route_id) || {};
+      return { ...a, request_type: 'INTERNAL_ROUTE_CHANGE', requested_at: a.requested_at || a.created_at || r.completed_at, route_number: r.number, requested_by_name: (this._user(a.requested_by) || {}).full_name,
+        reason: a.reason || ((a.modification_count || 0) + ' modificación(es) en la hoja'), approver_name: a.supervisor_user_id ? (this._user(a.supervisor_user_id) || {}).full_name : 'Admin General' }; })
+      .filter(q => !filter || filter === 'todas' || (filter === 'pendientes' && q.status === 'PENDING') || (filter === 'mias' && q.requested_by === me.id) ||
+        (filter === 'asignadas' && q.status === 'PENDING' && (q.supervisor_user_id === me.id || (!q.supervisor_user_id && me.role === 'ADMIN'))));
+    return ints.concat((this.db.opRequests || []).filter(q => this._visibleRequest(me, q) && (!filter || filter === 'todas' || (filter === 'pendientes' && q.status === 'PENDING') || (filter === 'asignadas' && q.status === 'PENDING' && (q.supervisor_user_id === me.id || (q.escalated && isAdmin(me)))) || (filter === 'mias' && q.requested_by === me.id)))
       .map(q => ({ ...q, approver_name: q.supervisor_user_id ? (this._user(q.supervisor_user_id) || {}).full_name : 'Admin General', reviewed_by_name: q.reviewed_by ? (this._user(q.reviewed_by) || {}).full_name : null }))
-      .sort((a, b) => String(b.requested_at).localeCompare(String(a.requested_at)));
+      ).sort((a, b) => String(b.requested_at).localeCompare(String(a.requested_at)));
   },
   async resolveOperationalRequest(id, decision, note, opId) {
     this._refresh(); const me = await this.me();

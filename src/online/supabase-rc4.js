@@ -11,11 +11,14 @@ export const SupabaseRC4 = {
   async listOperationalRequests(filter) {
     const me = await this.me();
     let q = this.sb.from('route_approval_requests').select('*, requester:profiles!route_approval_requests_requested_by_fkey(full_name), approver:profiles!route_approval_requests_supervisor_user_id_fkey(full_name), route:routes(number)')
-      .neq('request_type', 'INTERNAL_ROUTE_CHANGE').order('requested_at', { ascending: false }).limit(300);
+      .order('requested_at', { ascending: false }).limit(300);   // V4.27: INCLUYE los cambios de ruta interna (antes se excluían: el Superior no los veía)
     if (filter === 'pendientes') q = q.eq('status', 'PENDING');
     if (filter === 'mias') q = q.eq('requested_by', me.id);
     const rows = await sel(q);
-    return rows.filter(r => filter !== 'asignadas' || (r.status === 'PENDING' && (r.supervisor_user_id === me.id || (r.escalated && me.role === 'ADMIN'))))
+    // Cambios de ruta interna: SOLO el Superior asignado, quien los pidió o el Administrador (aunque la RLS deje leer más, nunca se muestran solicitudes ajenas)
+    const isInt = r => r.request_type === 'INTERNAL_ROUTE_CHANGE', mineInt = r => me.role === 'ADMIN' || r.supervisor_user_id === me.id || r.requested_by === me.id;
+    return rows.filter(r => !isInt(r) || mineInt(r))
+      .filter(r => filter !== 'asignadas' || (r.status === 'PENDING' && (r.supervisor_user_id === me.id || ((r.escalated || (isInt(r) && !r.supervisor_user_id)) && me.role === 'ADMIN'))))
       .map(r => ({ ...r, requested_by_name: r.requester && r.requester.full_name, approver_name: r.approver ? r.approver.full_name : 'Admin General', route_number: r.route && r.route.number }));
   },
   async resolveOperationalRequest(id, decision, note, opId) { const r = await this._rpc('resolve_operational_request', { p_request: id, p_decision: decision, p_note: note || null, p_op_id: opId || null }); this.flushPushQueue().catch(() => null); return r; },

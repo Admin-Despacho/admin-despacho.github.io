@@ -134,6 +134,7 @@ export async function openRecorridos(api, me) {
     '<button class="btn dark" type="button" id="rcGo">BUSCAR</button></div></details>' +
     '<div class="htabs" role="tablist"><button type="button" role="tab" data-rctab="list" aria-selected="true">LISTADO</button><button type="button" role="tab" data-rctab="detail" aria-selected="false" hidden></button></div>' +
     '<div id="rcList"></div><div id="rcDetail" hidden></div>';
+  stickHead(w);
   const rcFold = w.querySelector('details.hfold'), tLi = w.querySelector('[data-rctab="list"]'), tDe = w.querySelector('[data-rctab="detail"]'); let rcScroll = 0;
   const rcShow = det => { w.querySelector('#rcList').hidden = det; rcFold.hidden = det; w.querySelector('#rcDetail').hidden = !det;
     tLi.setAttribute('aria-selected', String(!det)); tDe.setAttribute('aria-selected', String(det)); if (!det) window.scrollTo(0, rcScroll); };
@@ -181,6 +182,13 @@ export async function openRecorridos(api, me) {
     box.querySelectorAll('[data-rcview]').forEach(b => b.onclick = () => showRoute(b.closest('tr').dataset.rid)); };
   w.querySelector('#rcGo').onclick = () => { rcShow(false); list(); }; await list();
 }
+// V4.27 · filtros (details.hfold) + pestañas (.htabs) en UN bloque fijo debajo de la cabecera; publica su altura en --hstick-h
+function stickHead(w) {
+  const fold = w.querySelector('details.hfold'), tabs = w.querySelector('.htabs'); if (!fold || !tabs) return null;
+  const box = document.createElement('div'); box.className = 'hstick'; fold.parentNode.insertBefore(box, fold); box.appendChild(fold); box.appendChild(tabs);
+  const put = () => w.style.setProperty('--hstick-h', Math.ceil(box.getBoundingClientRect().height) + 'px');
+  if ('ResizeObserver' in window) new ResizeObserver(put).observe(box); put(); return box;
+}
 export async function openHistory(api, me) {
   const w = frame(me, 'Hojas publicadas', '#/historial');
   const carriers = await api.listCarriers().catch(() => []);
@@ -194,21 +202,30 @@ export async function openHistory(api, me) {
     '<input id="hfFrom" type="date"><input id="hfTo" type="date"><button class="btn dark" type="button" id="hfGo">BUSCAR</button></div></details>' +
     // V4.20: VER HOJA abre la hoja en una PESTAÑA interna (arriba), sin desplazarse al final; LISTADO vuelve a la lista donde estaba
     '<div class="htabs" id="hTabs" role="tablist"><button type="button" role="tab" data-htab="list" aria-selected="true">LISTADO</button>' +
-    '<button type="button" role="tab" data-htab="detail" aria-selected="false" hidden></button><button type="button" role="tab" data-htab="search" aria-selected="false" class="bs-tab">BUSCAR ENTREGA</button></div>' +
+    '<button type="button" role="tab" data-htab="detail" aria-selected="false" hidden></button><button type="button" class="htab-x" id="hReviewClose" aria-label="Cerrar la revisión de la hoja" title="Cerrar revisión" hidden>✕</button>' +
+    '<button type="button" role="tab" data-htab="search" aria-selected="false" class="bs-tab">BUSCAR ENTREGA</button></div>' +
     '<div id="hList"></div><div id="hDetail" hidden></div><div id="hSearch" hidden></div>';
   // Filtros, página, plegado y hoja abierta se CONSERVAN al cambiar de vista y volver (en esta sesión del navegador)
   const SK = 'okd_hist_state', loadSt = () => { try { return JSON.parse(sessionStorage.getItem(SK) || '{}'); } catch (e) { return {}; } };
   const saveSt = p => { try { sessionStorage.setItem(SK, JSON.stringify({ ...loadSt(), ...p })); } catch (e) { } };
   const FIELDS = { number: '#hfNumber', order: '#hfOrder', client: '#hfClient', responsable: '#hfResp', carrier: '#hfCarrier', status: '#hfStatus', approval: '#hfApproval', zone: '#hfZone', from: '#hfFrom', to: '#hfTo' };
+  stickHead(w);
   const st0 = loadSt();
   if (st0.f) { f = { ...f, ...st0.f }; Object.entries(FIELDS).forEach(([k, sel]) => { const el = w.querySelector(sel); if (el && st0.f[k] != null) el.value = st0.f[k]; }); }
-  const fold = w.querySelector('#hFold'); if (st0.fold === false) fold.open = false; fold.addEventListener('toggle', () => saveSt({ fold: fold.open }));
+  const fold = w.querySelector('#hFold'); if (st0.fold === false) fold.open = false;
+  // V4.27 · Android: FILTROS empieza PLEGADO (el bloque fijo queda compacto y el listado se desplaza normal); un toque lo abre DENTRO del bloque fijo
+  else if (st0.fold == null && matchMedia('(max-width:760px)').matches) fold.open = false; fold.addEventListener('toggle', () => saveSt({ fold: fold.open }));
   const tL = w.querySelector('[data-htab="list"]'), tD = w.querySelector('[data-htab="detail"]'); let listScroll = 0;
   const tS = w.querySelector('[data-htab="search"]');
   const show = which => { const det = which === 'detail', srch = which === 'search'; w.querySelector('#hList').hidden = det || srch; fold.hidden = det || srch; w.querySelector('#hDetail').hidden = !det; w.querySelector('#hSearch').hidden = !srch;
     tL.setAttribute('aria-selected', String(!det && !srch)); tD.setAttribute('aria-selected', String(det)); tS.setAttribute('aria-selected', String(srch));
     if (!det && !srch) { saveSt({ view: 'list' }); window.scrollTo(0, listScroll); } };
-  tL.onclick = () => show('list'); tD.onclick = () => show('detail');
+  // V4.27 · REVISAR HOJA es una vista TEMPORAL y ÚNICA: se cierra sola al volver al listado, ir a BUSCAR ENTREGA, abrir otra hoja
+  // o cambiar de sección. Cerrarla es SOLO navegación: no llama al servidor ni cambia el estado de la hoja.
+  let reviewFrom = 'list'; const tX = w.querySelector('#hReviewClose');
+  const closeReview = to => { tD.hidden = true; tD.textContent = ''; tX.hidden = true; w.querySelector('#hDetail').innerHTML = ''; saveSt({ view: to === 'search' ? 'search' : 'list', rid: null }); };
+  tL.onclick = () => { closeReview('list'); show('list'); }; tD.onclick = () => show('detail');
+  tX.onclick = () => { const to = reviewFrom; closeReview(to); if (to === 'search') { searchPane(); show('search'); } else show('list'); };
   // ===== V4.26 · BUSCAR ENTREGA (diseño aprobado): pedido · factura · NDP · hoja; hojas activas, finalizadas e históricas; MISMA visibilidad que las hojas =====
   const OUT = { ENTREGADO: ['Entregado', 'ok'], ENTREGA_PARCIAL: ['Entrega parcial', 'part'], NO_ENTREGADO: ['No entregado', 'bad'], REPROGRAMAR: ['Reprogramado', 'part'], PENDIENTE: ['Pendiente', 'pend'] };
   const outcomeOf = x => x.outcome === 'PENDIENTE' && x.route_status === 'EN_CURSO' ? ['En reparto · aún NO recibido', 'pend'] : x.outcome === 'PENDIENTE' && x.route_status === 'CANCELADA' ? ['Hoja cancelada', 'bad'] : (OUT[x.outcome] || [x.outcome, 'pend']);
@@ -260,7 +277,7 @@ export async function openHistory(api, me) {
     document.body.appendChild(d); document.body.classList.add('bs-printing'); const close = () => { d.remove(); document.body.classList.remove('bs-printing'); };
     d.querySelector('#bsC').onclick = close; d.querySelector('#bsP').onclick = () => window.print();
   };
-  tS.onclick = () => { searchPane(); show('search'); setTimeout(() => { const i = w.querySelector('#bsQ'); if (i) i.focus(); }, 50); };
+  tS.onclick = () => { if (!tD.hidden) closeReview('search'); searchPane(); show('search'); setTimeout(() => { const i = w.querySelector('#bsQ'); if (i) i.focus(); }, 50); };
   const list = async m => {
     const box = w.querySelector('#hList'); let res = { total: 0, rows: [] };
     try { res = await api.searchRoutes(f); } catch (e) { m = { err: true, text: e.message }; }
@@ -278,10 +295,12 @@ export async function openHistory(api, me) {
   const detail = async (id, m) => {
     const box = w.querySelector('#hDetail'); let d;
     if (box.hidden) listScroll = window.scrollY;
-    tD.hidden = false; if (!tD.textContent) tD.textContent = 'HOJA'; show('detail'); saveSt({ view: 'detail', rid: id });
+    if (box.hidden) reviewFrom = w.querySelector('#hSearch').hidden ? 'list' : 'search';   // a dónde vuelve al cerrar
+    box.innerHTML = '';   // otra hoja REEMPLAZA a la anterior (una sola revisión a la vez)
+    tD.hidden = false; tX.hidden = false; tD.textContent = 'REVISAR HOJA'; show('detail'); saveSt({ view: 'detail', rid: id });
     const top = w.getBoundingClientRect().top + window.scrollY; if (window.scrollY > top) window.scrollTo(0, Math.max(0, top - 8));
     try { d = await api.routeDetail(id); } catch (e) { box.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; return; }
-    tD.textContent = 'HOJA ' + (d.route && d.route.number || '');
+    tD.textContent = 'REVISAR HOJA ' + (d.route && d.route.number || '');
     const r = d.route, active = ['PUBLICADA', 'EN_CURSO'].includes(r.operational_status), stops = (r.stops || []).slice().sort((a, b) => (a.sequence_number || a.seq) - (b.sequence_number || b.seq));
     const pend = (d.returns || []).filter(x => x.status === 'PENDING');
     const postReq = (d.postPublishRequests || []).find(x => Number(x.route_version || 1) === Number(r.version || 1));
@@ -443,10 +462,10 @@ export async function openHistory(api, me) {
   w.querySelector('#hfGo').onclick = () => {
     const v = id => w.querySelector(id).value.trim();
     f = { limit: 25, offset: 0, number: v('#hfNumber'), order: v('#hfOrder'), client: v('#hfClient'), responsable: v('#hfResp'), carrier: v('#hfCarrier'), status: v('#hfStatus'), approval: v('#hfApproval'), zone: v('#hfZone'), from: v('#hfFrom'), to: v('#hfTo') };
-    saveSt({ f, view: 'list', rid: null }); show('list'); list();
+    saveSt({ f, view: 'list', rid: null }); if (!tD.hidden) closeReview('list'); show('list'); list();
   };
   await list();
-  if (st0.view === 'detail' && st0.rid) detail(st0.rid);   // volver a la vista: se reabre la hoja que estaba abierta
+  if (st0.view === 'detail') saveSt({ view: 'list', rid: null });   // V4.27: al volver a la sección NO se reabre una revisión anterior (sin pestañas residuales)
 }
 
 // ================= CONFIGURACIÓN =================
