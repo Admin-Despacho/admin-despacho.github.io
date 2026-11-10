@@ -260,7 +260,7 @@ export async function openRequests(api, me, frame) {
         const intl = q.request_type === 'INTERNAL_ROUTE_CHANGE';   // V4.27: cambios de ruta interna → circuito review_route_approval
         const can = !intl && !own && ['PENDING', 'OBSERVED'].includes(q.status) && (me.role === 'ADMIN' || q.supervisor_user_id === me.id);
         const canInt = intl && !own && q.status === 'PENDING' && (me.role === 'ADMIN' || q.supervisor_user_id === me.id) && hasPerm(me, 'can_approve_internal_route_changes');
-        return '<tr data-id="' + q.id + '"' + (intl ? ' data-internal="1"' : '') + '><td>' + esc(dt(q.requested_at)) + '</td><td>' + esc(intl ? 'Cambios de ruta interna' : (REQ_LABEL[q.request_type] || q.request_type)) + (q.request_type === 'CORRECCION_KM' && q.payload ? '<br><small>' + n0(q.payload.km) + ' km</small>' : '') + '</td><td>' + esc(q.requested_by_name || '') +
+        return '<tr data-id="' + q.id + '"' + (intl ? ' data-internal="1"' : '') + '><td>' + esc(dt(q.requested_at)) + '</td><td>' + esc(intl ? 'Cambios de ruta interna' : (q.request_type === 'OTRO' && q.payload && q.payload.accion ? q.payload.accion + (q.payload.origen === 'VER_HOJA' ? ' (VER HOJA)' : '') : (REQ_LABEL[q.request_type] || q.request_type))) + (q.request_type === 'CORRECCION_KM' && q.payload ? '<br><small>' + n0(q.payload.km) + ' km</small>' : '') + '</td><td>' + esc(q.requested_by_name || '') +
           '</td><td>' + esc(q.approver_name || 'Admin General') + (q.escalated ? ' <small>(escalada)</small>' : '') + '</td><td>' + esc(q.route_number || '—') + '</td><td>' + esc(q.reason || '') + '</td><td>' + pill(c, l) + '</td><td>' + esc(q.review_note || '—') + '</td><td>' +
           (canInt ? '<button class="btn dark" type="button" data-irv>REVISAR CAMBIOS</button>' : '') +
           (can ? '<div class="uact"><input class="ed" data-note placeholder="Nota (obligatoria para observar/rechazar)"><button class="btn soft" type="button" data-d="APPROVED">APROBAR</button><button class="btn soft" type="button" data-d="OBSERVED">OBSERVAR</button><button class="btn danger" type="button" data-d="REJECTED">RECHAZAR</button></div>'
@@ -311,7 +311,9 @@ export async function openRequests(api, me, frame) {
   if (aprId) {   // abrir la solicitud indicada por la campana (si sigue pendiente) y marcar leída su notificación existente
     if (!w.querySelector('#rqTable tr[data-id="' + aprId + '"]') && me.role === 'ADMIN') { filter = 'todas'; await draw(); }
     const b = w.querySelector('#rqTable tr[data-id="' + aprId + '"] [data-irv]');
+    const tr0 = w.querySelector('#rqTable tr[data-id="' + aprId + '"]');
     if (b) { b.click(); setTimeout(() => { const box = w.querySelector('.irv-box'); if (box) box.scrollIntoView({ block: 'center' }); }, 500); }
+    else if (tr0) { tr0.classList.add('rq-focus'); tr0.scrollIntoView({ block: 'center' }); const n = tr0.querySelector('[data-note]'); if (n) n.focus({ preventScroll: true }); }   // V4.28: solicitud operativa → fila resaltada lista para resolver
     else msg(w, { text: 'Esa solicitud ya fue resuelta o no te corresponde. Se muestra el estado real.' });
     try { const q = (await api.listOperationalRequests(filter)).find(x => x.id === aprId);
       if (q && api.listNotifications && api.markNotificationRead) for (const n of (await api.listNotifications()).filter(n => n.type === 'INTERNAL_ROUTE_APPROVAL_REQUEST' && n.route_id === q.route_id && !n.read_at && (n.mine || n.user_id === me.id))) await api.markNotificationRead(n.id); } catch (e) { /* aviso: no bloquea */ }

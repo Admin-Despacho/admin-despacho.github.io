@@ -55,7 +55,9 @@ async def main():
                 await search(pg, '26340'); await pg.click('#bsRes [data-bs-view]'); await pg.wait_for_timeout(2200)
                 tr = await pg.evaluate('()=>{const b=document.getElementById("deliveryTraceBox"); return b?{img:[...b.querySelectorAll("img")].some(i=>i.src.startsWith("data:image")), txt:b.innerText}:null}')
                 res('BE-04 VER CONSTANCIA Y FIRMA abre la hoja y el panel VER ENTREGA de esa parada con la FIRMA ORIGINAL', bool(tr) and tr['img'] and 'María Pérez QA' in tr['txt'] and '27111111110' in tr['txt'], tr and {'firma': tr['img'], 'receptor': 'María Pérez QA' in tr['txt']})
-                await pg.click('[data-htab="search"]'); await pg.wait_for_timeout(300); await search(pg, '26340'); await pg.click('#bsRes [data-bs-print]'); await pg.wait_for_timeout(900)
+                await pg.click('#vhClose'); await pg.wait_for_timeout(400)   # V4.28: VER CONSTANCIA abre VER HOJA; CERRAR vuelve a BUSCAR ENTREGA
+                assert await pg.evaluate('()=>!document.querySelector("#hSearch").hidden'), 'CERRAR debía volver a BUSCAR ENTREGA'
+                await search(pg, '26340'); await pg.click('#bsRes [data-bs-print]'); await pg.wait_for_timeout(900)
                 pr = await pg.evaluate('()=>{const p=document.querySelector(".bs-paper"); return p?{txt:p.innerText.replace(/\\s+/g," "), img:!!p.querySelector("figure img")}:null}')
                 await pg.screenshot(path=os.path.join(OUT, 'constancia_imprimible.png')); await pg.evaluate('()=>{const c=document.getElementById("bsC"); if(c) c.click()}')
                 res('BE-05 CONSTANCIA IMPRIMIBLE: pedido, comprobante, cliente, hoja, receptor, CUIL, fecha y firma original', bool(pr) and all(x in pr['txt'] for x in ['26340', 'FCB 0002-00012345', 'Comercial del Valle QA', 'María Pérez QA', '27111111110']) and pr['img'], pr and pr['txt'][:160])

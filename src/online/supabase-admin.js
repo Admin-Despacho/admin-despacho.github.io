@@ -26,6 +26,26 @@ export const SupabaseAdmin = {
     return rows.map(r => ({ id: r.id, started_at: r.started_at || null, depot_arrived_at: r.depot_arrived_at || null, plate: (r.vehicle && r.vehicle.plate) || null,
       sheet_date: ((r.pdf || []).find(x => x && x.r && x.r.fecha) || { r: {} }).r.fecha || null }));
   },
+  // ===== V4.28 · VER HOJA: gestiones (solo agregado), solicitudes por el circuito existente e historial del servidor =====
+  async addStopFollowup(stopId, kind, note, requestId, opId) { const { data, error } = await this.sb.rpc('add_stop_followup', { p_stop: stopId, p_kind: kind, p_note: note, p_request: requestId || null, p_op_id: opId || null }); if (error) throw new Error(error.message); return data; },
+  // V4.28 · documentos del receptor A REVISAR (alcance y enmascarado en el servidor) y su corrección auditada
+  async listReceiverDocReviews(status) {
+    const { data, error } = await this.sb.rpc('list_receiver_doc_reviews', { p_status: status || 'A_REVISAR' });
+    if (error) { if (/list_receiver_doc_reviews|does not exist|Could not find|PGRST202/i.test(error.message + ' ' + (error.code || ''))) return []; throw new Error(error.message); }
+    return data || [];
+  },
+  async correctReceiverDoc(stopId, type, doc, reason, rectify = false) { const { data, error } = await this.sb.rpc('correct_receiver_doc', { p_stop: stopId, p_type: type, p_doc: doc, p_reason: reason, p_rectify: !!rectify }); if (error) throw new Error(error.message); return data; },
+  async routeChangeHistory(routeId) {
+    const { data, error } = await this.sb.rpc('route_change_history', { p_route: routeId });
+    if (error) { if (/route_change_history|does not exist|Could not find|PGRST202/i.test(error.message + ' ' + (error.code || ''))) return { unavailable: true, items: [] }; throw new Error(error.message); }
+    return { items: data || [] };
+  },
+  async requestFromViewSheet(p) {   // solicitud OTRO (sin efectos automáticos) + gestión enlazada; el resultado de la parada NO cambia
+    const q = await this.createOperationalRequest({ request_type: 'OTRO', route_id: p.route_id, reason: p.reason, op_id: p.op_id,
+      payload: { origen: 'VER_HOJA', accion: p.accion, parada: p.parada, stop_id: p.stop_id, resultado_actual: p.resultado_actual || null, propuesta: p.propuesta || null } });
+    try { await this.addStopFollowup(p.stop_id, 'SOLICITUD', p.accion + ': ' + p.reason, q.id, p.op_id + '-f'); } catch (e) { /* sin V4.28 la solicitud igual queda creada */ }
+    return q;
+  },
   async routeDetail(id) {
     const r = await sel(this.sb.from('routes').select('*, carriers(name), route_stops(*)').eq('id', id).single());
     const pdfs = await sel(this.sb.from('route_pdfs').select('*').eq('route_id', id).order('route_version'));

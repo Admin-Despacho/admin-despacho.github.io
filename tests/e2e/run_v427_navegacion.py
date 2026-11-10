@@ -17,7 +17,7 @@ SEED = '''async()=>{const A=window.OKD_ONLINE.api, k="okd_online_demo_v2"; const
   rs[1].operational_status='COMPLETADA'; rs[1].started_at=new Date(Date.now()-7200e3).toISOString(); rs[1].completed_at=new Date().toISOString(); rs[1].stops.forEach(s=>s.outcome='ENTREGADO');
   localStorage.setItem(k, JSON.stringify(d)); return {encurso:rs[0].number, fin:rs[1].number, otra:rs[5].number, orden_otra:rs[5].stops[0].order_numbers[0]};}'''
 SNAP = '()=>{const d=JSON.parse(localStorage.getItem("okd_online_demo_v2")); return JSON.stringify((d.routes2||[]).map(r=>[r.id,r.number,r.operational_status,r.started_at||null,r.completed_at||null,r.version||null,(r.stops||[]).map(s=>[s.id,s.outcome])]))}'
-TAB = '()=>{const t=document.querySelector("[data-htab=\\"detail\\"]"), x=document.getElementById("hReviewClose"); return {visible:!t.hidden, texto:t.textContent, cerrar:!!x&&!x.hidden, detalle_vacio:!document.querySelector("#hDetail").innerHTML.trim(), lista:!document.querySelector("#hList").hidden, busqueda:!document.querySelector("#hSearch").hidden, pestanas_revision:document.querySelectorAll("[data-htab=\\"detail\\"]:not([hidden])").length}}'
+TAB = '()=>{const o=document.querySelector(".vh-ovl"), v=!!o&&!o.hidden; return {visible:v, texto:v?document.getElementById("vhTitle").textContent:"", cerrar:v&&!!document.getElementById("vhClose"), detalle_vacio:!(document.querySelector("#vhSum")||{}).innerHTML, lista:!document.querySelector("#hList").hidden, busqueda:!document.querySelector("#hSearch").hidden, pestanas_revision:document.querySelectorAll(".vh-ovl:not([hidden])").length+document.querySelectorAll("[data-htab=\\"detail\\"]:not([hidden])").length}}'   # V4.28: VER HOJA es una VENTANA
 SCREENS = ['#/historial', '#/historial:revisar', '#/historial:buscar', '#/recorridos', '#/auditoria', '#/configuracion', '#/usuarios']
 MEASURE = '''(mob)=>{const vw=document.documentElement.clientWidth, sc=el=>{for(let p=el.parentElement;p;p=p.parentElement){const o=getComputedStyle(p).overflowX; if(o==="auto"||o==="scroll") return p;} return null;};
   const vis=e=>{const r=e.getBoundingClientRect(), s=getComputedStyle(e); return r.width>0&&r.height>0&&s.visibility!=="hidden"&&s.display!=="none";};
@@ -36,6 +36,7 @@ STICKY = '''(mob)=>{const q=s=>document.querySelector(s), R=e=>e&&e.getBoundingC
     buscador_visible:(()=>{const e=mob&&!q("#hFold").open?q("#hFold>summary"):q("#hfOrder"); const r=R(e); return !!r&&r.height>0&&r.top>=hr.top-1&&r.bottom<=hr.bottom+1;})(), pestanas_visibles:(()=>{const r=R(q("#hTabs")); return !!r&&r.top>=0&&r.bottom<=innerHeight;})(),
     debajo_es_lista:!!below&&!!below.closest("#hList"), debajo:below&&(below.tagName+"."+String(below.className).slice(0,16))}}'''
 async def go(pg, scr):
+    if await pg.locator('.vh-ovl:not([hidden]) #vhClose').count(): await pg.click('.vh-ovl:not([hidden]) #vhClose'); await pg.wait_for_timeout(300)   # V4.28: como una persona, cierra VER HOJA antes de navegar
     await pg.evaluate(f'()=>{{location.hash="{scr.split(":")[0]}"}}'); await pg.wait_for_timeout(1300)
     if scr.endswith(':revisar'): await pg.locator('#hList [data-view]').first.click(); await pg.wait_for_timeout(1300)
     if scr.endswith(':buscar'): await pg.click('[data-htab="search"]'); await pg.fill('#bsQ', '81001'); await pg.press('#bsQ', 'Enter'); await pg.wait_for_timeout(900)
@@ -52,25 +53,25 @@ async def main():
                 await go(pg, '#/historial'); first = await pg.evaluate('()=>document.querySelector("#hList tr[data-rid] td").textContent.trim()')
                 await pg.locator('#hList [data-view]').first.click(); await pg.wait_for_timeout(1400); t1 = await pg.evaluate(TAB)
                 await pg.screenshot(path=os.path.join(OUT, 'revisar_hoja_1366.png'))
-                res('N-01 VER HOJA abre UNA vista «REVISAR HOJA <número real>» con cierre ✕', t1['visible'] and t1['texto'] == 'REVISAR HOJA ' + first and t1['cerrar'] and t1['pestanas_revision'] == 1 and not t1['lista'], t1)
-                await pg.click('[data-htab="list"]'); await pg.wait_for_timeout(500); t2 = await pg.evaluate(TAB)
-                res('N-02 volver a LISTADO CIERRA la revisión (sin pestaña, sin contenido) y muestra el listado', not t2['visible'] and t2['texto'] == '' and t2['detalle_vacio'] and t2['lista'] and not t2['cerrar'], t2)
-                await pg.locator('#hList [data-view]').first.click(); await pg.wait_for_timeout(1200)
+                res('N-01 VER HOJA abre UNA ventana «VER HOJA <número real>» con CERRAR; el listado sigue detrás (V4.28)', t1['visible'] and t1['texto'] == 'VER HOJA ' + first and t1['cerrar'] and t1['pestanas_revision'] == 1 and t1['lista'], t1)
+                await pg.click('#vhClose'); await pg.wait_for_timeout(500); t2 = await pg.evaluate(TAB)
+                res('N-02 CERRAR cierra la ventana (sin pestaña, sin contenido) y deja el listado', not t2['visible'] and t2['texto'] == '' and t2['detalle_vacio'] and t2['lista'] and not t2['cerrar'], t2)
+                await pg.locator('#hList [data-view]').first.click(); await pg.wait_for_timeout(1200); await pg.click('#vhClose'); await pg.wait_for_timeout(400)
                 await pg.click('[data-htab="search"]'); await pg.wait_for_timeout(300); t3a = await pg.evaluate(TAB)
                 await pg.fill('#bsQ', ids['orden_otra']); await pg.press('#bsQ', 'Enter'); await pg.wait_for_timeout(900); found = await pg.locator('#bsRes .bs-res').count()
                 await pg.click('#bsRes [data-bs-view]'); await pg.wait_for_timeout(1500); t3 = await pg.evaluate(TAB)
-                res('N-03 abrir OTRA hoja REEMPLAZA la revisión (una sola, con el número nuevo); ir a BUSCAR ENTREGA cerró la anterior',
-                    not t3a['visible'] and t3['visible'] and t3['texto'] == 'REVISAR HOJA ' + ids['otra'] and t3['pestanas_revision'] == 1, {'al_ir_a_buscar': t3a['visible'], 'ahora': t3['texto']})
-                await pg.click('#hReviewClose'); await pg.wait_for_timeout(500); t4 = await pg.evaluate(TAB); kept = await pg.locator('#bsRes .bs-res').count()
-                res('N-04 ✕ cierra la revisión y VUELVE al contexto de origen (BUSCAR ENTREGA, con los resultados intactos)', not t4['visible'] and t4['busqueda'] and kept == found == 1, {'origen_busqueda': t4['busqueda'], 'resultados': kept})
+                res('N-03 UNA sola ventana: tras cerrar, abrir OTRA hoja (desde BUSCAR ENTREGA) muestra SOLO la nueva',
+                    not t3a['visible'] and t3['visible'] and t3['texto'] == 'VER HOJA ' + ids['otra'] and t3['pestanas_revision'] == 1, {'al_ir_a_buscar': t3a['visible'], 'ahora': t3['texto']})
+                await pg.click('#vhClose'); await pg.wait_for_timeout(500); t4 = await pg.evaluate(TAB); kept = await pg.locator('#bsRes .bs-res').count()
+                res('N-04 CERRAR la ventana VUELVE al contexto de origen (BUSCAR ENTREGA, con los resultados intactos)', not t4['visible'] and t4['busqueda'] and kept == found == 1, {'origen_busqueda': t4['busqueda'], 'resultados': kept})
                 await pg.click('[data-htab="list"]'); await pg.locator('#hList [data-view]').nth(2).click(); await pg.wait_for_timeout(1200)
                 await pg.evaluate('()=>{location.hash="#/usuarios"}'); await pg.wait_for_timeout(1300); await pg.evaluate('()=>{location.hash="#/historial"}'); await pg.wait_for_timeout(1500); t5 = await pg.evaluate(TAB)
-                res('N-05 cambiar de MÓDULO con una revisión abierta y volver: SIN pestaña residual, en el listado', not t5['visible'] and t5['lista'] and t5['detalle_vacio'], t5)
+                res('N-05 cambiar de MÓDULO con la ventana abierta y volver: SIN ventana ni pestaña residual, en el listado', not t5['visible'] and t5['lista'] and t5['detalle_vacio'], t5)
                 await pg.click('[data-htab="search"]'); await pg.fill('#bsQ', ids['orden_otra']); await pg.press('#bsQ', 'Enter'); await pg.wait_for_timeout(900); n6 = await pg.locator('#bsRes .bs-res').count()
                 res('N-06 BUSCAR ENTREGA funciona como pestaña INDEPENDIENTE (busca y muestra la entrega)', n6 == 1, n6)
                 for rn in (ids['encurso'], ids['fin']):   # se REVISAN y se CIERRAN también la hoja EN CURSO y la FINALIZADA
                     await pg.click('[data-htab="list"]'); await pg.fill('#hfNumber', rn); await pg.click('#hfGo'); await pg.wait_for_timeout(900)
-                    await pg.locator('#hList [data-view]').first.click(); await pg.wait_for_timeout(1200); await pg.click('#hReviewClose'); await pg.wait_for_timeout(400)
+                    await pg.locator('#hList [data-view]').first.click(); await pg.wait_for_timeout(1200); await pg.click('#vhClose'); await pg.wait_for_timeout(400)
                 await pg.fill('#hfNumber', ''); await pg.click('#hfGo'); await pg.wait_for_timeout(600)
                 snap1 = await pg.evaluate(SNAP); st = {x[1]: x[2] for x in json.loads(snap1)}
                 res('N-07 consultar y cerrar NO modifica NINGUNA hoja (estados, fechas, versión y resultados idénticos; EN CURSO sigue EN CURSO y FINALIZADA sigue FINALIZADA)',
@@ -102,7 +103,7 @@ async def main():
                     vb = q.locator('#hList [data-view]').first; await vb.scroll_into_view_if_needed()
                     hit = await vb.evaluate('b=>{const r=b.getBoundingClientRect(); const e=document.elementFromPoint(r.left+r.width/2, r.top+r.height/2); return e===b||b.contains(e);}')
                     await vb.click(); await q.wait_for_timeout(1200); rev = await q.evaluate(TAB)
-                    await q.click('[data-htab="list"]'); await q.fill('#hfOrder', ''); await q.click('#hfGo'); await q.wait_for_timeout(700)
+                    await q.click('#vhClose'); await q.wait_for_timeout(300); await q.fill('#hfOrder', ''); await q.click('#hfGo'); await q.wait_for_timeout(700)
                     await q.evaluate('()=>{location.hash="#/usuarios"}'); await q.wait_for_timeout(1500); await q.mouse.wheel(0, 900); await q.wait_for_timeout(300)
                     nu = q.locator('#upNew'); modal = None
                     if await nu.count():
@@ -120,9 +121,11 @@ async def main():
                         filas >= 1 and hit and rev['visible'] and bool(modal) and modal['sobre_cabecera'] and modal['dentro'] and (not mob or (menu['abierto'] and menu['toque_min'] >= 36)), {'filas': filas, 'boton_libre': hit, 'revision': rev['texto'], 'ventana': modal, 'menu': menu})
                 # ---------- tamaño táctil en Android de pestañas y cierre de revisión ----------
                 c = await b.new_context(viewport={'width': 360, 'height': 800}, is_mobile=True, has_touch=True, storage_state=state); q = await c.new_page(); await q.goto(f'http://127.0.0.1:{dp.PORT}/'); await dp.login(q, 'admin@okdespacho.demo')
-                await go(q, '#/historial:revisar'); tt = await q.evaluate('()=>[...document.querySelectorAll("#hTabs button")].filter(b=>!b.hidden).map(b=>({t:b.textContent.trim().slice(0,22), h:Math.round(b.getBoundingClientRect().height), w:Math.round(b.getBoundingClientRect().width), dentro:b.getBoundingClientRect().right<=innerWidth}))')
-                await q.screenshot(path=os.path.join(OUT, 'revisar_hoja_360.png')); await c.close()
-                res('T-360 Android: pestañas LISTADO / REVISAR HOJA / ✕ / BUSCAR ENTREGA dentro de la pantalla y con tamaño táctil (≥ 36 px)', all(x['h'] >= 36 and x['w'] >= 36 and x['dentro'] for x in tt) and len(tt) == 4, tt)
+                await go(q, '#/historial:revisar')
+                tt = await q.evaluate('()=>[...document.querySelectorAll("#vhX, #vhClose")].map(b=>({t:b.textContent.trim().slice(0,22)||"×", h:Math.round(b.getBoundingClientRect().height), w:Math.round(b.getBoundingClientRect().width), dentro:b.getBoundingClientRect().right<=innerWidth&&b.getBoundingClientRect().bottom<=innerHeight}))')
+                await q.screenshot(path=os.path.join(OUT, 'ver_hoja_360.png')); await q.click('#vhClose'); await q.wait_for_timeout(300)
+                tt += await q.evaluate('()=>[...document.querySelectorAll("#hTabs button")].filter(b=>!b.hidden).map(b=>({t:b.textContent.trim().slice(0,22), h:Math.round(b.getBoundingClientRect().height), w:Math.round(b.getBoundingClientRect().width), dentro:b.getBoundingClientRect().right<=innerWidth}))'); await c.close()
+                res('T-360 Android: × y CERRAR de VER HOJA y pestañas LISTADO / BUSCAR ENTREGA dentro de la pantalla y con tamaño táctil (≥ 36 px)', all(x['h'] >= 36 and x['w'] >= 36 and x['dentro'] for x in tt) and len(tt) == 4, tt)
             finally: await b.close()
     finally: srv.terminate()
     print('TOTAL', sum(1 for r in R if r[1] == 'PASS'), 'PASS /', sum(1 for r in R if r[1] == 'FAIL'), 'FAIL · esperados', EXPECTED)

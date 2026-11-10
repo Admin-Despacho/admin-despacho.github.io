@@ -1,3 +1,4 @@
+import { docIssue } from './receiver-doc.js';   // V4.28: mismas reglas de documento que la pantalla y el servidor
 import { DemoInsp } from './demo-insp.js';
 // MODO DEMO: sin servidor. Mismo contrato que SupabaseApi y MISMAS reglas (rules.js).
 // Sirve para aceptación visual y pruebas automáticas cuando no hay proyecto Supabase configurado.
@@ -513,11 +514,14 @@ export class DemoApi {
     const r = (this.db.routes2 || []).find(x => x.stops.some(s => s.id === stopId)); if (!r) throw err('NOT_FOUND', 'NOT_FOUND', 404);
     if (!(r.responsable_id === me.id || me.role === 'ADMIN')) throw err('FORBIDDEN', 'FORBIDDEN', 403);
     const st = r.stops.find(s => s.id === stopId), I = this.db.identity || {}, c = String(cuil || '').replace(/\D/g, ''), d = String(dni || '').replace(/\D/g, '');
-    let p = c && I[c] ? { ...I[c], cuil: c, source: 'CUIL' } : null;
-    if (!p && d) { const k = Object.keys(I).filter(x => I[x].dni === d).sort((a, b) => String(I[b].updated_at).localeCompare(String(I[a].updated_at)))[0]; if (k) p = { ...I[k], cuil: k, source: 'DNI' }; }
-    if (p) return { source: p.source, cuil: p.cuil, dni: p.dni || null, full_name: p.full_name || null, email: p.email || null, has_dni_photo: !!p.storage_path };
+    let p = c && /^(20|23|24|27)\d{9}$/.test(c) && I[c] ? { ...I[c], cuil: c, source: 'CUIL' } : null;   // V4.28: el padrón PERSONAL solo con un CUIL de persona
+    if (!p && d) { const k = Object.keys(I).filter(x => I[x].dni === d && /^(20|23|24|27)\d{9}$/.test(x))   // B3: por DNI, SOLO un CUIL de persona
+     .sort((a, b) => String(I[b].updated_at).localeCompare(String(I[a].updated_at)))[0]; if (k) p = { ...I[k], cuil: k, source: 'DNI' }; }
+    if (p) return { source: p.source, cuil: /^(20|23|24|27)\d{9}$/.test(p.cuil || '') ? p.cuil : null,   // B3: segunda capa
+       dni: p.dni || null, full_name: p.full_name || null, email: p.email || null, has_dni_photo: !!p.storage_path };
     if (st.client_key) { const e = Object.values(this.db.evidence || {}).filter(x => x.client_key === st.client_key && x.receiver_email).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
-      if (e) return { source: 'CLIENTE', cuil: e.cuil || null, dni: e.receiver_dni || null, full_name: e.receiver_name, email: e.receiver_email, has_dni_photo: !!(e.cuil && I[e.cuil] && I[e.cuil].storage_path) }; }
+      if (e) return { source: 'CLIENTE', cuil: e.cuil && /^(20|23|24|27)\d{9}$/.test(e.cuil) && (e.receiver_doc_type || 'CUIL') === 'CUIL' && e.receiver_doc_valid !== false ? e.cuil : null,   // nunca un CUIT como CUIL
+        dni: e.receiver_dni || null, full_name: e.receiver_name, email: e.receiver_email, has_dni_photo: !!(e.cuil && I[e.cuil] && I[e.cuil].storage_path) }; }
     return null;
   }
   _onTheWay(r) {
@@ -560,14 +564,21 @@ export class DemoApi {
       // contrato VIGENTE (migración cristian_email_dni_required): CUIL + DNI + email obligatorios solo para Cristian. V4.21 (propuesta): sin foto del DNI y email OPCIONAL.
       // contrato V4.17-PROPUESTA: los mismos controles para TODA entrega comercial (externo e interno). Sucursal/TAREA: sin ellos.
       var idReq = cristian || (demoContract() !== 'VIGENTE' && commercial);
-      if (idReq) { cuil = String(ev.cuil || '').replace(/\D/g, ''); if (cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
-      else { cuil = String(ev.cuil || '').replace(/\D/g, '') || null; if (cuil && cuil.length !== 11) throw err('CUIL_INVALID: el CUIL debe tener 11 dígitos', 'CUIL_INVALID', 400); }
+      // V4.28 (= servidor): DNI, CUIL o CUIT; sin tipo = entrega anterior en cola → regla V4.21 (CUIL 11 dígitos)
+      // V4.28 (= servidor): el documento NUNCA bloquea; se clasifica, se guarda lo declarado y, si hace falta, se crea UNA incidencia con alerta
+      const dType = String(ev.receiver_doc_type || '').toUpperCase() || null, dNum = String(ev.receiver_doc || ev.cuil || '').replace(/\D/g, ''), dRaw = String(ev.receiver_doc_declared || ev.receiver_doc || ev.cuil || '').trim();
+      const dIssue = idReq ? docIssue(dType, dRaw, true) : (dRaw ? docIssue(dType, dRaw, false) : '');
+      cuil = !dIssue && dNum && (dType || 'CUIL') === 'CUIL' ? dNum : null;   // receiver_cuil: SOLO CUIL de persona
+      ev._cuit = !dIssue && dNum && dType === 'CUIT' ? dNum : null;               // el CUIT válido va a receiver_cuit (nunca como CUIL)
+      ev.receiver_doc_type = dNum ? (['DNI', 'CUIL', 'CUIT'].includes(dType) ? dType : (dType ? null : 'CUIL')) : null;
+      ev.dni = !dIssue && dType === 'DNI' ? dNum : (!dType && /^\d{7,8}$/.test(String(ev.dni || '').replace(/\D/g, '')) ? String(ev.dni).replace(/\D/g, '') : null);
+      ev._docIssue = dIssue || null; ev._docRaw = dRaw || null;
       // RC4.1: email del receptor (segunda pantalla), opcional; si viene debe ser válido
       var vEmail = String(ev.email || '').trim().toLowerCase() || null;
       // V4.21 (propuesta): el email del receptor es OPCIONAL (antes: EMAIL_REQUIRED). Si viene, se valida el formato.
       if (vEmail && !(/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(vEmail) && vEmail.length <= 254)) throw err('EMAIL_INVALID: el email no es válido', 'EMAIL_INVALID', 400);
-      var vDni = String(ev.dni || '').replace(/\D/g, '') || (cuil ? cuil.slice(2, 10) : null);
-      if (vDni && !/^[0-9]{7,8}$/.test(vDni)) throw err('DNI_INVALID: el DNI debe tener 7 u 8 dígitos', 'DNI_INVALID', 400);
+      var vDni = String(ev.dni || '').replace(/\D/g, '') || (cuil && ev.receiver_doc_type !== 'CUIT' ? cuil.slice(2, 10) : null);   // V4.28: de un CUIT no se deriva DNI
+      if (vDni && !/^[0-9]{7,8}$/.test(vDni)) vDni = null;   // V4.28 (= servidor): un DNI que no valida NO bloquea ni se guarda como verificado
       if (ev.dni_photo_b64) throw err('DNI_STORAGE_REQUIRED: la foto del DNI se sube a Storage privado', 'DNI_STORAGE_REQUIRED', 400);
       if ((cristian || (demoContract() !== 'VIGENTE' && commercial && cuil)) && ev.dni_storage_path) { const o = (this.db.storage || {})[ev.dni_storage_path];
         if (!new RegExp('^' + cuil + '/[0-9a-f-]{36}\\.(jpg|png)$').test(ev.dni_storage_path) || !o || o.owner !== me.id) throw err('DNI_UPLOAD_INVALID', 'DNI_UPLOAD_INVALID', 400); }
@@ -593,11 +604,13 @@ export class DemoApi {
     } else if (['ENTREGADO', 'ENTREGA_PARCIAL'].includes(outcome)) {
       st.receiver_name = String(ev.receiver_name).trim(); // el nombre sí; firma y CUIL/DNI solo en evidencia privada
       this.db.evidence = this.db.evidence || {};
-      if (!this.db.evidence[st.id]) this.db.evidence[st.id] = { evidence_kind: 'ENTREGA_CLIENTE', receiver_name: st.receiver_name, signature_png_b64: ev.signature_png_b64, cuil, created_by: me.id, at: new Date().toISOString(), receiver_email: vEmail, receiver_dni: vDni, client_key: st.client_key || null };
+      if (!this.db.evidence[st.id]) this.db.evidence[st.id] = { evidence_kind: 'ENTREGA_CLIENTE', receiver_name: st.receiver_name, signature_png_b64: ev.signature_png_b64, cuil, created_by: me.id, at: new Date().toISOString(), receiver_email: vEmail, receiver_dni: vDni, client_key: st.client_key || null, receiver_doc_type: ev.receiver_doc_type || null,
+        receiver_doc_declared: ev._docRaw, receiver_doc_valid: !ev._docIssue && !!ev._docRaw, receiver_doc_issue: ev._docIssue, receiver_cuit: ev._cuit || null };
+      if (ev._docIssue) this._docFlag(st, r, st.receiver_name || ev.receiver_name, ev.receiver_doc_type || String(ev.receiver_doc_type || '') || null, ev._docRaw, ev._docIssue, me);
       this.db.identity = this.db.identity || {};
-      if ((cristian || (contract !== 'VIGENTE' && commercial && cuil)) && ev.dni_storage_path) { const id0 = this.db.identity[cuil]; if (!id0 || !id0.storage_path) this.db.identity[cuil] = Object.assign(id0 || {}, { storage_path: ev.dni_storage_path, mime: this.db.storage[ev.dni_storage_path].mime, registered_by: me.id, registered_at: new Date().toISOString() }); }
+      if ((cristian || (contract !== 'VIGENTE' && commercial && cuil)) && (ev.receiver_doc_type || 'CUIL') === 'CUIL' && ev.dni_storage_path) { const id0 = this.db.identity[cuil]; if (!id0 || !id0.storage_path) this.db.identity[cuil] = Object.assign(id0 || {}, { storage_path: ev.dni_storage_path, mime: this.db.storage[ev.dni_storage_path].mime, registered_by: me.id, registered_at: new Date().toISOString() }); }
       // Perfil reutilizable (misma capa de identidad): nombre, DNI, email y cliente
-      if (cuil) { const p0 = this.db.identity[cuil] = this.db.identity[cuil] || { registered_by: me.id, registered_at: new Date().toISOString() };
+      if (cuil && (ev.receiver_doc_type || 'CUIL') === 'CUIL') { const p0 = this.db.identity[cuil] = this.db.identity[cuil] || { registered_by: me.id, registered_at: new Date().toISOString() };   // V4.28: padrón PERSONAL solo con CUIL válido (nunca CUIT)
         if (vEmail && vEmail !== p0.email) Object.assign(p0, { email: vEmail, email_updated_at: new Date().toISOString(), email_updated_by: me.id });
         Object.assign(p0, { full_name: st.receiver_name || p0.full_name, dni: vDni || p0.dni, client_key: st.client_key || p0.client_key, updated_at: new Date().toISOString() }); }
       // Recibido Conforme: entrega total + email válido → comprobante único + envío (la falla del email nunca revierte la entrega)
@@ -650,6 +663,15 @@ export class DemoApi {
     applyReorder(r.stops, order); r.version++;
     r.events.push({ type: 'INTERNAL_STOP_REORDERED', version: r.version, user_id: me.id, at: new Date().toISOString(), client_op_id: opId, offline: !!offline, before, after: order });
     this._onTheWay(r); this._audit(me, 'INTERNAL_STOP_REORDERED', r.id, before, order); this._save(); return r;
+  }
+  // V4.28 (= _receiver_doc_flag): UNA incidencia por entrega (idempotente) + alerta a Administración y al Superior del transportista; la alerta nunca deshace la entrega
+  _docFlag(st, r, name, type, raw, issue, me) {
+    const D = this.db.docReviews = this.db.docReviews || {}; if (D[st.id]) return;
+    const sup = me.supervisor_user_id || null;
+    D[st.id] = { stop_id: st.id, route_id: r.id, driver_id: me.id, supervisor_id: sup, receiver_name: name || 'Sin nombre', declared_type: type || null, declared_doc: raw || null, issue, status: 'A_REVISAR', created_at: new Date().toISOString() };
+    this.db.audit = this.db.audit || []; this.db.audit.push({ at: D[st.id].created_at, actor: me.id, action: 'RECEIVER_DOC_FLAGGED', target: r.id, target_id: r.id, after: { stop: st.id, issue } });
+    try { const body = 'Hoja ' + r.number + ' · Pedido ' + (st.order_numbers || []).join(' + ') + ' · ' + st.client_name + ' · ' + issue;
+      (this.db.users || []).filter(u => u.status === 'ACTIVO' && (u.role === 'ADMIN' || (u.id === sup && u.role === 'SUPERVISOR_DESPACHO'))).forEach(u => this._notif(u.id, r, 'RECEIVER_DOC_REVIEW', 'DOCUMENTO DEL RECEPTOR A REVISAR', body)); } catch (e) { /* la alerta nunca deshace la entrega */ }
   }
   _notif(userId, r, type, title, body) {
     this.db.notifs = this.db.notifs || [];

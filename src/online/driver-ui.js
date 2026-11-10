@@ -2,6 +2,7 @@
 // Offline básico: cambios locales + cola con op_id (el servidor ignora un op_id repetido) + sincronización al volver.
 import { canSwitch, switcherHtml } from './role-view.js';
 import { esc } from './util.js';
+import { docError } from './receiver-doc.js';   // V4.28: DNI / CUIL / CUIT
 import { ROLE_LABEL } from '../../supabase/functions/_shared/rules.js';
 import { openAccount } from './account-ui.js';
 import { byOrder, currentStop, futureStops } from '../../supabase/functions/_shared/internal-route.js';
@@ -148,6 +149,7 @@ const BLOBS = {
   async del(k) { const d = await this.open(); return new Promise(ok => { const t = d.transaction('b', 'readwrite'); t.objectStore('b').delete(k); t.oncomplete = () => ok(true); t.onerror = () => ok(false); }); }
 };
 const kb = n => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+
 
 export class DriverApp {
   constructor(api, me, onLogout, opts = {}) {
@@ -511,7 +513,9 @@ export class DriverApp {
       (task && o === 'ENTREGADO' ? '<input class="ed" data-f="txt" placeholder="Observación (opcional)">' : '') +
       (sign ? '<label class="drv-field" data-field="recv"><span class="drv-lbl">' + (transfer ? 'Nombre y apellido de quien recibe en la sucursal' : 'Nombre y apellido de quien recibe') + ' <b>*</b></span><input class="ed" data-f="recv" autocomplete="off" placeholder="Ej.: María Pérez"><small class="drv-ferr" data-ferr="recv" hidden></small></label>' +
         // V4.24 · entrega comercial: CUIL (obligatorio) y email (OPCIONAL) con etiqueta fija, ANTES de la firma. Nunca en sucursal ni en TAREA.
-        (idReq ? '<label class="drv-field" data-field="cuil"><span class="drv-lbl">CUIL de quien recibe <b>*</b></span><input class="ed" data-f="cuil" inputmode="numeric" maxlength="13" autocomplete="off" placeholder="Ej.: 20-12345678-6"><span class="drv-cuilhint" data-cuilhint></span><small class="drv-ferr" data-ferr="cuil" hidden></small></label>' +
+        // V4.28 · documento de quien recibe: DNI, CUIL o CUIT (antes solo CUIL), con validación según el tipo
+        (idReq ? '<label class="drv-field" data-field="cuil"><span class="drv-lbl">Documento de quien recibe <b>*</b></span><span class="drv-docrow"><select class="ed drv-doctype" data-f="doctype" aria-label="Tipo de documento"><option value="DNI">DNI</option><option value="CUIL" selected>CUIL</option><option value="CUIT">CUIT</option></select>' +
+          '<input class="ed" data-f="cuil" inputmode="numeric" maxlength="20" autocomplete="off" placeholder="Ej.: 20-12345678-6" aria-label="Número de documento"></span><span class="drv-cuilhint" data-cuilhint></span><small class="drv-ferr" data-ferr="cuil" hidden></small></label>' +
           '<label class="drv-field" data-field="email"><span class="drv-lbl">Email de quien recibe <em class="drv-opt">OPCIONAL</em></span><input class="ed" data-f="email" type="email" inputmode="email" autocomplete="off" placeholder="Ej.: compras@cliente.com"><span class="drv-mailhint" data-mailhint></span><small class="drv-ferr" data-ferr="email" hidden></small></label>' : '') +
         '<div class="sigbox" data-sigbox><img class="sig-prev" data-sigprev alt="Firma de quien recibe" hidden><span class="sig-empty" data-sigempty>Falta la firma de quien recibe</span><button type="button" class="btn dark sig-open" data-sigopen>FIRMAR</button></div>' : '') +
       // entrega comercial: CUIL obligatorio (ambos transportistas). Sin foto del DNI. Nunca en sucursal/ubicación interna ni en TAREA.
@@ -520,7 +524,7 @@ export class DriverApp {
       '<button class="btn dark" type="button" data-save>GUARDAR</button><span class="shiperr" hidden></span>';
     const er = form.querySelector('.shiperr'), fail = t => { er.textContent = t; er.hidden = false;
       form.querySelectorAll('[data-ferr]').forEach(x => { x.hidden = true; x.textContent = ''; });
-      const k = /CUIL/i.test(t) ? 'cuil' : /email/i.test(t) ? 'email' : /nombre/i.test(t) ? 'recv' : null, fe = k && form.querySelector('[data-ferr="' + k + '"]');
+      const k = /CUIL|CUIT|DNI|DOC_TYPE|documento/i.test(t) ? 'cuil' : /email/i.test(t) ? 'email' : /nombre/i.test(t) ? 'recv' : null, fe = k && form.querySelector('[data-ferr="' + k + '"]');
       if (fe) { fe.textContent = t; fe.hidden = false; const inp = form.querySelector('[data-f="' + k + '"]'); if (inp) inp.focus(); } };
     form.addEventListener('input', () => { er.hidden = true; });   // el aviso se oculta apenas se corrige un dato
     // FIRMA (V4.19): FIRMAR abre una ventana a pantalla completa con un lienzo propio del tamaño real de la pantalla.
@@ -542,13 +546,16 @@ export class DriverApp {
     // CUIL obligatorio en la entrega comercial (ambos transportistas). Sin foto del DNI (V4.19).
     const cu = form.querySelector('[data-f="cuil"]'), cuHint = form.querySelector('[data-cuilhint]');
     form._release = () => {};
-    if (cu) cu.onchange = () => { const n = cu.value.replace(/\D/g, ''); cuHint.textContent = n && n.length !== 11 ? 'El CUIL debe tener 11 dígitos.' : ''; if (n.length === 11) fill(n); keep(); };
+    const dt = form.querySelector('[data-f="doctype"]');
+    const docMsg = () => { const t = dt ? dt.value : 'CUIL'; return docError(t, cu.value); };   // V4.28: se clasifica lo DECLARADO
+    if (dt) dt.onchange = () => { cu.placeholder = dt.value === 'DNI' ? 'Ej.: 30111222' : dt.value === 'CUIT' ? 'Ej.: 30-50001091-2' : 'Ej.: 20-12345678-6'; cuHint.textContent = cu.value ? docMsg() : ''; keep(); };
+    if (cu) cu.onchange = () => { const n = cu.value.replace(/\D/g, ''), t = dt ? dt.value : 'CUIL'; cuHint.textContent = n ? docMsg() : ''; if (t === 'CUIL' && n.length === 11 && !docMsg()) fill(n); keep(); };   // autocompletado de identidad SOLO con CUIL
     // Los datos cargados sobreviven a una recarga (p. ej. Android cerró la página al volver de la cámara) y a un fallo de la foto
     const draftKey = 'okd_drv_form:' + st.id + ':' + o;
-    function keep() { try { sessionStorage.setItem(draftKey, JSON.stringify({ recv: rv ? rv.value : '', email: em ? em.value : '', cuil: cu ? cu.value : '', sig: sigData })); } catch (e) { } }
+    function keep() { try { sessionStorage.setItem(draftKey, JSON.stringify({ recv: rv ? rv.value : '', email: em ? em.value : '', cuil: cu ? cu.value : '', doctype: (form.querySelector('[data-f="doctype"]') || {}).value || '', sig: sigData })); } catch (e) { } }
     form.addEventListener('input', keep);
     try { const d = JSON.parse(sessionStorage.getItem(draftKey) || 'null');
-      if (d) { if (rv && d.recv) rv.value = d.recv; if (em && d.email) { em.value = d.email; em.dataset.auto = ''; } if (cu && d.cuil) { cu.value = d.cuil; cu.onchange(); }
+      if (d) { if (rv && d.recv) rv.value = d.recv; if (em && d.email) { em.value = d.email; em.dataset.auto = ''; } if (d.doctype && form.querySelector('[data-f="doctype"]')) form.querySelector('[data-f="doctype"]').value = d.doctype; if (cu && d.cuil) { cu.value = d.cuil; cu.onchange(); }
         if (d.sig && prevImg) { sigData = d.sig; showSig(); } } } catch (e) { }
     // V4.23 · email SUGERIDO para ESTA entrega (de la hoja o del padrón por CUIT): se precarga; el chofer lo puede cambiar o borrar
     if (em && !em.value && idReq && this.api.deliveryEmailSuggestion) this.api.deliveryEmailSuggestion(st.id).then(v => { if (v && !em.value) { em.value = v; em.dataset.auto = ''; keep(); } }).catch(() => { });
@@ -565,7 +572,18 @@ export class DriverApp {
         const mail = em ? em.value.trim().toLowerCase() : '';
         // V4.21: el email es OPCIONAL. Si se carga, tiene que ser válido (se corrige o se borra); vacío → sin Recibido Conforme.
         if (mail && !/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(mail)) return fail('El email del receptor no es válido: corregilo o borralo (es opcional).');
-        if (idReq) { const n = cu.value.replace(/\D/g, ''); if (!n) return fail('El CUIL de quien recibe es obligatorio.'); if (n.length !== 11) return fail('El CUIL debe tener 11 dígitos.'); extra.evidence.cuil = n; }
+        if (idReq) {   // V4.28 · REGLA DEFINITIVA: un documento incorrecto o faltante NO bloquea; se advierte y se continúa (la firma sigue obligatoria)
+          const raw = cu.value.trim(), n = raw.replace(/\D/g, ''), t = dt ? dt.value : 'CUIL', m = docError(t, raw);
+          if (m && form.dataset.docAck !== raw + '|' + t) {
+            let wb = form.querySelector('[data-docwarn]'); if (!wb) { wb = document.createElement('div'); wb.className = 'drv-docwarn'; wb.setAttribute('data-docwarn', ''); wb.setAttribute('role', 'alert'); cu.closest('.drv-field').after(wb); }
+            wb.innerHTML = '<p><b>El documento ingresado necesita revisión.</b> Podés corregirlo ahora o continuar con la entrega. Administración recibirá una alerta.</p><small>' + esc(m) + '</small>' +
+              '<div class="drv-docwarn-act"><button type="button" class="btn soft" data-docfix>CORREGIR DOCUMENTO</button><button type="button" class="btn dark" data-docgo>CONTINUAR CON ENTREGA</button></div>';
+            wb.querySelector('[data-docfix]').onclick = () => { wb.remove(); cu.focus(); };
+            wb.querySelector('[data-docgo]').onclick = () => { form.dataset.docAck = raw + '|' + t; wb.remove(); ev.target.click(); };   // misma firma; repite el guardado
+            if (cuHint) cuHint.textContent = ''; wb.scrollIntoView({ block: 'center' }); return;
+          }
+          extra.evidence.receiver_doc_type = t; extra.evidence.receiver_doc = n; extra.evidence.receiver_doc_declared = raw;   // EXACTAMENTE como fue declarado
+          if (t === 'CUIL' && !m) extra.evidence.cuil = n; }   // «cuil» SOLO para un CUIL válido (un CUIT nunca viaja como CUIL)
         if (mail) extra.evidence.email = mail;
       }
       ev.target.disabled = true;

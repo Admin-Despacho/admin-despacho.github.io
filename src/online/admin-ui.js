@@ -13,6 +13,14 @@ const dt = iso => iso ? new Date(iso).toLocaleString('es-AR', { timeZone: 'Ameri
 const ST = { PUBLICADA: 'PUBLICADA', EN_CURSO: 'EN CURSO', COMPLETADA: 'FINALIZADA', CANCELADA: 'CANCELADA' };
 const AP = { PENDIENTE: 'PENDIENTE DE APROBACIÓN', APROBADA: 'APROBADA', OBSERVADA: 'OBSERVADA', NO_REQUERIDA: '' };
 
+// V4.28 · documento del receptor para mostrar: tipo de la evidencia (histórico sin tipo = CUIL) y número correspondiente
+const docOf = ev => { if (!ev) return null;
+  if (ev.receiver_doc_valid === false) return { t: ev.receiver_doc_type || 'DOCUMENTO', n: (ev.receiver_doc_declared || 'no informado') + ' (A REVISAR)' };   // V4.28: nunca como verificado
+  if (ev.receiver_cuit) return { t: 'CUIT', n: ev.receiver_cuit };   // V4.28: el CUIT tiene su propia columna
+  const t = ev.receiver_doc_type || (ev.receiver_cuil ? (/^(30|33|34)/.test(ev.receiver_cuil) ? 'CUIT' : 'CUIL') : (ev.receiver_dni ? 'DNI' : null)); if (!t) return null;   // histórico sin tipo: prefijo de empresa = CUIT
+  const n = t === 'DNI' ? ev.receiver_dni : (t === 'CUIT' ? (ev.receiver_cuit || ev.receiver_cuil) : ev.receiver_cuil); return n ? { t, n } : null; };
+const docTxt = ev => { const d = docOf(ev); return d ? d.t + ' ' + d.n : '—'; };
+
 export const NAV = [
   ['#/dashboard', 'DASHBOARD', me => hasPerm(me, 'users.view') || hasPerm(me, 'settings.manage')],
   ['#/despacho', 'DESPACHO', me => hasPerm(me, 'routes.create')],
@@ -223,7 +231,7 @@ export async function openHistory(api, me) {
   // V4.27 · REVISAR HOJA es una vista TEMPORAL y ÚNICA: se cierra sola al volver al listado, ir a BUSCAR ENTREGA, abrir otra hoja
   // o cambiar de sección. Cerrarla es SOLO navegación: no llama al servidor ni cambia el estado de la hoja.
   let reviewFrom = 'list'; const tX = w.querySelector('#hReviewClose');
-  const closeReview = to => { tD.hidden = true; tD.textContent = ''; tX.hidden = true; w.querySelector('#hDetail').innerHTML = ''; saveSt({ view: to === 'search' ? 'search' : 'list', rid: null }); };
+  const closeReview = to => { if (typeof closeVH === 'function') try { closeVH(); } catch (e) { } tD.hidden = true; tD.textContent = ''; tX.hidden = true; w.querySelector('#hDetail').innerHTML = ''; saveSt({ view: to === 'search' ? 'search' : 'list', rid: null }); };
   tL.onclick = () => { closeReview('list'); show('list'); }; tD.onclick = () => show('detail');
   tX.onclick = () => { const to = reviewFrom; closeReview(to); if (to === 'search') { searchPane(); show('search'); } else show('list'); };
   // ===== V4.26 · BUSCAR ENTREGA (diseño aprobado): pedido · factura · NDP · hoja; hojas activas, finalizadas e históricas; MISMA visibilidad que las hojas =====
@@ -246,11 +254,11 @@ export async function openHistory(api, me) {
           (x._try ? '<span class="bs-try">INTENTO ' + esc(x._try) + '</span>' : '') + '<span class="bs-date">' + esc(x.sheet_date ? x.sheet_date.split('-').reverse().join('/') : dt(x.published_at)) + '</span></header>' +
           '<div class="bs-grid"><div><span>CLIENTE</span><b>' + esc(x.client_name || '—') + '</b><small>' + esc(x.address || '') + (x.docs ? ' · ' + esc(x.docs) : '') + '</small></div>' +
           '<div><span>HOJA / TRANSPORTISTA</span><b>' + esc(x.route_number) + '</b><small>' + esc(x.carrier || '') + (x.responsable ? ' · ' + esc(x.responsable) : '') + '</small><small>Publicada ' + dt(x.published_at) + (x.started_at ? ' · Salió ' + dt(x.started_at) : '') + (x.completed_at ? ' · Cerró ' + dt(x.completed_at) : '') + '</small></div>' +
-          '<div><span>QUIÉN RECIBIÓ</span>' + (x.signatures_visible ? (x.receiver_name ? '<b>' + esc(x.receiver_name) + '</b><small>CUIL ' + esc(x.receiver_cuil || '—') + ' · ' + dt(x.received_at) + '</small>' : '<b>—</b><small>' + (x.outcome === 'PENDIENTE' ? 'Todavía sin recepción' : 'Sin firma registrada') + '</small>')
+          '<div><span>QUIÉN RECIBIÓ</span>' + (x.signatures_visible ? (x.receiver_name ? '<b>' + esc(x.receiver_name) + '</b><small>' + esc(docTxt(x)) + ' · ' + dt(x.received_at) + '</small>' : '<b>—</b><small>' + (x.outcome === 'PENDIENTE' ? 'Todavía sin recepción' : 'Sin firma registrada') + '</small>')
             : '<b>' + (x.received_at ? 'Recepción registrada' : '—') + '</b><small>Firma y CUIL visibles solo con permiso de firmas</small>') + '</div></div>' +
           '<footer><span>' + (x.signatures_visible && x.has_receipt ? '✓ Constancia de recepción disponible' + (x.receipt_number ? ' · N.º ' + esc(x.receipt_number) : '') : x.outcome_note ? 'Observación: ' + esc(x.outcome_note) : '') + '</span>' +
           (x.signatures_visible && x.received_at ? '<button class="btn soft" type="button" data-bs-print>IMPRIMIR CONSTANCIA</button><button class="btn dark" type="button" data-bs-view data-rid="' + x.route_id + '">VER CONSTANCIA Y FIRMA →</button>' : '<button class="btn soft" type="button" data-bs-view data-rid="' + x.route_id + '">VER HOJA →</button>') + '</footer></article>'; }).join('');
-      out.querySelectorAll('[data-bs-view]').forEach(b => b.onclick = async () => { const sid = b.closest('[data-stop]').dataset.stop; await detail(b.dataset.rid);
+      out.querySelectorAll('[data-bs-view]').forEach(b => b.onclick = async () => { const sid = b.closest('[data-stop]').dataset.stop; await detail(b.dataset.rid); ovl.querySelector('#vhFullSec').open = true;   /* V4.28: VER CONSTANCIA → detalle completo dentro de VER HOJA */
         const btn = w.querySelector('#hDetail tr[data-stop="' + sid + '"] [data-delivery-detail]'); if (btn) { btn.click(); setTimeout(() => (w.querySelector('#deliveryTraceBox') || btn).scrollIntoView({ block: 'start' }), 600); } });
       out.querySelectorAll('[data-bs-print]').forEach(b => b.onclick = async () => { const sid = b.closest('[data-stop]').dataset.stop, x = rows.find(r => r.stop_id === sid);
         try { const tr = await api.deliveryTrace(sid); printReceipt(x, tr); } catch (err) { alert(err.message); } });
@@ -271,7 +279,7 @@ export async function openHistory(api, me) {
     const ev = tr.evidence || {}, rc = tr.receipt || {}, sig = ev.signature_png ? signatureSrc(ev.signature_png) : '';
     const d = document.createElement('div'); d.className = 'bs-print'; d.innerHTML = '<div class="bs-paper"><header><img src="/brand/ok-accesorios-negro.png" alt="OK Accesorios"><div><b>CONSTANCIA DE ENTREGA</b><small>' + (rc.receipt_number ? 'Recibido Conforme N.º ' + esc(rc.receipt_number) : 'OK Despacho') + '</small></div></header>' +
       '<dl><dt>Pedido</dt><dd>' + esc((x.order_numbers || []).join(' + ')) + '</dd><dt>Comprobante</dt><dd>' + esc(x.docs || '—') + '</dd><dt>Cliente</dt><dd>' + esc(x.client_name || '') + '</dd><dt>Domicilio</dt><dd>' + esc(x.address || '') + '</dd>' +
-      '<dt>Hoja</dt><dd>' + esc(x.route_number) + ' · ' + esc(x.carrier || '') + '</dd><dt>Resultado</dt><dd>' + esc(outcomeOf(x)[0]) + '</dd><dt>Recibió</dt><dd>' + esc(ev.receiver_name || '—') + '</dd><dt>CUIL</dt><dd>' + esc(ev.receiver_cuil || '—') + '</dd>' +
+      '<dt>Hoja</dt><dd>' + esc(x.route_number) + ' · ' + esc(x.carrier || '') + '</dd><dt>Resultado</dt><dd>' + esc(outcomeOf(x)[0]) + '</dd><dt>Recibió</dt><dd>' + esc(ev.receiver_name || '—') + '</dd><dt>Documento</dt><dd>' + esc(docTxt(ev)) + '</dd>' +
       '<dt>Fecha y hora</dt><dd>' + dt(x.received_at) + '</dd></dl>' + (sig ? '<figure><img src="' + sig + '" alt="Firma"><figcaption>Firma del receptor (original)</figcaption></figure>' : '') +
       '<p class="bs-foot">Emitida desde OK Despacho · ' + esc(new Date().toLocaleString('es-AR')) + '</p></div><div class="bs-print-bar"><button class="btn dark" type="button" id="bsP">IMPRIMIR</button><button class="btn soft" type="button" id="bsC">CERRAR</button></div>';
     document.body.appendChild(d); document.body.classList.add('bs-printing'); const close = () => { d.remove(); document.body.classList.remove('bs-printing'); };
@@ -292,15 +300,151 @@ export async function openHistory(api, me) {
     box.querySelector('#hNext').onclick = () => { f.offset += f.limit; list(); };
     box.querySelectorAll('[data-view]').forEach(b => b.onclick = () => detail(b.closest('tr').dataset.rid));
   };
+
+  // ================= V4.28 · VER HOJA: ventana superpuesta (el listado queda detrás, intacto) =================
+  // Consultar NO modifica la hoja. RESOLVER PENDIENTE registra gestiones (solo agregado) o crea solicitudes por el circuito existente;
+  // nunca cambia el resultado original de una parada.
+  const canAct = hasPerm(me, 'requests.create') || hasPerm(me, 'users.manage');
+  const STOP_KIND = { PEDIDO: 'Entrega', TAREA: 'Tarea operativa', UBICACION_INTERNA: 'Traslado interno' };
+  const OUTL = { ENTREGADO: ['Realizado', 'ok'], ENTREGA_PARCIAL: ['Parcial', 'part'], NO_ENTREGADO: ['No realizado', 'bad'], REPROGRAMAR: ['Reprogramado', 'part'], PENDIENTE: ['Pendiente', 'pend'] };
+  // UNA sola ventana en todo el documento: se descartan las de instancias anteriores de esta sección (al volver de otro módulo)
+  document.querySelectorAll('.vh-ovl').forEach(o => o.remove()); document.body.classList.remove('vh-open');
+  const ovl = document.createElement('div'); ovl.className = 'vh-ovl'; ovl.hidden = true; ovl.setAttribute('role', 'dialog'); ovl.setAttribute('aria-modal', 'true'); ovl.setAttribute('aria-labelledby', 'vhTitle');
+  ovl.innerHTML = '<div class="vh-dlg"><header class="vh-head"><div><small>CONSULTA DE LA HOJA · NO MODIFICA SU ESTADO</small><h2 id="vhTitle">VER HOJA</h2></div><button type="button" class="vh-x" id="vhX" aria-label="Cerrar">×</button></header>' +
+    '<div class="vh-body"><div id="vhSum"></div>' +
+    '<details class="vh-sec" id="vhHistSec"><summary>HISTORIAL DE CAMBIOS</summary><div id="vhHist"></div></details>' +
+    '<details class="vh-sec" id="vhFullSec"><summary>ACCIONES Y DETALLE COMPLETO</summary><div id="vhFull"></div></details></div>' +
+    '<footer class="vh-foot"><img src="/brand/ok-accesorios-negro.png" alt="OK Accesorios"><button type="button" class="btn dark" id="vhClose">CERRAR</button></footer></div>';
+  w.appendChild(ovl); ovl.querySelector('#vhFull').appendChild(w.querySelector('#hDetail'));   // el detalle de siempre, DENTRO de la ventana
+  let vhPrev = null, vhRid = null, vhHist = [];
+  const scroller = () => { const u = document.getElementById('usersPanel'); return u && u.scrollHeight > u.clientHeight ? u : document.scrollingElement; };
+  const openVH = () => { if (!ovl.hidden) return; vhPrev = { el: document.activeElement, top: scroller().scrollTop }; ovl.hidden = false; document.body.classList.add('vh-open'); setTimeout(() => ovl.querySelector('#vhX').focus(), 30); };
+  const closeVH = () => {
+    if (ovl.hidden) return; ovl.hidden = true; document.body.classList.remove('vh-open'); vhRid = null;
+    w.querySelector('#hDetail').innerHTML = ''; ovl.querySelector('#vhSum').innerHTML = ''; ovl.querySelector('#vhHist').innerHTML = ''; ovl.querySelector('#vhHistSec').open = false; ovl.querySelector('#vhFullSec').open = false;
+    saveSt({ view: w.querySelector('#hSearch').hidden ? 'list' : 'search', rid: null });
+    if (/[?&]vh=/.test(location.hash)) history.replaceState(null, '', location.hash.replace(/\?.*$/, ''));   // sin reabrir al recargar (no dispara navegación)
+    if (vhPrev) { const s = scroller(); s.scrollTop = vhPrev.top; if (vhPrev.el && vhPrev.el.isConnected) try { vhPrev.el.focus({ preventScroll: true }); } catch (e) { } }   // vuelve EXACTO al listado
+  };
+  ovl.querySelector('#vhX').onclick = closeVH; ovl.querySelector('#vhClose').onclick = closeVH;
+  ovl.addEventListener('keydown', e => { if (e.key === 'Escape' && !document.querySelector('.umodal:not(.up-inpanel)')) { e.stopPropagation(); closeVH(); } });
+  // cambiar de sección cierra la ventana (sin residuos); un ÚNICO escucha global (no se acumulan al volver a la sección)
+  if (window.__okdVhNav) removeEventListener('hashchange', window.__okdVhNav);
+  window.__okdVhNav = () => { if (!ovl.isConnected) { removeEventListener('hashchange', window.__okdVhNav); window.__okdVhNav = null; document.body.classList.remove('vh-open'); return; } closeVH(); };
+  addEventListener('hashchange', window.__okdVhNav);
+  const histHtml = (items, parada) => {
+    const L = (items || []).filter(x => !parada || x.parada === parada);
+    if (!L.length) return '<p class="rp-note">' + (parada ? 'Sin gestiones registradas para esta parada.' : 'Sin cambios registrados.') + '</p>';
+    const EST = { PENDING: 'PENDIENTE DE APROBACIÓN', APPROVED: 'APROBADA', OBSERVED: 'OBSERVADA', REJECTED: 'RECHAZADA', CANCELLED: 'CANCELADA' };
+    return '<ol class="vh-hist">' + L.map(x => '<li><b>' + esc(x.tipo) + '</b>' + (x.parada && !parada ? ' · ' + esc(x.parada) : '') + '<small>' + esc(dt(x.at) || '') + (x.usuario ? ' · ' + esc(x.usuario) : '') + '</small>' +
+      (x.resultado ? '<span>Resultado: <b>' + esc((OUTL[x.resultado] || [x.resultado])[0]) + '</b>' + (x.nuevo ? ' → propuesta: <b>' + esc(x.nuevo) + '</b>' : '') + '</span>' : '') +
+      (x.motivo ? '<span>' + esc(x.motivo) + '</span>' : '') + (x.estado ? '<span class="vh-est ' + esc(x.estado) + '">' + esc(EST[x.estado] || x.estado) + (x.resuelto_por ? ' · ' + esc(x.resuelto_por) + (x.resuelto_at ? ' · ' + esc(dt(x.resuelto_at)) : '') : '') + '</span>' : '') +
+      (x.nota_resolucion ? '<span>Respuesta: ' + esc(x.nota_resolucion) + '</span>' : '') + '</li>').join('') + '</ol>';
+  };
+  const loadHist = async () => {
+    const box = ovl.querySelector('#vhHist'); let h;
+    try { h = await api.routeChangeHistory(vhRid); } catch (e) { box.innerHTML = '<p class="up-msg err">' + esc(e.message) + '</p>'; return; }
+    vhHist = h.items || []; box.innerHTML = h.unavailable ? '<p class="rp-note">El historial estará disponible al aplicar la actualización de base de datos V4.28.</p>' : histHtml(vhHist);
+    ovl.querySelectorAll('[data-vhfu]').forEach(el => { el.innerHTML = histHtml(vhHist.filter(x => !String(x.tipo).startsWith('RESULTADO')), el.dataset.vhfu); });
+  };
+  let vhFocusStop = null;
+  const canDocs = me.role === 'ADMIN' || me.role === 'SUPERVISOR_DESPACHO';
+  const loadDocReviews = async () => {
+    if (!canDocs || !api.listReceiverDocReviews) return; let L = [];
+    try { L = (await api.listReceiverDocReviews('TODOS')).filter(v => v.route_id === vhRid); } catch (e) { return; }
+    L.forEach(v => {
+      const el = ovl.querySelector('.vh-stop[data-sid="' + v.stop_id + '"]'); if (!el) return;
+      const sum = el.querySelector('summary'); if (!sum.querySelector('.vh-docflag')) sum.querySelector('.vh-who').insertAdjacentHTML('afterend', '<span class="vh-docflag ' + v.status + '">' + (v.status === 'CORREGIDO' ? 'DOC. CORREGIDO' : 'DOC. A REVISAR') + '</span>');
+      let box = el.querySelector('.vh-doc'); if (!box) { box = document.createElement('div'); box.className = 'vh-doc'; el.querySelector('.vh-grid').after(box); }
+      box.innerHTML = '<span class="vh-lbl">' + (v.status === 'CORREGIDO' ? 'DOCUMENTO DEL RECEPTOR · CORREGIDO' : 'DOCUMENTO DEL RECEPTOR A REVISAR') + '</span>' +
+        '<p><b>' + esc(v.issue) + '</b><br>Declarado: ' + esc(v.declared_type || 'sin tipo') + ' ' + esc(v.doc || 'no informado') + ' · Receptor: ' + esc(v.receiver_name || '—') + ' · ' + esc(v.driver || '') + ' · ' + esc(dt(v.created_at)) + '</p>' +
+        ((v.corrections || []).length ? '<ol class="vh-hist">' + v.corrections.map(c => '<li><b>' + (c.rectificacion ? 'RECTIFICACIÓN' : 'CORRECCIÓN') + ' ' + c.seq + '</b> · ' + esc(c.type) + ' ' + esc(c.doc || '') +
+          '<small>' + esc(c.by || '') + ' · ' + esc(dt(c.at)) + '</small><span>' + esc(c.reason) + '</span></li>').join('') + '</ol>' :
+          (v.status === 'CORREGIDO' ? '<p>Corregido a <b>' + esc(v.corrected_type) + ' ' + esc(v.corrected_doc || '') + '</b> por ' + esc(v.corrected_by || '') + ' · ' + esc(dt(v.corrected_at)) + ' · ' + esc(v.correction_reason || '') + '</p>' : '')) +
+        (v.can_correct ? '<div class="vh-docfix" data-rect="' + (v.status === 'CORREGIDO' ? '1' : '') + '">' + (v.status === 'CORREGIDO' ? '<span class="vh-lbl" style="grid-column:1/-1">RECTIFICAR LA CORRECCIÓN (queda en el historial; no reemplaza la anterior)</span>' : '') + '<select class="ed" data-dct><option>DNI</option><option selected>CUIL</option><option>CUIT</option></select><input class="ed" data-dcn inputmode="numeric" placeholder="Número correcto">' +
+          '<input class="ed" data-dcr placeholder="Motivo (ej.: el receptor confirmó su CUIL)"><button type="button" class="btn dark" data-dcok>' + (v.status === 'CORREGIDO' ? 'RECTIFICAR' : 'CORREGIR DOCUMENTO') + '</button><p data-dcmsg></p></div>' : '') +
+        '<p class="vh-hint">La firma y el documento declarado originales se conservan; la corrección queda registrada con quién, cuándo y por qué.</p>';
+      const ok = box.querySelector('[data-dcok]');
+      if (ok) ok.onclick = async () => { const m = box.querySelector('[data-dcmsg]'); ok.disabled = true;
+        try { await api.correctReceiverDoc(v.stop_id, box.querySelector('[data-dct]').value, box.querySelector('[data-dcn]').value, box.querySelector('[data-dcr]').value, v.status === 'CORREGIDO');
+          dispatchEvent(new Event('okd:approvals-changed')); await loadDocReviews(); await loadHist(); }
+        catch (e) { m.className = 'up-msg err'; m.textContent = e.message.replace(/^[A-Z_]+:\s*/, ''); ok.disabled = false; } };
+    });
+    if (vhFocusStop) { const el = ovl.querySelector('.vh-stop[data-sid="' + vhFocusStop + '"]'); vhFocusStop = null;
+      if (el) { el.open = true; setTimeout(() => (el.querySelector('.vh-doc') || el).scrollIntoView({ block: 'center' }), 200); } }
+  };
+  const pending = (s, r) => ['ENTREGA_PARCIAL', 'NO_ENTREGADO', 'REPROGRAMAR'].includes(s.outcome) || !!(s.outcome_note && String(s.outcome_note).trim()) || (s.outcome === 'PENDIENTE' && ['COMPLETADA', 'CANCELADA'].includes(r.operational_status));
+  const renderVH = d => {
+    const r = d.route, stops = (r.stops || []).slice().sort((a, b) => (a.sequence_number || a.seq) - (b.sequence_number || b.seq));
+    const fecha = ((((r.sheet_snapshot || {}).pdf_model || {}).data || []).map(x => x && x.r && x.r.fecha).find(Boolean));
+    ovl.querySelector('#vhTitle').textContent = 'VER HOJA ' + (r.number || '');
+    const card = (k, v) => '<div class="vh-card"><span>' + k + '</span><b>' + esc(v || '—') + '</b></div>';
+    ovl.querySelector('#vhSum').innerHTML = '<div class="vh-badges"><span class="ust ' + (r.operational_status === 'CANCELADA' ? 'DESHABILITADO' : r.operational_status === 'COMPLETADA' ? 'ACTIVO' : 'INVITACION_PENDIENTE') + '">' + esc(ST[r.operational_status] || r.operational_status) + '</span>' +
+      (r.approval_status && AP[r.approval_status] ? '<span class="vh-apr">' + esc(AP[r.approval_status]) + '</span>' : '') + '</div>' +
+      '<div class="vh-cards">' + card('TRANSPORTISTA', r.carrier_name || r.carrier_id) + card('RESPONSABLE', r.responsable_name || '') + card('FECHA DE HOJA', fecha ? fecha.split('-').reverse().join('/') : (dt(r.published_at) || '').slice(0, 10)) +
+      card('INICIO', r.started_at ? dt(r.started_at) : '') + card('CIERRE', r.completed_at ? dt(r.completed_at) : '') + '</div>' +
+      '<h3 class="vh-h3">Recorrido y entregas <small>' + stops.length + ' parada' + (stops.length === 1 ? '' : 's') + '</small></h3>' +
+      stops.map((s, i) => { const [ol, oc] = OUTL[s.outcome] || [s.outcome, 'pend'], pend = pending(s, r);
+        return '<details class="vh-stop' + (pend ? ' pend' : '') + '" data-sid="' + s.id + '"><summary><span class="vh-n">' + (i + 1) + '</span><span class="vh-who"><b>' + esc(s.client_name) + '</b><small>' + esc(STOP_KIND[s.stop_type || 'PEDIDO'] || '') + ((s.order_numbers || []).length ? ' · Pedido ' + esc(s.order_numbers.join(' + ')) : '') + '</small></span>' +
+          (pend ? '<span class="vh-flag">PENDIENTE</span>' : '') + '<span class="bs-st ' + oc + '">' + esc(ol) + '</span></summary>' +
+          '<div class="vh-sd"><div class="vh-grid"><div><span>TIPO</span><b>' + esc(STOP_KIND[s.stop_type || 'PEDIDO'] || '—') + '</b></div><div><span>HORA</span><b>' + esc(dt(s.outcome_at || s.resolved_at || s.arrived_at) || '—') + '</b></div>' +
+          '<div><span>RESULTADO</span><b>' + esc(ol) + '</b></div><div><span>DIRECCIÓN</span><b>' + esc(s.address || '—') + '</b></div>' +
+          (s.outcome_note ? '<div class="vh-wide"><span>OBSERVACIÓN</span><b>' + esc(s.outcome_note) + '</b></div>' : '') + (s.outcome_reason ? '<div class="vh-wide"><span>MOTIVO / INCIDENCIA</span><b>' + esc(s.outcome_reason) + '</b></div>' : '') + '</div>' +
+          '<div class="vh-fu"><span class="vh-lbl">GESTIONES</span><div data-vhfu="' + esc(s.client_name) + '"><p class="rp-note">Cargando…</p></div></div>' +
+          (pend && canAct ? '<div class="vh-act"><button type="button" class="btn dark" data-vhres>RESOLVER PENDIENTE</button><div class="vh-res" hidden></div></div>' : '') + '</div></details>'; }).join('') +
+      '<p class="vh-note">ⓘ Consultar no modifica la hoja. Las gestiones quedan registradas y <b>no cambian el resultado original</b>; las correcciones van a aprobación.</p>';
+    ovl.querySelectorAll('[data-vhres]').forEach(b => b.onclick = () => openResolver(b, r, stops.find(s => s.id === b.closest('[data-sid]').dataset.sid)));
+    loadDocReviews();
+  };
+  // RESOLVER PENDIENTE: solo acciones REALES y autorizadas (el servidor vuelve a validar permiso, alcance e idempotencia)
+  const openResolver = (btn, r, s) => {
+    const box = btn.nextElementSibling; if (!box.hidden) { box.hidden = true; return; } box.hidden = false;
+    const A = [['GESTION', 'Registrar la gestión posterior', 'Qué se hizo (ej.: se coordinó con el cliente la entrega del faltante)', false],
+      ['OBSERVACION', 'Agregar observación', 'Observación', false], ['INCIDENCIA', 'Agregar incidencia', 'Qué pasó', false],
+      ['REPROGRAMACION', 'Solicitar reprogramación', 'Motivo de la reprogramación', true], ['CORRECCION', 'Solicitar revisión de una corrección', 'Qué hay que corregir y por qué', true]];
+    box.innerHTML = '<div class="vh-opts" role="radiogroup">' + A.map(([k, l], i) => '<label><input type="radio" name="vhk-' + s.id + '" value="' + k + '"' + (i ? '' : ' checked') + '> ' + esc(l) + '</label>').join('') + '</div>' +
+      '<textarea class="ed" data-vhnote rows="2" maxlength="1000" placeholder="' + esc(A[0][2]) + '"></textarea><input class="ed" data-vhprop hidden maxlength="200" placeholder="Corrección propuesta (ej.: el faltante se entregó el 12/11; no cambia el resultado hasta aprobar)">' +
+      '<p class="vh-hint" data-vhhint>Se registra en el historial. <b>No cambia el resultado original.</b></p><div class="uact"><button type="button" class="btn go" data-vhok>REGISTRAR</button><button type="button" class="btn soft" data-vhcancel>CANCELAR</button></div><p data-vhmsg></p>';
+    const kind = () => box.querySelector('input[type=radio]:checked').value, note = box.querySelector('[data-vhnote]'), prop = box.querySelector('[data-vhprop]'), hint = box.querySelector('[data-vhhint]'), ok = box.querySelector('[data-vhok]');
+    box.querySelectorAll('input[type=radio]').forEach(x => x.onchange = () => { const a = A.find(z => z[0] === kind()); note.placeholder = a[2]; prop.hidden = kind() !== 'CORRECCION';
+      hint.innerHTML = a[3] ? 'Se crea una solicitud <b>PENDIENTE DE APROBACIÓN</b> para tu Superior. <b>No cambia el resultado original.</b>' : 'Se registra en el historial. <b>No cambia el resultado original.</b>'; ok.textContent = a[3] ? 'ENVIAR SOLICITUD' : 'REGISTRAR'; });
+    box.querySelector('[data-vhcancel]').onclick = () => { box.hidden = true; };
+    const opBase = 'vh-' + s.id + '-' + Date.now();
+    ok.onclick = async () => {
+      const k = kind(), t = note.value.trim(), msgEl = box.querySelector('[data-vhmsg]'); if (t.length < 3) { msgEl.className = 'up-msg err'; msgEl.textContent = 'Describí la gestión (al menos 3 caracteres).'; note.focus(); return; }
+      ok.disabled = true;
+      try {
+        if (k === 'REPROGRAMACION' || k === 'CORRECCION') {
+          await api.requestFromViewSheet({ route_id: r.id, stop_id: s.id, parada: s.client_name, accion: k === 'REPROGRAMACION' ? 'SOLICITAR REPROGRAMACIÓN' : 'REVISIÓN DE CORRECCIÓN', reason: t, resultado_actual: s.outcome, propuesta: k === 'CORRECCION' ? (prop.value.trim() || null) : null, op_id: opBase });
+          dispatchEvent(new Event('okd:approvals-changed'));
+          msgEl.className = 'up-msg ok'; msgEl.textContent = 'Solicitud enviada: queda PENDIENTE DE APROBACIÓN. El resultado original no se modificó.';
+        } else { await api.addStopFollowup(s.id, k, t, null, opBase); msgEl.className = 'up-msg ok'; msgEl.textContent = 'Registrado en el historial. El resultado original no se modificó.'; }
+        note.value = ''; prop.value = ''; await loadHist();
+      } catch (e) { msgEl.className = 'up-msg err'; msgEl.textContent = e.message.replace(/^[A-Z_]+:\s*/, ''); }
+      finally { ok.disabled = false; }
+    };
+  };
   const detail = async (id, m) => {
-    const box = w.querySelector('#hDetail'); let d;
-    if (box.hidden) listScroll = window.scrollY;
-    if (box.hidden) reviewFrom = w.querySelector('#hSearch').hidden ? 'list' : 'search';   // a dónde vuelve al cerrar
-    box.innerHTML = '';   // otra hoja REEMPLAZA a la anterior (una sola revisión a la vez)
-    tD.hidden = false; tX.hidden = false; tD.textContent = 'REVISAR HOJA'; show('detail'); saveSt({ view: 'detail', rid: id });
-    const top = w.getBoundingClientRect().top + window.scrollY; if (window.scrollY > top) window.scrollTo(0, Math.max(0, top - 8));
-    try { d = await api.routeDetail(id); } catch (e) { box.innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; return; }
-    tD.textContent = 'REVISAR HOJA ' + (d.route && d.route.number || '');
+    // V4.28: VER HOJA es una VENTANA superpuesta (una sola; otra hoja la REEMPLAZA); el listado no se oculta ni se mueve
+    const box = w.querySelector('#hDetail'); let d; box.hidden = false;
+    openVH(); vhRid = id; box.innerHTML = ''; ovl.querySelector('#vhFullSec').hidden = false; ovl.querySelector('#vhTitle').textContent = 'VER HOJA'; ovl.querySelector('#vhSum').innerHTML = '<p class="rp-note">Cargando…</p>'; ovl.querySelector('#vhHist').innerHTML = '';
+    try { d = await api.routeDetail(id); } catch (e) {
+      // V4.28: desde una alerta de DOCUMENTO, si la hoja completa está fuera del alcance del Superior responsable, se muestra SOLO la revisión
+      // del documento (datos que el servidor ya le autoriza); la visibilidad de hojas NO se amplía
+      const focus = vhFocusStop; let v = null;
+      if (focus && canDocs) { try { v = (await api.listReceiverDocReviews('TODOS')).find(x => x.stop_id === focus); } catch (e2) { v = null; } }
+      if (v) {
+        ovl.querySelector('#vhTitle').textContent = 'VER HOJA ' + (v.route_number || ''); vhRid = v.route_id;
+        ovl.querySelector('#vhSum').innerHTML = '<p class="vh-note">ⓘ El detalle completo de esta hoja está fuera de tu alcance. Desde acá podés revisar y corregir el documento del receptor.</p>' +
+          '<details class="vh-stop pend" data-sid="' + esc(v.stop_id) + '" open><summary><span class="vh-n">!</span><span class="vh-who"><b>' + esc(v.client || '') + '</b><small>Pedido ' + esc((v.orders || []).join(' + ')) + ' · ' + esc(v.driver || '') + '</small></span></summary>' +
+          '<div class="vh-sd"><div class="vh-grid"></div></div></details>';
+        ovl.querySelector('#vhHist').innerHTML = '<p class="rp-note">El historial completo está disponible para quien tiene acceso a la hoja.</p>'; ovl.querySelector('#vhFullSec').hidden = true;
+        await loadDocReviews(); return;
+      }
+      ovl.querySelector('#vhSum').innerHTML = '<div class="up-msg err">' + esc(e.message) + '</div>'; return;
+    }
+    if (vhRid !== id) return;   // se abrió otra hoja mientras cargaba
+    renderVH(d); loadHist();
     const r = d.route, active = ['PUBLICADA', 'EN_CURSO'].includes(r.operational_status), stops = (r.stops || []).slice().sort((a, b) => (a.sequence_number || a.seq) - (b.sequence_number || b.seq));
     const pend = (d.returns || []).filter(x => x.status === 'PENDING');
     const postReq = (d.postPublishRequests || []).find(x => Number(x.route_version || 1) === Number(r.version || 1));
@@ -380,7 +524,7 @@ export async function openHistory(api, me) {
           (internal ? evItem('locfin', 'TERMINÉ EN LA UBICACIÓN', s.location_finished_at, s.location_finished_location) + evItem('locdep', 'SALIDA DE LA UBICACIÓN', s.location_departed_at, s.location_departed_location) : '') + '</ol>' +
         (s.location_warning ? '<div class="dt-warn">⚠ ' + esc(s.location_warning) + '</div>' : '') +
         '<div class="dt-cards"><div class="dt-card"><h4>' + (internal ? 'RECEPCIÓN INTERNA G2' : task ? 'TAREA' : 'RECEPCIÓN') + '</h4>' +
-          '<p><span>Recibió</span><b>' + esc((ev && ev.receiver_name) || '—') + '</b></p>' + (!internal && !task ? '<p><span>CUIL</span><b>' + esc((ev && ev.receiver_cuil) || '—') + '</b></p><p><span>Email usado</span><b>' + esc((ev && ev.receiver_email) || 'sin email') + '</b></p>' : '') +
+          '<p><span>Recibió</span><b>' + esc((ev && ev.receiver_name) || '—') + '</b></p>' + (!internal && !task ? '<p><span>Documento</span><b>' + esc(docTxt(ev)) + '</b></p><p><span>Email usado</span><b>' + esc((ev && ev.receiver_email) || 'sin email') + '</b></p>' : '') +
           (internal ? '<p><span>Pedidos trasladados</span><b>' + esc((s.order_numbers || []).join(', ') || '—') + '</b></p><p class="dt-note">Traslado entre sucursales: no es entrega al cliente.</p>' : '<p><span>Pedidos / comprobantes</span><b>' + esc((s.order_numbers || []).join(' + ') || '—') + '</b></p>') +
           (s.outcome_note || s.outcome_reason ? '<p><span>Observación / motivo</span><b>' + esc(s.outcome_note || s.outcome_reason) + '</b></p>' : '') +
           (s.collection_status && s.collection_status !== 'PENDIENTE' ? '<p><span>Cobranza</span><b>' + esc(s.collection_status.replaceAll('_', ' ')) + ' · ' + (s.collected_amount != null ? fmtMoney(s.collected_amount) : '—') + ' · ' + esc(s.payment_mode || '—') + '</b></p>' : '') + '</div>' +
@@ -465,7 +609,9 @@ export async function openHistory(api, me) {
     saveSt({ f, view: 'list', rid: null }); if (!tD.hidden) closeReview('list'); show('list'); list();
   };
   await list();
-  if (st0.view === 'detail') saveSt({ view: 'list', rid: null });   // V4.27: al volver a la sección NO se reabre una revisión anterior (sin pestañas residuales)
+  if (st0.view === 'detail') saveSt({ view: 'list', rid: null });
+  { const hv = decodeURIComponent((location.hash.match(/[?&]vh=([^&]+)/) || [])[1] || ''), hs = decodeURIComponent((location.hash.match(/[?&]stop=([^&]+)/) || [])[1] || '');
+    if (hv) { vhFocusStop = hs || null; detail(hv); } }   // V4.28: desde la campana → VER HOJA en esa entrega, con la revisión del documento   // V4.27: al volver a la sección NO se reabre una revisión anterior (sin pestañas residuales)
 }
 
 // ================= CONFIGURACIÓN =================

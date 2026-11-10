@@ -349,7 +349,7 @@ function showLogin(note) {
 if (api.mode === 'demo') $('#demoBanner').hidden = false;
 window.OKD_ONLINE = { api };
 // La splash se oculta apenas termina la inicialización real (sesión restaurada y primera pantalla elegida): sin demoras artificiales
-window.OKD_BUILD = import.meta.env.VITE_OKD_BUILD_TAG || 'V4.27'; // identificador del build (diagnóstico)
+window.OKD_BUILD = import.meta.env.VITE_OKD_BUILD_TAG || 'V4.28'; // identificador del build (diagnóstico) · B4: el workflow oficial NO define VITE_OKD_BUILD_TAG, por eso rige este valor
 async function syncServerConfig() {
   const set = (st, msg) => {
     window.OKD_CFG_STATE = st;

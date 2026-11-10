@@ -22,10 +22,10 @@ async def ready(pg):
  await pg.evaluate('()=>navigator.serviceWorker.ready.then(()=>true)')
  await pg.wait_for_timeout(1500)
 async def newid(pg):
- await pg.wait_for_function('async k=>(await caches.keys()).includes(k)&&window.OKD_BUILD==="V4.27"',arg=NEW_CACHE,timeout=45000)
+ await pg.wait_for_function('async k=>(await caches.keys()).includes(k)&&window.OKD_BUILD==="V4.28"',arg=NEW_CACHE,timeout=45000)
  await pg.wait_for_timeout(1500)
  try:
-  await pg.wait_for_function('()=>window.OKD_BUILD==="V4.27"',timeout=15000)
+  await pg.wait_for_function('()=>window.OKD_BUILD==="V4.28"',timeout=15000)
  except Exception:
   d=await pg.evaluate('''async()=>({url:location.href,version:window.OKD_BUILD,scripts:[...document.scripts].map(s=>s.src),cache:await caches.keys(),online:navigator.onLine,reg:(await navigator.serviceWorker.getRegistrations()).map(r=>({active:r.active?.state,waiting:r.waiting?.state,installing:r.installing?.state}))})''')
   d['root']=gh.ROOT;d['expected']=NEW_CACHE
@@ -57,7 +57,7 @@ async def main():
    await ctx.set_offline(False);await pg.reload();await newid(pg)
    await pg.wait_for_function('()=>JSON.parse(localStorage.getItem("okd_drv_queue:u-cristian")||"[]").length===0',timeout=30000)
    after=await state(pg)
-   assert after['build']=='V4.27',after
+   assert after['build']=='V4.28',after
    assert after['me']==before['me'] and after['cfg']==before['cfg'] and not after['pin'],(before,after)
    assert await blob(pg)=='PENDIENTE-QA-NO-BORRAR'
    def ops_expr():return '''sid=>{const d=JSON.parse(localStorage.getItem('okd_online_demo_v2'));return {outcome:d.routes2.flatMap(r=>r.stops).find(s=>s.id===sid).outcome,ops:Object.entries(d.ops||{}).filter(([k,v])=>v===sid).map(([k])=>k)}}'''

@@ -80,7 +80,7 @@ export const DemoAdmin = {
     const r = (this.db.routes2 || []).find(x => x.stops.some(st => st.id === stopId)); if (!r) throw err('No existe.', 'NOT_FOUND', 404);
     this._routeScope(me, r);   // como el servidor (RLS): signatures.view Y poder ver ESA hoja (Superior Despacho: las de su equipo)
     const stop = { ...r.stops.find(x => x.id === stopId) }, e = (this.db.evidence || {})[stopId];
-    const evidence = e ? { receiver_name: e.receiver_name, receiver_cuil: e.cuil || e.receiver_cuil || null, receiver_email: e.receiver_email || e.email || null, signature_png: e.signature_png_b64 || null, created_by: e.created_by } : null;
+    const evidence = e ? { receiver_name: e.receiver_name, receiver_cuil: e.cuil || e.receiver_cuil || null, receiver_dni: e.receiver_dni || null, receiver_cuit: e.receiver_cuit || null, receiver_doc_type: e.receiver_doc_type || null, receiver_doc_declared: e.receiver_doc_declared || null, receiver_doc_valid: e.receiver_doc_valid == null ? null : e.receiver_doc_valid, receiver_email: e.receiver_email || e.email || null, signature_png: e.signature_png_b64 || null, created_by: e.created_by } : null;
     const rc = (this.db.receipts || {})[stopId], receipt = rc ? { receipt_number: rc.receipt_number || rc.number || null, generated_at: rc.generated_at || rc.at || null, recipient_email: rc.recipient_email || rc.email || null } : null;
     const emails = (this.db.customerJobs || []).filter(j => j.stop_id === stopId).map(j => ({ kind: j.kind, status: j.status, sent_at: j.sent_at || null, error: j.error || null }));
     const by = id => ((this.db.users || []).find(u => u.id === id) || {}).full_name || null;
@@ -107,7 +107,7 @@ export const DemoAdmin = {
           responsable: (U.find(u => u.id === r.responsable_id) || {}).full_name || null, published_at: r.published_at, started_at: r.started_at || null, completed_at: r.completed_at || null,
           sheet_date: (data.find(x => x.fecha) || {}).fecha || null, stop_id: s.id, client_name: s.client_name, address: s.address, order_numbers: ords, docs: docs.join(' · ') || null,
           outcome: s.outcome, outcome_note: s.outcome_note || null, arrived_at: s.arrived_at || null, received_at: e ? (e.created_at || e.at || null) : null, has_receipt: !!rc, signatures_visible: sig,
-          receiver_name: sig && e ? e.receiver_name : null, receiver_cuil: sig && e ? (e.cuil || e.receiver_cuil || null) : null, has_signature: sig ? !!(e && e.signature_png_b64) : null,
+          receiver_name: sig && e ? e.receiver_name : null, receiver_cuil: sig && e ? (e.cuil || e.receiver_cuil || null) : null, receiver_dni: sig && e ? (e.receiver_dni || null) : null, receiver_cuit: sig && e ? (e.receiver_cuit || null) : null, receiver_doc_type: sig && e ? (e.receiver_doc_type || null) : null, receiver_doc_declared: sig && e ? (e.receiver_doc_declared || null) : null, receiver_doc_valid: sig && e ? (e.receiver_doc_valid == null ? null : e.receiver_doc_valid) : null, has_signature: sig ? !!(e && e.signature_png_b64) : null,
           receipt_number: sig && rc ? (rc.receipt_number || rc.number || null) : null, receipt_at: sig && rc ? (rc.generated_at || rc.at || null) : null });
         if (out.length >= 30) return out;
       }
@@ -119,6 +119,75 @@ export const DemoAdmin = {
     return (this.db.routes2 || []).filter(r => (ids || []).includes(r.id) && this._canViewRoute(me, r)).map(r => ({ id: r.id, started_at: r.started_at || null, depot_arrived_at: r.depot_arrived_at || null,
       plate: (vs.find(v => v.id === r.vehicle_id) || {}).plate || null,
       sheet_date: (((r.sheet_snapshot && r.sheet_snapshot.pdf_model && r.sheet_snapshot.pdf_model.data) || []).find(x => x && x.r && x.r.fecha) || { r: {} }).r.fecha || null }));
+  },
+  async addStopFollowup(stopId, kind, note, requestId, opId) {   // V4.28 (demo) = add_stop_followup
+    this._refresh(); const me = await this.me(); const F = this.db.stopFollowups = this.db.stopFollowups || [];
+    if (!me || me.status !== 'ACTIVO' || !(hasPerm(me, 'requests.create') || hasPerm(me, 'users.manage'))) throw err('FORBIDDEN', 'FORBIDDEN', 403);
+    // B2 (auditoría de Work, = servidor): 1) usuario activo y permiso, 2) ALCANCE sobre hoja y parada, 3) correspondencia del op_id; recién entonces el reintento
+    const r = (this.db.routes2 || []).find(x => (x.stops || []).some(s => s.id === stopId)); if (!r) throw err('NOT_FOUND', 'NOT_FOUND', 404);
+    if (!this._canViewRoute(me, r)) throw err('FORBIDDEN_ROUTE: la hoja está fuera de tu alcance', 'FORBIDDEN_ROUTE', 403);
+    if (opId) { const again = F.find(f => f.op_id === opId);
+      if (again) { if (again.created_by === me.id && again.stop_id === stopId && again.kind === kind && (again.request_id || null) === (requestId || null)) return { ...again };
+        throw err('OP_ID_CONFLICT: el identificador de la operación ya fue usado para otra gestión', 'OP_ID_CONFLICT', 409); } }   // sin datos ajenos
+    if (!['GESTION', 'OBSERVACION', 'INCIDENCIA', 'SOLICITUD'].includes(kind)) throw err('BAD_KIND', 'BAD_KIND', 400);
+    if (String(note || '').trim().length < 3) throw err('NOTE_REQUIRED: describí la gestión', 'NOTE_REQUIRED', 400);
+    if (requestId) { const q = (this.db.opRequests || []).find(x => x.id === requestId); if (!q || q.route_id !== r.id || q.requested_by !== me.id || kind !== 'SOLICITUD') throw err('BAD_REQUEST_LINK', 'BAD_REQUEST_LINK', 400); }
+    else if (kind === 'SOLICITUD') throw err('BAD_REQUEST_LINK', 'BAD_REQUEST_LINK', 400);
+    const st = r.stops.find(s => s.id === stopId), f = { id: F.length + 1, route_id: r.id, stop_id: stopId, kind, note: String(note).trim(), request_id: requestId || null, op_id: opId || null, created_by: me.id, created_at: new Date().toISOString() };
+    F.push(f); this.db.audit = this.db.audit || []; this.db.audit.push({ at: f.created_at, actor: me.id, action: 'STOP_FOLLOWUP_' + kind, target: r.id, target_id: r.id, after: { stop: stopId, client: st.client_name, outcome: st.outcome, note: f.note } });
+    this._save(); return { ...f };   // el resultado de la parada NO se modifica
+  },
+  // V4.28 (= _doc_review_responsible): Administración, o el usuario ACTIVO con rol SUPERIOR DESPACHO que HOY es el Superior asignado al transportista
+  _docResponsible(me, driverId) { if (!me || me.status !== 'ACTIVO') return false; if (me.role === 'ADMIN') return true;   // B1: rol real (users.manage delegado NO da acceso global)
+    const d = this._user(driverId); return me.role === 'SUPERVISOR_DESPACHO' && !!d && d.supervisor_user_id === me.id; },
+  async listReceiverDocReviews(status) {   // V4.28 (demo) = list_receiver_doc_reviews
+    this._refresh(); const me = await this.me(); if (!me || me.status !== 'ACTIVO') throw err('FORBIDDEN', 'FORBIDDEN', 403);
+    const adm = me.role === 'ADMIN', sig = hasPerm(me, 'signatures.view'); if (!adm && me.role !== 'SUPERVISOR_DESPACHO') return [];   // B1: rol real
+    const mask = d => d == null ? null : sig ? d : '•••' + String(d).replace(/\D/g, '').slice(-3), st = status || 'A_REVISAR';
+    return Object.values(this.db.docReviews || {}).filter(v => this._docResponsible(me, v.driver_id) && (st === 'TODOS' || v.status === st)).map(v => {   // responsabilidad VIGENTE
+      const r = (this.db.routes2 || []).find(x => x.id === v.route_id) || {}, s = (r.stops || []).find(x => x.id === v.stop_id) || {};
+      return { stop_id: v.stop_id, route_id: v.route_id, route_number: r.number, orders: s.order_numbers || [], client: s.client_name, driver: (this._user(v.driver_id) || {}).full_name, receiver_name: v.receiver_name,
+        declared_type: v.declared_type, doc: mask(v.declared_doc), issue: v.issue, status: v.status, created_at: v.created_at, corrected_type: v.corrected_type || null, corrected_doc: mask(v.corrected_doc),
+        corrected_by: v.corrected_by ? (this._user(v.corrected_by) || {}).full_name : null, corrected_at: v.corrected_at || null, correction_reason: v.correction_reason || null,
+        corrections: (v.corrections || []).map(c => ({ seq: c.seq, type: c.type, doc: mask(c.doc), reason: c.reason, rectificacion: c.rectificacion, by: (this._user(c.by) || {}).full_name, at: c.at })), can_correct: this._docResponsible(me, v.driver_id) };
+    }).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  },
+  async correctReceiverDoc(stopId, type, doc, reason, rectify = false) {   // V4.28 (demo) = correct_receiver_doc (historial inmutable; rectificación explícita)
+    this._refresh(); const me = await this.me(); if (!me || me.status !== 'ACTIVO') throw err('FORBIDDEN', 'FORBIDDEN', 403);
+    const v = (this.db.docReviews || {})[stopId]; if (!v) throw err('NOT_FOUND', 'NOT_FOUND', 404);
+    if (!this._docResponsible(me, v.driver_id)) throw err('FORBIDDEN: solo Administración o el Superior Despacho ACTIVO asignado hoy al transportista', 'FORBIDDEN', 403);
+    if (String(reason || '').trim().length < 3) throw err('REASON_REQUIRED: indicá por qué se corrige', 'REASON_REQUIRED', 400);
+    if (v.status === 'CORREGIDO' && !rectify) throw err('ALREADY_CORRECTED: ya fue corregido; para cambiarlo usá RECTIFICAR (queda en el historial)', 'ALREADY_CORRECTED', 409);
+    if (v.status === 'A_REVISAR' && rectify) throw err('NOTHING_TO_RECTIFY: todavía no hay una corrección para rectificar', 'NOTHING_TO_RECTIFY', 400);
+    const t = String(type || '').toUpperCase(), d = String(doc || '').replace(/\D/g, ''), { docIssue } = await import('./receiver-doc.js'), iss = docIssue(t, doc, true);
+    if (iss) throw err('DOC_STILL_INVALID: la corrección tampoco es válida (' + iss + ')', 'DOC_STILL_INVALID', 400);
+    const H = v.corrections = v.corrections || [], n = H.length + 1, at = new Date().toISOString();
+    H.push({ seq: n, type: t, doc: d, reason: String(reason).trim(), rectificacion: n > 1, by: me.id, at });   // solo agregado: ninguna corrección pisa a otra
+    Object.assign(v, { status: 'CORREGIDO', corrected_type: t, corrected_doc: d, corrected_by: me.id, corrected_at: at, correction_reason: String(reason).trim() });   // vigente = la última
+    this.db.audit = this.db.audit || []; this.db.audit.push({ at, actor: me.id, action: n > 1 ? 'RECEIVER_DOC_RECTIFIED' : 'RECEIVER_DOC_CORRECTED', target: v.route_id, target_id: v.route_id, after: { stop: stopId, type: t, reason: v.correction_reason, seq: n } });
+    this._save(); return { stop_id: stopId, status: v.status, corrected_type: t, seq: n };
+  },
+  async routeChangeHistory(routeId) {   // V4.28 (demo) = route_change_history
+    this._refresh(); const me = await this.me(); const r = (this.db.routes2 || []).find(x => x.id === routeId);
+    if (!r || !me || me.status !== 'ACTIVO' || !this._canViewRoute(me, r)) throw err('FORBIDDEN_ROUTE', 'FORBIDDEN_ROUTE', 403);
+    const U = id => (this._user(id) || {}).full_name || null, P = id => ((r.stops || []).find(s => s.id === id) || {}).client_name || null, items = [];
+    (r.stops || []).filter(s => s.outcome && s.outcome !== 'PENDIENTE').forEach(s => items.push({ at: s.outcome_at || s.resolved_at || r.completed_at || null, tipo: 'RESULTADO ORIGINAL', parada: s.client_name, resultado: s.outcome, motivo: s.outcome_note || s.outcome_reason || null, usuario: U(s.outcome_by || r.responsable_id) }));
+    (r.events || []).forEach(e => items.push({ at: e.at || e.created_at, tipo: e.type === 'INTERNAL_STOP_ADDED' ? 'PARADA AGREGADA' : 'PARADAS REORDENADAS', parada: P(e.stop_id), motivo: e.note || null, usuario: U(e.user_id || r.responsable_id) }));
+    const reqs = [...(this.db.opRequests || []).filter(q => q.route_id === r.id), ...(this.db.approvals || []).filter(a => a.route_id === r.id).map(a => ({ ...a, request_type: 'INTERNAL_ROUTE_CHANGE', requested_at: a.requested_at || a.created_at }))];
+    reqs.forEach(q => items.push({ at: q.requested_at, tipo: 'SOLICITUD · ' + (q.request_type === 'INTERNAL_ROUTE_CHANGE' ? 'CAMBIOS DE RUTA INTERNA' : q.request_type === 'OTRO' ? ((q.payload || {}).accion || 'OTRA ACCIÓN') : q.request_type.replace(/_/g, ' ')),
+      parada: (q.payload || {}).parada || null, resultado: (q.payload || {}).resultado_actual || null, nuevo: (q.payload || {}).propuesta || null, motivo: q.reason || null, estado: q.status, usuario: U(q.requested_by),
+      resuelto_por: q.reviewed_by ? U(q.reviewed_by) : (q.resolved_by ? U(q.resolved_by) : null), resuelto_at: q.reviewed_at || q.resolved_at || null, nota_resolucion: q.review_note || q.resolution_note || null }));
+    Object.values(this.db.docReviews || {}).filter(v => v.route_id === r.id).forEach(v => items.push({ at: v.created_at, tipo: 'DOCUMENTO DEL RECEPTOR A REVISAR', parada: P(v.stop_id), motivo: v.issue, estado: v.status,
+      usuario: U(v.driver_id), resuelto_por: v.corrected_by ? U(v.corrected_by) : null, resuelto_at: v.corrected_at || null, nota_resolucion: v.correction_reason || null }));
+    Object.values(this.db.docReviews || {}).filter(v => v.route_id === r.id).forEach(v => (v.corrections || []).forEach(c => items.push({ at: c.at, tipo: c.rectificacion ? 'RECTIFICACIÓN DEL DOCUMENTO' : 'CORRECCIÓN DEL DOCUMENTO', parada: P(v.stop_id), motivo: c.reason, usuario: U(c.by) })));
+    (this.db.stopFollowups || []).filter(f => f.route_id === r.id).forEach(f => items.push({ at: f.created_at, tipo: f.kind, parada: P(f.stop_id), motivo: f.note, estado: f.request_id ? (((this.db.opRequests || []).find(q => q.id === f.request_id)) || {}).status || null : null, usuario: U(f.created_by) }));
+    return { items: items.sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))) };
+  },
+  async requestFromViewSheet(p) {
+    const q = await this.createOperationalRequest({ request_type: 'OTRO', route_id: p.route_id, reason: p.reason, op_id: p.op_id,
+      payload: { origen: 'VER_HOJA', accion: p.accion, parada: p.parada, stop_id: p.stop_id, resultado_actual: p.resultado_actual || null, propuesta: p.propuesta || null } });
+    try { await this.addStopFollowup(p.stop_id, 'SOLICITUD', p.accion + ': ' + p.reason, q.id, p.op_id + '-f'); } catch (e) { /* la solicitud igual queda creada */ }
+    return q;
   },
   async routeDetail(id) {
     this._refresh(); const me = await this.me(); this._need(me, 'routes.view_all', 'routes.view_team', 'routes.view_own');
