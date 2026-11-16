@@ -71,7 +71,9 @@ Deno.serve(async (req) => {
     const transport=await smtp.runtime();
     if(transport.provider==='SMTP'){
       // Auth nativo usa el MISMO remitente/SMTP corporativo, certificado antes de activar el selector.
-      await admin.auth.resetPasswordForEmail(email,{redirectTo:appBase+'/?nueva-contrasena=1'});
+      const native=await admin.auth.resetPasswordForEmail(email,{redirectTo:appBase+'/?nueva-contrasena=1'});
+      if(native.error)console.error('[password-recovery] native SMTP delivery not confirmed');
+      else await Promise.resolve(admin.from('audit_log').insert({actor_id:null,action:'PASSWORD_RECOVERY_EMAIL_REQUESTED',target_type:'user',target_id:profile.id,after:{channel:'AUTH_CORPORATE_SMTP'}})).catch(()=>null);
       return ok(req);
     }
     const generated = await admin.auth.admin.generateLink({
@@ -112,13 +114,13 @@ Deno.serve(async (req) => {
       return ok(req);
     }
 
-    await admin.from('audit_log').insert({
+    await Promise.resolve(admin.from('audit_log').insert({
       actor_id: null,
       action: 'PASSWORD_RECOVERY_EMAIL_SENT',
       target_type: 'user',
       target_id: profile.id,
       after: { channel: transport.provider==='SMTP'?'SMTP':'RESEND' }
-    }).catch(() => null);
+    })).catch(() => null);
   } catch (e) {
     console.error('[password-recovery] unexpected', String((e as Error)?.message || e));
   }

@@ -52,7 +52,7 @@ const provider=routedMailProvider(admin,legacyMailProvider,{connectTls:(o: Deno.
 const originalGmailStore = pgStore(admin);
 const originalGmail = gmailProvider(originalGmailStore, { clientId: Deno.env.get('GOOGLE_CLIENT_ID') ?? '', clientSecret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '' });
 const sendInspectionGmail = inspectionGmailSender({
-  provider: {async prepare(){const c=await mailChannel(admin,{legacyStore:originalGmailStore,legacyProvider:originalGmail,connectTls:(o:Deno.ConnectTlsOptions)=>Deno.connectTls(o),scope:'inspecciones'});return {channel:c,token:await c.provider.prepare(false)};},async post(raw:any,t:any,opts:any){return t.channel.provider.post(raw,t.token,opts);},interpret:r=>originalGmail.interpret(r)},
+  provider: {async prepare(){const c=await mailChannel(admin,{legacyStore:originalGmailStore,legacyProvider:originalGmail,connectTls:(o:Deno.ConnectTlsOptions)=>Deno.connectTls(o),scope:'inspecciones'});return {channel:c,token:await c.provider.prepare(false)};},async post(raw:any,t:any,opts:any){return t.channel.provider.post(raw,t.token,opts);},interpret:(r:any)=>originalGmail.interpret(r)},
   gmailStore:{...originalGmailStore,async gmailStatus(){const r=await admin.rpc('comm_mail_runtime');if(r.error)throw Error('MAIL_CONFIG');return r.data;}} ,
   async claim(j: any, lock: string) {
     let q = admin.from('vehicle_inspection_email_requests').update({status:'ERROR', error:lock}).eq('id',j.id).eq('status',j.status).eq('retry_count',j.retry_count);

@@ -29,6 +29,7 @@ export function corporateMime(m,from,key){
  for(const a of m.attachments){const name=a.filename.replace(/["\\]/g,'_');raw+='--'+B+'\r\nContent-Type: '+a.mime+'\r\nContent-Disposition: '+(a.cid?'inline':'attachment')+'; filename="'+word(name)+'"\r\n'+(a.cid?'Content-ID: <'+a.cid.replace(/[<>]/g,'')+'>\r\n':'')+'Content-Transfer-Encoding: base64\r\n\r\n'+fold(a.content);}
  return raw+'--'+B+'--\r\n';
 }
+/** @param {any} sb @param {{connectTls?: any, transport?: any, scope?: string}} [options] */
 export function corporateMail(sb,{connectTls,transport=smtpTransport({connectTls}),scope='mail'}={}){
  const rpc=async(name,args={})=>unwrap(await sb.rpc(name,args));
  const runtime=()=>rpc('comm_mail_runtime');
