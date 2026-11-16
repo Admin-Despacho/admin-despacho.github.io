@@ -2,6 +2,8 @@
 import { hasPerm } from '../../supabase/functions/_shared/rules.js';
 
 export const SupabaseCom = {
+  comMailSettings() { return this._rpc('com_mail_settings_get', {}); },
+  comSetMailCopies(copies) { return this._rpc('com_mail_settings_set', { p_copies: copies }); },
   comConfig() { return this._rpc('com_config', {}); },
   comOrderAlerts(orders, cuits) { return this._rpc('com_order_alerts', { p_orders: orders, p_cuits: cuits }); },   // «CONSULTAR APROBACIÓN» (solo lectura)
   // ALARMA URGENTE (servidor: emisión, escalamiento a 3 min por pg_cron, atender, historial inmutable)
@@ -69,6 +71,8 @@ const DEMO_CLIENTS = [
 
 const arDay = iso => new Date(Date.parse(iso) - 3 * 3600e3).toISOString().slice(0, 10);   // N-V4-05: America/Argentina/Mendoza (UTC−3, sin cambio de horario)
 export const DemoCom = {
+  async comMailSettings() { const me=await this._comMe();if(!this._comAdmin(me))throw E('FORBIDDEN');return {copies:(this._com().mailCopies||[]).slice(),author_always:true,history:[],simulated:true}; },
+  async comSetMailCopies(copies) { const me=await this._comMe();if(!this._comAdmin(me))throw E('FORBIDDEN');const list=[...new Set((copies||[]).map(x=>String(x).trim().toLowerCase()).filter(Boolean))];if(list.length>20||list.some(x=>!/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(x)))throw E('INVALID_EMAIL_LIST');this._com().mailCopies=list;this._save();return this.comMailSettings(); },
   _com() {
     this._refresh();
     const c = this.db.com = this.db.com || {};
