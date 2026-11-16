@@ -1,0 +1,14 @@
+name: Verify corporate SMTP TLS without credentials or email
+on:
+  push:
+    branches: ["cert/corporate-smtp-20261116"]
+permissions:
+  contents: read
+jobs:
+  smtp-tls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check SMTP 465 TLS and EHLO only
+        run: python3 scripts/certify_corporate_smtp_tls.py
