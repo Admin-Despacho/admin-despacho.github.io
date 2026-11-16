@@ -1,0 +1,23 @@
+name: Certificar cierre
+on:
+  push:
+    branches: [cert/logout-final-work]
+permissions:
+  contents: read
+jobs:
+  logout:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - run: npx vitest run
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.51.0 openpyxl && python -m playwright install --with-deps chromium
+      - run: npx vite build --outDir dist-demo
+      - run: python tests/e2e/run_cierre_sesion.py dist-demo
