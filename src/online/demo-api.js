@@ -100,7 +100,8 @@ export class DemoApi {
     this.session = { userId: u.id, epoch: u.session_epoch || 0 }; this._set('session', this.session);
     return { userId: u.id };
   }
-  async signOut() { this.session = null; this._set('session', null); }
+  async signOut() { this.session = null; this._set('session', null); return { remote: 'OK', detail: null }; }   // mismo contrato que Supabase
+  dropLocalSession() { this.session = null; try { this._set('session', null); } catch (e) { } }
   // Invitación (mismo comportamiento que Supabase + Edge Function accept_invite): idempotente, nunca activa a un deshabilitado
   async acceptInvite() {
     this._refresh(); const me = await this.me(); if (!me || me.status !== 'INVITACION_PENDIENTE') return me;

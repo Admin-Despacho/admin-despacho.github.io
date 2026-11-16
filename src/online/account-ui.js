@@ -6,7 +6,7 @@ import { passkeysSupported, createPasskey } from './webauthn.js';
 
 export function openAccount(api, me, onLogout) {
   const m = document.createElement('div'); m.className = 'umodal'; m.id = 'accountModal';
-  m.innerHTML = '<div class="udialog" role="dialog" aria-modal="true"><header><b>MI CUENTA</b></header><div class="body">' +
+  m.innerHTML = '<div class="udialog ac-dialog" role="dialog" aria-modal="true"><header><b>MI CUENTA</b></header><div class="body">' +
     '<p style="margin:0;font-size:13px"><b>' + esc(me.full_name) + '</b><br><span style="color:var(--muted)">' + esc(me.email) + ' · ' + esc(ROLE_LABEL[me.role] || me.role) + '</span></p>' +
     '<p style="margin:0;font-size:12px;color:var(--muted)">El rol, los permisos y los transportistas los administra Administración.</p>' +
     '<label>Nueva contraseña<input id="acP1" type="password" autocomplete="new-password"></label>' +
@@ -14,7 +14,7 @@ export function openAccount(api, me, onLogout) {
     '<div class="up-msg err" id="acErr" hidden></div><div class="up-msg ok" id="acOk" hidden></div>' +
     (hasPerm(me, 'routes.view_assigned') ? '<div class="acsec"><b>SEGURIDAD · INGRESO RÁPIDO</b><p>Entrá con huella, Face ID o el bloqueo de tu celular. La app no guarda tu huella ni tu cara.</p><div id="pkList"></div>' +
       (passkeysSupported() ? '<button class="btn go" type="button" id="pkAdd">ACTIVAR INGRESO RÁPIDO</button>' : '<p class="shiperr">Este dispositivo no admite ingreso rápido.</p>') + '</div>' : '') +
-    '</div><footer><button class="btn ghost" type="button" id="acLogout">Cerrar sesión</button><span style="flex:1"></span><button class="btn ghost" type="button" id="acClose">Cerrar</button><button class="btn dark" type="button" id="acSave">CAMBIAR CONTRASEÑA</button></footer></div>';
+    '</div><footer class="ac-foot"><button class="btn ghost" type="button" id="acLogout">Cerrar sesión</button><span style="flex:1"></span><button class="btn ghost" type="button" id="acClose">Cerrar</button><button class="btn dark" type="button" id="acSave">CAMBIAR CONTRASEÑA</button></footer></div>';
   document.body.appendChild(m);
   const errB = m.querySelector('#acErr'), okB = m.querySelector('#acOk');
   m.querySelector('#acClose').addEventListener('click', () => m.remove());

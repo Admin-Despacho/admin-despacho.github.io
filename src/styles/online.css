@@ -56,6 +56,14 @@ table.utable{border-collapse:separate;border-spacing:0;width:100%;min-width:1180
 .udialog .carr{display:flex;flex-wrap:wrap;gap:6px}
 .udialog .carr label{flex-direction:row;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:5px 8px;color:var(--text);font-weight:600}
 .udialog footer{padding:12px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;background:var(--mist)}
+/* Mi cuenta (cierre de sesión): el pie NUNCA desborda ni queda recortado; en pantallas angostas cada botón ocupa su propia línea */
+.udialog footer.ac-foot{flex-wrap:wrap}
+@media(max-width:560px){.udialog footer.ac-foot>span{display:none}.udialog footer.ac-foot .btn{flex:1 1 100%;min-width:0;white-space:normal}}
+/* Mi cuenta: el diálogo nunca supera la altura visible; solo el CUERPO se desplaza (sin arrastrar la página de fondo) y el pie con
+   «Cerrar sesión», «Cerrar» y «CAMBIAR CONTRASEÑA» queda SIEMPRE a la vista (pantallas bajas, teclado abierto, zoom) */
+.udialog.ac-dialog{display:flex;flex-direction:column;max-height:calc(100vh - 80px);max-height:calc(100dvh - 80px)}
+.udialog.ac-dialog>header,.udialog.ac-dialog>footer{flex:none}
+.udialog.ac-dialog>.body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
 
 /* Fase 1.1: filtros de usuarios y chip de usuario clickeable (mismas formas que la offline) */
 .ufilters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}

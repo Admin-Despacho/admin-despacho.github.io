@@ -26,7 +26,24 @@ export class SupabaseApi {
     }
     return { userId: data.user.id };
   }
-  async signOut() { await this.sb.auth.signOut(); }
+  // Cierre de sesión ACOTADO (corrección de cierre): nunca queda pendiente ni rechaza. Mismo alcance de revocación que antes (el predeterminado).
+  // Si la revocación remota falla o no responde, se cierra la sesión EN ESTE DISPOSITIVO (retirada local explícita) y se informa que el servidor no la confirmó.
+  async signOut() {
+    const within = (p, ms) => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('SIN_RESPUESTA'), { okdTimeout: true })), ms))]);
+    try { this.sb.auth.stopAutoRefresh(); } catch (e) { }   // una renovación tardía no debe reconstruir la sesión saliente
+    let remote = 'OK', detail = null;
+    try { const r = await within(this.sb.auth.signOut(), 5000); if (r && r.error) { remote = 'ERROR'; detail = String(r.error.message || r.error); } }
+    catch (e) { remote = e && e.okdTimeout ? 'SIN_RESPUESTA' : 'ERROR'; detail = String((e && e.message) || e); }
+    // scope 'local': limita la revocación a ESTA sesión; el SDK instalado puede igualmente intentar una solicitud remota (acotada a 2 s).
+    // Lo que GARANTIZA el cierre en este dispositivo es el límite de tiempo y la retirada local explícita (dropLocalSession).
+    if (remote !== 'OK') { try { await within(this.sb.auth.signOut({ scope: 'local' }), 2000); } catch (e) { } }
+    this.dropLocalSession();
+    return { remote, detail };
+  }
+  // Retira SOLO las claves de sesión de Supabase Auth de este dispositivo (nada de clear(): PIN, borradores y cola offline se conservan)
+  dropLocalSession() {
+    try { const k = this.sb.auth.storageKey; if (k) for (const x of [k, k + '-code-verifier', k + '-user']) localStorage.removeItem(x); } catch (e) { }
+  }
   takeRevokedNotice() { let v = this.revokedNotice; try { v = v || sessionStorage.getItem('okd_revoked') === '1'; sessionStorage.removeItem('okd_revoked'); } catch (e) { } this.revokedNotice = false; return v; }
 
   // Usuario invitado: guarda la contraseña y activa su usuario. Si la activación falla NO se oculta el error.
