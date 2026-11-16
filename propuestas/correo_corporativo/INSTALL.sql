@@ -116,8 +116,8 @@ END;$$;
 -- Reemplazos mínimos y verificados de funciones existentes se incorporan al generar la entrega.
 
 -- Notificaciones de decisiones: autor obligatorio y copias configurables por Administrador General vigente.
-CREATE TABLE public.com_mail_settings(id int PRIMARY KEY CHECK(id=1),copies text[] NOT NULL DEFAULT '{}',changed_by uuid,changed_at timestamptz NOT NULL DEFAULT now());
-INSERT INTO public.com_mail_settings(id) VALUES(1);
+CREATE TABLE IF NOT EXISTS public.com_mail_settings(id int PRIMARY KEY CHECK(id=1),copies text[] NOT NULL DEFAULT '{}',changed_by uuid,changed_at timestamptz NOT NULL DEFAULT now());
+INSERT INTO public.com_mail_settings(id) VALUES(1) ON CONFLICT(id) DO NOTHING;
 CREATE TABLE public.com_decision_mail_outbox (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,event_id bigint NOT NULL REFERENCES public.com_request_events(id),request_id uuid NOT NULL REFERENCES public.com_requests(id),
  recipient_user uuid,recipient text,kind text NOT NULL CHECK(kind IN ('AUTHOR','COPY')),event_kind text NOT NULL,request_number text NOT NULL,
@@ -129,14 +129,14 @@ ALTER TABLE public.com_mail_settings ENABLE ROW LEVEL SECURITY;ALTER TABLE publi
 REVOKE ALL ON public.com_mail_settings,public.com_decision_mail_outbox FROM PUBLIC,anon,authenticated;
 GRANT SELECT,INSERT,UPDATE ON public.com_mail_settings,public.com_decision_mail_outbox TO service_role;
 GRANT USAGE,SELECT ON SEQUENCE public.com_decision_mail_outbox_id_seq TO service_role;
-CREATE FUNCTION public._comm_mail_admin() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+CREATE OR REPLACE FUNCTION public._comm_mail_admin() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
  SELECT coalesce(public._com_admin(),false) AND EXISTS(SELECT 1 FROM auth.sessions s WHERE s.user_id=auth.uid() AND s.id::text=auth.jwt()->>'session_id' AND (s.not_after IS NULL OR s.not_after>now()));
 $$;
 REVOKE ALL ON FUNCTION public._comm_mail_admin() FROM PUBLIC,anon,authenticated;
-CREATE FUNCTION public.com_mail_settings_get() RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
+CREATE OR REPLACE FUNCTION public.com_mail_settings_get() RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
 BEGIN IF NOT coalesce(public._comm_mail_admin(),false) THEN RAISE EXCEPTION 'FORBIDDEN' USING errcode='42501';END IF;
  RETURN (SELECT jsonb_build_object('copies',s.copies,'author_always',true,'history',coalesce((SELECT jsonb_agg(x) FROM (SELECT request_number,event_kind,recipient,state,sent_at,error_code FROM public.com_decision_mail_outbox ORDER BY id DESC LIMIT 20)x),'[]'::jsonb)) FROM public.com_mail_settings s WHERE id=1);END;$$;
-CREATE FUNCTION public.com_mail_settings_set(p_copies text[]) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+CREATE OR REPLACE FUNCTION public.com_mail_settings_set(p_copies text[]) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE v text[];oldv text[];
 BEGIN IF NOT coalesce(public._comm_mail_admin(),false) THEN RAISE EXCEPTION 'FORBIDDEN' USING errcode='42501';END IF;
  SELECT coalesce(array_agg(DISTINCT lower(btrim(x)) ORDER BY lower(btrim(x))),'{}') INTO v FROM unnest(coalesce(p_copies,'{}')) x WHERE btrim(x)<>'';
