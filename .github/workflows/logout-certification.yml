@@ -29,7 +29,7 @@ jobs:
           VITE_SUPABASE_URL: ""
           VITE_SUPABASE_ANON_KEY: ""
       - name: Logout browser acceptance (demo, failures injected)
-        run: python tests/e2e/run_cierre_sesion.py dist-demo /tmp/logout-results
+        run: python tests/e2e/work_cierre_sesion.py dist-demo /tmp/logout-results
       - name: Driver signature regression (demo)
         run: python tests/e2e/run_firma_cuil.py dist-demo
       - name: Delivery and route regression (demo)
