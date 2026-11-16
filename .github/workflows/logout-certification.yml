@@ -1,0 +1,37 @@
+name: Certify logout correction without deployment
+on:
+  push:
+    branches: ["cert/logout-20261116"]
+permissions:
+  contents: read
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run
+      - run: node scripts/verify_production_carrier_flow.mjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install playwright==1.51.0 openpyxl==3.1.5
+          python -m playwright install --with-deps chromium
+      - run: npx vite build --outDir dist-demo
+        env:
+          VITE_SUPABASE_URL: ""
+          VITE_SUPABASE_ANON_KEY: ""
+      - name: Logout browser acceptance (demo, failures injected)
+        run: python tests/e2e/run_cierre_sesion.py dist-demo /tmp/logout-results
+      - name: Driver signature regression (demo)
+        run: python tests/e2e/run_firma_cuil.py dist-demo
+      - name: Delivery and route regression (demo)
+        run: python tests/e2e/run_ver_entrega_recorrido.py dist-demo
+      - name: Commercial alarm regression (demo)
+        run: python tests/e2e/run_com_alarma.py dist-demo

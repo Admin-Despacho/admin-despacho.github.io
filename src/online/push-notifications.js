@@ -65,12 +65,31 @@ export async function initPushNotifications(api, me) {
 
 // Al CERRAR SESIÓN: el dispositivo deja de recibir avisos de ese usuario (servidor + navegador). Si no hay conexión, igual se
 // da de baja en el navegador; el servidor la marcará vencida en el próximo envío (410). Nunca bloquea el cierre de sesión.
+// Baja de notificaciones al cerrar sesión, ACOTADA (corrección de cierre): cada operación del navegador y la revocación tienen límite y el
+// total no supera ~4 s. Devuelve el resultado REAL (no se presenta como hecha una baja que no se confirmó). Si la baja LOCAL no se confirma,
+// queda una marca y se reintenta en la próxima carga (evita avisos de la cuenta saliente en este dispositivo).
+const PENDING = 'okd_push_unsub_pending';
+const within = (p, ms) => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(new Error('SIN_RESPUESTA')), Math.max(1, ms)))]);
 export async function revokePushOnLogout(api) {
+  const t0 = Date.now(), left = cap => Math.min(cap, Math.max(300, 4000 - (Date.now() - t0)));
+  const out = { servidor: 'NO_APLICA', dispositivo: 'NO_APLICA' };
   try {
-    if (!capable()) return;
-    const reg = await navigator.serviceWorker.getRegistration(); if (!reg) return;
-    const sub = await reg.pushManager.getSubscription(); if (!sub) return;
-    await Promise.race([api.revokePushSubscription ? api.revokePushSubscription(sub.endpoint).catch(() => null) : null, new Promise(r => setTimeout(r, 2500))]);
-    await sub.unsubscribe().catch(() => null);
-  } catch (_) { /* nunca impide cerrar sesión */ }
+    if (!capable()) return out;
+    const reg = await within(navigator.serviceWorker.getRegistration(), left(1500)); if (!reg) return out;
+    const sub = await within(reg.pushManager.getSubscription(), left(1500)); if (!sub) return out;
+    out.servidor = 'NO_CONFIRMADA'; out.dispositivo = 'NO_CONFIRMADA';
+    if (api.revokePushSubscription) { try { await within(api.revokePushSubscription(sub.endpoint), left(2500)); out.servidor = 'OK'; } catch (_) { } }
+    try { await within(sub.unsubscribe(), left(1500)); out.dispositivo = 'OK'; } catch (_) { }
+  } catch (_) { if (out.dispositivo === 'NO_APLICA') out.dispositivo = 'NO_CONFIRMADA'; }   // nunca impide cerrar sesión
+  try { if (out.dispositivo === 'NO_CONFIRMADA') localStorage.setItem(PENDING, '1'); else localStorage.removeItem(PENDING); } catch (_) { }
+  return out;
+}
+// En la próxima carga (antes de ingresar): si la baja local quedó pendiente, se reintenta acotada. Solo el navegador; sin red ni cuenta.
+export async function retryPendingPushUnsubscribe() {
+  try {
+    if (localStorage.getItem(PENDING) !== '1' || !capable()) return;
+    const reg = await within(navigator.serviceWorker.getRegistration(), 1500); const sub = reg && await within(reg.pushManager.getSubscription(), 1500);
+    if (sub) await within(sub.unsubscribe(), 1500);
+    localStorage.removeItem(PENDING);
+  } catch (_) { /* queda la marca para la próxima carga */ }
 }

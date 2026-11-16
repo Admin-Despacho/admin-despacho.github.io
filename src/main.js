@@ -8,7 +8,7 @@ import { openAccount } from './online/account-ui.js';
 import { esc } from './online/util.js';
 import { hasPerm, ROLE_LABEL } from '../supabase/functions/_shared/rules.js';
 import { ensurePinGate, startPinLockWatcher } from './online/session-pin.js';
-import { initPushNotifications, revokePushOnLogout } from './online/push-notifications.js';
+import { initPushNotifications, revokePushOnLogout, retryPendingPushUnsubscribe } from './online/push-notifications.js';
 import { canSwitch, viewMode, switchTo, switcherHtml, wireSwitcher, checkRevoked, watchRevocation } from './online/role-view.js';
 import { initStickyHeader } from './online/sticky-header.js';   // V4.27: cabecera, buscador y filtros fijos (solo presentación)
 try { initStickyHeader(); } catch (e) { /* nunca bloquea el arranque */ }
@@ -219,8 +219,31 @@ async function addHeaderControls(me) {
   out.addEventListener('click', logout);
   top.appendChild(out);
 }
-async function logout() { window.dispatchEvent(new Event('okd-com-cleanup')); try { Object.keys(sessionStorage).filter(k => k.startsWith('okd_veh_draft:')).forEach(k => sessionStorage.removeItem(k)); } catch (e) { }   // lo escrito en Vehículos no queda para el próximo usuario
-  if (stopPinWatcher) { stopPinWatcher(); stopPinWatcher = null; } await revokePushOnLogout(api); await api.signOut(); location.hash = ''; location.reload(); }
+// Cierre de sesión (corrección de cierre): UNA sola ejecución aunque se toque varias veces; tapa la interfaz del usuario saliente al instante;
+// cada paso está acotado (baja de push ~4 s, Auth 5 s + local) y un límite máximo GARANTIZA la recarga. Si el servidor no confirmó la revocación
+// o la baja de notificaciones, se informa en la pantalla de ingreso (no se presenta como hecho lo que no ocurrió).
+let logoutRun = null;
+function logout() { if (!logoutRun) logoutRun = doLogout(); return logoutRun; }
+async function doLogout() {
+  window.OKD_LOGGING_OUT = true; let done = false;
+  const finish = res => {
+    if (done) return; done = true; clearTimeout(guard);
+    try { api.dropLocalSession && api.dropLocalSession(); } catch (e) { }   // último paso: nada de la sesión saliente queda en este dispositivo
+    try { const n = { auth: (res && res.auth) || 'SIN_RESPUESTA', push: (res && res.push) || null }; if (n.auth !== 'OK' || (n.push && n.push.dispositivo === 'NO_CONFIRMADA')) sessionStorage.setItem('okd_logout_notice', JSON.stringify(n)); } catch (e) { }
+    location.hash = ''; location.reload();
+  };
+  const guard = setTimeout(() => finish(null), 9000);   // límite máximo: aunque algo quede pendiente, la sesión se cierra en este dispositivo
+  try { const c = document.createElement('div'); c.id = 'okdLogoutCover'; c.setAttribute('role', 'status'); c.setAttribute('aria-busy', 'true');
+    c.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#0b1f33;color:#fff;display:flex;align-items:center;justify-content:center;font:700 1.1rem system-ui,sans-serif';
+    c.textContent = 'Cerrando sesión…'; document.body.appendChild(c); } catch (e) { }   // retira de la vista los datos del usuario saliente
+  window.dispatchEvent(new Event('okd-com-cleanup'));
+  try { Object.keys(sessionStorage).filter(k => k.startsWith('okd_veh_draft:')).forEach(k => sessionStorage.removeItem(k)); } catch (e) { }   // lo escrito en Vehículos no queda para el próximo usuario
+  try { if (stopPinWatcher) { stopPinWatcher(); stopPinWatcher = null; } } catch (e) { }
+  let push = null, auth = 'SIN_RESPUESTA';
+  try { push = await revokePushOnLogout(api); } catch (e) { }
+  try { const r = await api.signOut(); auth = (r && r.remote) || 'OK'; } catch (e) { auth = 'ERROR'; }
+  finish({ auth, push });
+}
 
 async function route() {
   // Enlace de nueva contraseña (recuperación o invitación): antes de cualquier otra cosa
@@ -355,11 +378,15 @@ async function route() {
 }
 function showLogin(note) {
   show('#auth'); renderLogin(api, route);
-  const msg = note || (api.takeRevokedNotice() ? 'Tu sesión fue cerrada por Administración. Volvé a iniciar sesión.' : '');
+  let lo = null; try { lo = JSON.parse(sessionStorage.getItem('okd_logout_notice') || 'null'); sessionStorage.removeItem('okd_logout_notice'); } catch (e) { }
+  const loMsg = lo ? ['Se cerró la sesión en este dispositivo.', lo.auth !== 'OK' ? 'El servidor no confirmó el cierre (' + (lo.auth === 'SIN_RESPUESTA' ? 'sin respuesta' : 'error') + '): si el equipo es compartido, avisá a Administración.' : '',
+    lo.push && lo.push.dispositivo === 'NO_CONFIRMADA' ? 'No se pudo confirmar la baja de notificaciones de la cuenta anterior; se reintenta automáticamente.' : ''].filter(Boolean).join(' ') : '';
+  const msg = note || (api.takeRevokedNotice() ? 'Tu sesión fue cerrada por Administración. Volvé a iniciar sesión.' : '') || loMsg;
   if (msg) { const n = document.createElement('div'); n.className = 'auth-note'; n.id = 'authNote'; n.textContent = msg; document.getElementById('authCard').prepend(n); }
 }
 
 if (api.mode === 'demo') $('#demoBanner').hidden = false;
+retryPendingPushUnsubscribe().catch(() => null);   // baja de notificaciones que quedó pendiente al cerrar la sesión anterior (acotada; sin red)
 window.OKD_ONLINE = { api };
 // La splash se oculta apenas termina la inicialización real (sesión restaurada y primera pantalla elegida): sin demoras artificiales
 window.OKD_BUILD = import.meta.env.VITE_OKD_BUILD_TAG || 'V4.28'; // identificador del build (diagnóstico) · B4: el workflow oficial NO define VITE_OKD_BUILD_TAG, por eso rige este valor
