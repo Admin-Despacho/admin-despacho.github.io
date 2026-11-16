@@ -1,0 +1,40 @@
+--- DEPLOYED/push-notifications/index.ts
++++ V4/push-notifications/index.ts
+@@ -7,12 +7,8 @@
+   'Access-Control-Allow-Methods': 'POST, OPTIONS'
+ };
+ const json = (status:number, body:any) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'content-type':'application/json' } });
+-const urlFor = (n:any, appUrl:string) => {
+-  const rid = n.route_id ? encodeURIComponent(n.route_id) : '';
+-  if (n.type === 'REQUEST_CREATED') return appUrl + '/#/solicitudes' + (rid ? '?route=' + rid : '');
+-  if (String(n.type || '').startsWith('REQUEST_')) return appUrl + '/#/solicitudes' + (rid ? '?route=' + rid : '');
+-  return appUrl + '/#/mis-hojas' + (rid ? '?route=' + rid : '');
+-};
++import { urlFor } from './url.ts';
++import { authorize } from './auth.ts';   // B-W05   // destino al tocar la notificación (módulo propio para poder probarlo)
+ 
+ Deno.serve(async (req:Request) => {
+   if (req.method === 'OPTIONS') return new Response('ok', { headers:cors });
+@@ -24,17 +20,11 @@
+   const admin = createClient(url, service, { auth:{ persistSession:false } });
+   // Dos formas de vaciar la cola: (a) ejecución PROGRAMADA con x-cron-secret = CRON_SECRET (no depende de que alguien tenga la app abierta);
+   // (b) cualquier usuario ACTIVO con sesión (después de publicar o al abrir la app). La toma de trabajos es atómica: no hay envíos duplicados.
+-  const cron = Deno.env.get('CRON_SECRET') || '';
+-  const viaCron = !!cron && req.headers.get('x-cron-secret') === cron;
+-  if (!viaCron) {
+-    const auth = req.headers.get('authorization') || '';
+-    if (!auth.startsWith('Bearer ')) return json(401,{ error:'Sesión inválida' });
+-    const authClient = createClient(url, anon, { global:{ headers:{ Authorization:auth } }, auth:{ persistSession:false } });
+-    const { data:who, error:authErr } = await authClient.auth.getUser();
+-    if (authErr || !who?.user) return json(401,{ error:'Sesión inválida' });
+-    const { data:profile } = await admin.from('profiles').select('id,status').eq('id',who.user.id).maybeSingle();
+-    if (!profile || profile.status !== 'ACTIVO') return json(403,{ error:'Usuario sin acceso' });
+-  }
++  const gate = await authorize(req.headers, Deno.env.get('CRON_SECRET') || '', {   // B-W05: única puerta (el gateway no exige JWT)
++    getUser: async (auth) => { const c = createClient(url, anon, { global:{ headers:{ Authorization:auth } }, auth:{ persistSession:false } }); const { data, error } = await c.auth.getUser(); return error || !data?.user ? null : { id: data.user.id }; },
++    getProfile: async (id) => { const { data } = await admin.from('profiles').select('id,status').eq('id', id).maybeSingle(); return data || null; },
++  });
++  if (!gate.ok) return json(gate.status, { error: gate.error });
+ 
+   const { data:cfg, error:cfgErr } = await admin.from('push_vapid_config').select('public_key,private_key').eq('id','DEFAULT').single();
+   if (cfgErr || !cfg) return json(500,{ error:'Push no configurado' });

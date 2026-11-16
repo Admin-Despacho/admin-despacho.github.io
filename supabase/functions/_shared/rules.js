@@ -2,12 +2,13 @@
 // Edge Functions (Deno). La base de datos aplica las MISMAS reglas en SQL (migración Fase 1):
 // la pantalla nunca es la única defensa.
 
-export const ROLES = ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO', 'TRANSPORTISTA', 'TRANSPORTISTA_INTERNO', 'SOLO_LECTURA'];
+export const ROLES = ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO', 'TRANSPORTISTA', 'TRANSPORTISTA_INTERNO', 'SOLO_LECTURA', 'COMERCIAL'];
 export const ASSIGNABLE_ROLES = [...ROLES];
 
 export const ROLE_LABEL = {
   ADMIN: 'Admin General',
   SUPERVISOR_DESPACHO: 'Superior Despacho',
+  COMERCIAL: 'Comercial',   // Autorizaciones comerciales
   OPERARIO_DEPOSITO: 'Operario Depósito',
   TRANSPORTISTA: 'Transportista',
   TRANSPORTISTA_INTERNO: 'Transportista interno',
@@ -35,7 +36,8 @@ export const PERMISSIONS = [
   'routes.edit', 'routes.cancel', 'routes.reassign', 'routes.view_team', 'routes.view_own',
   'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team', 'drafts.manage_all',
   'requests.create', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team', 'requests.reassign',
-  'users.assign_supervisor', 'users.manage_permissions', 'vehicles.view', 'vehicles.service_manage', 'backup.manage'
+  'users.assign_supervisor', 'users.manage_permissions', 'vehicles.view', 'vehicles.service_manage', 'backup.manage',
+  'com.request', 'com.approve', 'com.track', 'com.sources.upload'   // Autorizaciones comerciales
 ];
 // Solo Admin General puede otorgarlos (mismo criterio que public.is_sensitive_permission)
 export const SENSITIVE_PERMISSIONS = ['users.manage', 'users.manage_permissions', 'users.assign_supervisor', 'settings.manage', 'credit_notes.manage', 'audit.view', 'backup.manage',
@@ -51,14 +53,17 @@ export const ROLE_PERMISSIONS = {
   OPERARIO_DEPOSITO: ['routes.create', 'routes.edit', 'routes.publish', 'routes.assign', 'routes.view_all', 'routes.view_own', 'locations.view', 'drafts.create', 'drafts.view_own', 'drafts.manage_all', 'requests.create', 'columns.view', 'columns.manage_defaults', 'columns.manage_templates', 'vehicle_mileage.view', 'vehicle_mileage.enter', 'vehicles.view', 'vehicles.service_manage', 'carriers.manage'],
   TRANSPORTISTA: ['routes.view_assigned', 'deliveries.update', 'deliveries.capture_signature'],
   TRANSPORTISTA_INTERNO: ['routes.view_assigned', 'internal_routes.use', 'deliveries.update', 'deliveries.capture_signature'],
-  SOLO_LECTURA: ['routes.view_all']
+  SOLO_LECTURA: ['routes.view_all'],
+  COMERCIAL: ['com.request']   // Autorizaciones comerciales: crea y consulta SUS solicitudes
 };
+// Autorizaciones comerciales: trazabilidad para Despacho e ingesta de las cargas diarias (Operario)
+ROLE_PERMISSIONS.SUPERVISOR_DESPACHO.push('com.track'); ROLE_PERMISSIONS.OPERARIO_DEPOSITO.push('com.track', 'com.sources.upload');
 
 export const STATUS = ['ACTIVO', 'DESHABILITADO', 'ARCHIVADO', 'INVITACION_PENDIENTE'];
 
 // Módulos (RC1.1): cada permiso pertenece a un módulo; Administración puede RESTRINGIR módulos por usuario (nunca agregar)
-export const MODULES = ['DESPACHO', 'MIS_HOJAS', 'USUARIOS', 'INFORMES', 'APROBACIONES', 'CONFIGURACION', 'AUDITORIA'];
-export const MODULE_LABEL = { DESPACHO: 'Despacho general', MIS_HOJAS: 'Mis hojas publicadas', USUARIOS: 'Usuarios', INFORMES: 'Informes', APROBACIONES: 'Aprobaciones', CONFIGURACION: 'Configuración', AUDITORIA: 'Auditoría' };
+export const MODULES = ['DESPACHO', 'MIS_HOJAS', 'USUARIOS', 'INFORMES', 'APROBACIONES', 'CONFIGURACION', 'AUDITORIA', 'COMERCIAL'];
+export const MODULE_LABEL = { DESPACHO: 'Despacho general', MIS_HOJAS: 'Mis hojas publicadas', USUARIOS: 'Usuarios', INFORMES: 'Informes', APROBACIONES: 'Aprobaciones', CONFIGURACION: 'Configuración', AUDITORIA: 'Auditoría', COMERCIAL: 'Autorizaciones comerciales' };
 export const MODULE_PERMISSIONS = {
   DESPACHO: ['routes.create', 'routes.publish', 'routes.assign', 'routes.view_all', 'internal_routes.manage', 'locations.view', 'signatures.view', 'routes.manage_all_drafts', 'collections.manage',
     'routes.edit', 'routes.cancel', 'routes.reassign', 'routes.view_team', 'routes.view_own', 'drafts.create', 'drafts.view_own', 'drafts.view_team', 'drafts.manage_team', 'drafts.manage_all',
@@ -69,7 +74,8 @@ export const MODULE_PERMISSIONS = {
   APROBACIONES: ['can_approve_internal_route_changes', 'requests.view_team', 'requests.approve_team', 'requests.reject_team', 'requests.observe_team', 'requests.reassign'],
   CONFIGURACION: ['settings.manage', 'carriers.manage', 'vehicles.manage', 'locations.manage', 'credit_notes.manage', 'columns.manage_defaults', 'columns.manage_templates', 'columns.apply_global',
     'vehicle_mileage.edit', 'vehicle_mileage.rules_manage', 'vehicle_mileage.resolve_alerts', 'vehicles.service_manage', 'backup.manage'],
-  AUDITORIA: ['audit.view', 'identity_docs.view']
+  AUDITORIA: ['audit.view', 'identity_docs.view'],
+  COMERCIAL: ['com.request', 'com.approve', 'com.track', 'com.sources.upload']
 };
 export const moduleOf = perm => MODULES.find(m => MODULE_PERMISSIONS[m].includes(perm)) || null;
 export const roleModules = role => MODULES.filter(m => MODULE_PERMISSIONS[m].some(p => (ROLE_PERMISSIONS[role] || []).includes(p)));

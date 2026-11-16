@@ -1,0 +1,2 @@
+push-notifications a desplegar = fuente DESPLEGADA v13 (idéntica a 1925c44; index.ts SHA-256 c37f7366…) + url.ts + auth.ts (vigencia y session_id obligatorio) + verificación del destinatario COM_ALARMA y prioridad de alarmas (index.ts).
+Gateway: verify_jwt = true (valor desplegado).

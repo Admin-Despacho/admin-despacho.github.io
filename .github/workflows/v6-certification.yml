@@ -1,0 +1,75 @@
+name: V6 independent certification - NO DEPLOY
+on:
+  push:
+    branches: ['cert/v6-20261116']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v6-certification-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [driver, alarms, pwa]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: python -m pip install playwright==1.51.0 openpyxl==3.1.5
+      - run: python -m playwright install --with-deps chromium
+      - name: Resolve Chromium
+        run: python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print('CHROMIUM_PATH='+p.chromium.executable_path); p.stop()" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        if: matrix.suite == 'pwa'
+        with:
+          ref: 1925c44629ea24a6eddcf5668a9bb9987f67186c
+          path: base-src
+      - name: Build baseline demo
+        if: matrix.suite == 'pwa'
+        env:
+          VITE_SUPABASE_URL: ''
+          VITE_SUPABASE_ANON_KEY: ''
+        run: |
+          ln -s ../node_modules base-src/node_modules
+          cd base-src
+          npm run build -- --outDir ../dist-baseline
+      - name: Build demo only
+        env:
+          VITE_SUPABASE_URL: ''
+          VITE_SUPABASE_ANON_KEY: ''
+        run: npm run build -- --outDir dist-demo
+      - name: Browser tests with synthetic data
+        shell: bash
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          set -o pipefail
+          mkdir -p cert-results
+          if [ "$SUITE" = driver ]; then
+            python tests/e2e/run_firma_cuil.py dist-demo /tmp/cert-firma | tee cert-results/firma.log
+            python tests/e2e/run_driver_perfiles.py dist-demo /tmp/cert-perfiles | tee cert-results/perfiles.log
+            python tests/e2e/run_ver_entrega_recorrido.py dist-demo /tmp/cert-recorrido | tee cert-results/recorrido.log
+          elif [ "$SUITE" = alarms ]; then
+            python tests/e2e/run_com_v5.py dist-demo /tmp/cert-v6 | tee cert-results/v6.log
+            python tests/e2e/run_com_alarma.py dist-demo /tmp/cert-alarma | tee cert-results/alarma.log
+          else
+            python tests/e2e/run_v427_pwa_upgrade.py dist-baseline dist-demo /tmp/cert-pwa | tee cert-results/pwa.log
+            python tests/e2e/run_v427_navegacion.py dist-demo /tmp/cert-nav | tee cert-results/navegacion.log
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v6-browser-${{ matrix.suite }}
+          path: cert-results
+          retention-days: 7

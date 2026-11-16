@@ -50,10 +50,11 @@ async def main():
                 await dp.login(pg, 'cristian@okdespacho.demo'); await dp.open_route(pg, ids['ct']); s1 = await dp.stop_id(pg, ids['ct'], 0)
                 await dp.choose(pg, s1, 'ENTREGADO'); form = await pg.locator(S(s1, '.drv-form')).inner_text()
                 files = await pg.locator(S(s1, 'input[type=file]')).count()
-                res('FC-01 EXTERNO: el formulario pide nombre, CUIL (obligatorio), email y FIRMAR; NINGÚN campo ni texto de foto del DNI',
-                    files == 0 and 'DNI' not in form and await pg.locator(S(s1, '[data-f="recv"]')).count() == 1 and await pg.locator(S(s1, '[data-f="cuil"]')).count() == 1
-                    and await pg.locator(S(s1, '[data-sigopen]')).count() == 1 and '*' in (await pg.inner_text(S(s1, '[data-field="cuil"] .drv-lbl'))) and 'OPCIONAL' in (await pg.inner_text(S(s1, '[data-field="email"] .drv-lbl'))), {'archivos': files})   # V4.24: etiqueta fija (CUIL *, email OPCIONAL)
-                errs = []
+                res('FC-01 EXTERNO: el formulario pide nombre, TIPO y número de documento (V4.28: CUIL/DNI/CUIT, advierte sin bloquear), email OPCIONAL y FIRMAR; NINGÚN campo ni texto de FOTO del documento',
+                    files == 0 and 'FOTO' not in form.upper() and await pg.locator(S(s1, '[data-f="recv"]')).count() == 1 and await pg.locator(S(s1, '[data-f="cuil"]')).count() == 1
+                    and await pg.locator(S(s1, '[data-f="doctype"]')).count() == 1 and await pg.locator(S(s1, '[data-sigopen]')).count() == 1
+                    and 'OPCIONAL' in (await pg.inner_text(S(s1, '[data-field="email"] .drv-lbl'))), {'archivos': files})   # V4.28: tipo de documento; el email sigue OPCIONAL
+                errs = []; warns = []   # errs: lo que BLOQUEA (nombre, firma, email mal escrito) · warns: ADVERTENCIAS de documento (V4.28, no bloquean)
                 errs.append(await dp.save(pg, s1))
                 await pg.fill(S(s1, '[data-f="recv"]'), 'Receptora QA Uno'); errs.append(await dp.save(pg, s1))
                 await pg.fill(S(s1, '[data-f="email"]'), 'receptora.uno@ejemplo.test')
@@ -98,13 +99,14 @@ async def main():
                 await pg.screenshot(path=os.path.join(SHOTS, 'android_formulario_con_firma.png'))
                 res('FC-08 CONFIRMAR FIRMA vuelve a la entrega con la firma visible (1200×480, sin deformar); cancelar después NO la pierde',
                     src1 and src1.startswith('data:image/png') and dims == [1200, 480] and src2 == src1 and await pg.inner_text(S(s1, '[data-sigopen]')) == 'FIRMAR DE NUEVO', dims)
-                errs.append(await dp.save(pg, s1))   # sin CUIL
-                await pg.fill(S(s1, '[data-f="cuil"]'), '2012345678'); await pg.press(S(s1, '[data-f="cuil"]'), 'Tab'); errs.append(await dp.save(pg, s1))   # CUIL corto
+                warns.append(await dp.doc_warning(pg, s1)); await dp.doc_fix(pg, s1)   # sin documento → ADVERTENCIA (V4.28)
+                await pg.fill(S(s1, '[data-f="cuil"]'), '2012345678'); await pg.press(S(s1, '[data-f="cuil"]'), 'Tab'); warns.append(await dp.doc_warning(pg, s1)); await dp.doc_fix(pg, s1)   # CUIL corto → ADVERTENCIA
+                pend_doc = (await pg.evaluate(dp.DB, ids['ct']))[0]['outcome']   # tras las advertencias NO se guardó
                 await pg.fill(S(s1, '[data-f="cuil"]'), '20-12345678-6'); await pg.fill(S(s1, '[data-f="email"]'), 'receptora.uno@'); errs.append(await dp.save(pg, s1))   # email mal escrito
                 await pg.fill(S(s1, '[data-f="email"]'), 'receptora.uno@ejemplo.test')
-                res('FC-02 validaciones: sin nombre / sin firma / sin CUIL / CUIL incompleto / email MAL ESCRITO → no guarda y explica qué corregir (el email se corrige o se borra)',
-                    'nombre' in (errs[0] or '') and 'firma' in (errs[1] or '').lower() and 'firma' in (errs[2] or '').lower() and 'CUIL' in (errs[3] or '') and 'obligatorio' in (errs[3] or '')
-                    and '11 dígitos' in (errs[4] or '') and 'no es válido' in (errs[5] or '') and 'borralo' in (errs[5] or ''), errs)
+                res('FC-02 validaciones: sin nombre / sin firma / email MAL ESCRITO → NO guarda y explica qué corregir; sin documento / CUIL incompleto → ADVERTENCIA que no guarda hasta CORREGIR o CONTINUAR (V4.28: el documento no bloquea)',
+                    'nombre' in (errs[0] or '') and 'firma' in (errs[1] or '').lower() and 'firma' in (errs[2] or '').lower() and 'no es válido' in (errs[3] or '') and 'borralo' in (errs[3] or '')
+                    and 'necesita revisión' in (warns[0] or '') and 'Falta el documento' in (warns[0] or '') and 'necesita revisión' in (warns[1] or '') and pend_doc != 'ENTREGADO', {'bloquean': errs, 'advertencias': warns, 'estado': pend_doc})
                 # ---- firma conservada al recargar (borrador) ----
                 await pg.fill(S(s1, '[data-f="cuil"]'), '20-12345678-6'); await pg.press(S(s1, '[data-f="cuil"]'), 'Tab'); await pg.wait_for_timeout(300)
                 await pg.reload(); await pg.wait_for_timeout(2500); await dp.dismiss(pg)
@@ -131,11 +133,12 @@ async def main():
                 if arrive: await pg.locator(S(sc, '[data-arrive]')).click(); await pg.wait_for_timeout(1500)
                 await dp.choose(pg, sc, 'ENTREGADO'); f_int = await pg.locator(S(sc, '.drv-form')).inner_text()
                 await pg.fill(S(sc, '[data-f="recv"]'), 'Receptor QA Dos')   # V4.21: SIN email (opcional)
-                await pg.fill(S(sc, '[data-f="cuil"]'), '20987654321'); await pg.press(S(sc, '[data-f="cuil"]'), 'Tab'); await sign_with_finger(pg, cdp, sc)
+                await pg.fill(S(sc, '[data-f="cuil"]'), '20987654326'); await pg.press(S(sc, '[data-f="cuil"]'), 'Tab'); await sign_with_finger(pg, cdp, sc)   # CUIL VÁLIDO (este caso no prueba el documento)
                 e_int = await dp.save(pg, sc); ag = await pg.evaluate(dp.ASSOC, sc); st_gb = await pg.evaluate(dp.DB, ids['gb'])
-                res('FC-10 INTERNO SIN EMAIL: conserva LLEGADA A DESTINO y confirma con nombre + CUIL + firma, SIN foto del DNI y SIN Recibido Conforme (no hay a quién enviarlo)',
-                    arrive == 1 and 'DNI' not in f_int and await pg.locator(S(sc, 'input[type=file]')).count() == 0 and e_int is None and st_gb[0]['outcome'] == 'ENTREGADO'
-                    and ag['cuil'] == '20987654321' and not ag['dniStored'] and not ag['email'] and not ag['receipt'] and ag['job'] != 'RECIBIDO_CONFORME', {'llegada': arrive, 'error': e_int, 'asoc': ag})
+                res('FC-10 INTERNO SIN EMAIL: conserva LLEGADA A DESTINO y confirma con nombre + CUIL + firma, SIN FOTO del documento y SIN Recibido Conforme (no hay a quién enviarlo)',
+                    # V4.28: «DNI» aparece como TIPO de documento; lo que no debe haber es FOTO
+                    arrive == 1 and 'FOTO' not in f_int.upper() and await pg.locator(S(sc, 'input[type=file]')).count() == 0 and e_int is None and st_gb[0]['outcome'] == 'ENTREGADO'
+                    and ag['cuil'] == '20987654326' and not ag['dniStored'] and not ag['email'] and not ag['receipt'] and ag['job'] != 'RECIBIDO_CONFORME', {'llegada': arrive, 'error': e_int, 'estado': st_gb[0]['outcome'], 'asoc': ag})
                 if await pg.locator(S(sm, '[data-arrive]')).count(): await pg.locator(S(sm, '[data-arrive]')).click(); await pg.wait_for_timeout(1500)
                 await dp.choose(pg, sm, 'ENTREGADO')
                 g2 = {'cuil': await pg.locator(S(sm, '[data-f="cuil"]')).count(), 'email': await pg.locator(S(sm, '[data-f="email"]')).count(), 'firmar': await pg.locator(S(sm, '[data-sigopen]')).count()}

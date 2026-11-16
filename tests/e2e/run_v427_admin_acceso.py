@@ -20,7 +20,9 @@ async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or None)
         h0, a0, e0 = await navs(b, sys.argv[1], 4480); h1, a1, e1 = await navs(b, sys.argv[2], 4481); await b.close()
-    ok = h0 == h1 and all(a1.values()) and not e1
+    NUEVOS = {'#/autorizaciones'}   # módulo de Autorizaciones comerciales: único destino agregado
+    ok = set(h0) <= set(h1) and set(h1) - set(h0) <= NUEVOS and all(a1.values()) and not e1
+    print('agregados:', sorted(set(h1) - set(h0)), '· faltantes:', sorted(set(h0) - set(h1)))
     print('destinos publicados', len(h0), '· parche', len(h1), '· iguales', h0 == h1, '· todos abren', all(a1.values()), '· errores de página', len(e1))
     print('no abren:', [h for h, v in a1.items() if not v], 'errores:', e1[:3])
     print('PASS' if ok else 'FAIL', 'AD-01 el Administrador General conserva TODOS los destinos y cada módulo abre sin error ni rechazo')

@@ -19,3 +19,9 @@ verify_jwt = false
 # Comunicaciones · registro de adjuntos validado en el servidor (exige sesión; el permiso se valida adentro)
 [functions.comm-attachments]
 verify_jwt = true
+
+# Push (N-V4-02 · orden V5 de Dirección): se MANTIENE verify_jwt = true (el valor desplegado). NO se habilita false hasta acreditar, en un
+# Supabase AISLADO, una autorización equivalente y probada para la ejecución programada (el proyecto usa claves sb_publishable_…, que no
+# son JWT). El handler valida además la VIGENCIA de la sesión (auth.ts · push_session_valid) antes de reclamar trabajos.
+[functions.push-notifications]
+verify_jwt = true

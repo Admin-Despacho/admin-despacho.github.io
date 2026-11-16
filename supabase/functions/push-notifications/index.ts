@@ -7,12 +7,8 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 const json = (status:number, body:any) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'content-type':'application/json' } });
-const urlFor = (n:any, appUrl:string) => {
-  const rid = n.route_id ? encodeURIComponent(n.route_id) : '';
-  if (n.type === 'REQUEST_CREATED') return appUrl + '/#/solicitudes' + (rid ? '?route=' + rid : '');
-  if (String(n.type || '').startsWith('REQUEST_')) return appUrl + '/#/solicitudes' + (rid ? '?route=' + rid : '');
-  return appUrl + '/#/mis-hojas' + (rid ? '?route=' + rid : '');
-};
+import { urlFor } from './url.ts';
+import { authorize } from './auth.ts';   // B-W05   // destino al tocar la notificación (módulo propio para poder probarlo)
 
 Deno.serve(async (req:Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers:cors });
@@ -24,17 +20,12 @@ Deno.serve(async (req:Request) => {
   const admin = createClient(url, service, { auth:{ persistSession:false } });
   // Dos formas de vaciar la cola: (a) ejecución PROGRAMADA con x-cron-secret = CRON_SECRET (no depende de que alguien tenga la app abierta);
   // (b) cualquier usuario ACTIVO con sesión (después de publicar o al abrir la app). La toma de trabajos es atómica: no hay envíos duplicados.
-  const cron = Deno.env.get('CRON_SECRET') || '';
-  const viaCron = !!cron && req.headers.get('x-cron-secret') === cron;
-  if (!viaCron) {
-    const auth = req.headers.get('authorization') || '';
-    if (!auth.startsWith('Bearer ')) return json(401,{ error:'Sesión inválida' });
-    const authClient = createClient(url, anon, { global:{ headers:{ Authorization:auth } }, auth:{ persistSession:false } });
-    const { data:who, error:authErr } = await authClient.auth.getUser();
-    if (authErr || !who?.user) return json(401,{ error:'Sesión inválida' });
-    const { data:profile } = await admin.from('profiles').select('id,status').eq('id',who.user.id).maybeSingle();
-    if (!profile || profile.status !== 'ACTIVO') return json(403,{ error:'Usuario sin acceso' });
-  }
+  const gate = await authorize(req.headers, Deno.env.get('CRON_SECRET') || '', {   // B-W05 + N-V4-02: puerta del handler (el gateway mantiene verify_jwt=true)
+    getUser: async (auth) => { const c = createClient(url, anon, { global:{ headers:{ Authorization:auth } }, auth:{ persistSession:false } }); const { data, error } = await c.auth.getUser(); return error || !data?.user ? null : { id: data.user.id }; },
+    // N-V4-02: vigencia de la sesión en la base (perfil activo, token posterior a la revocación, sesión existente) ANTES de reclamar trabajos
+    checkSession: async (id, iat, sid) => { const { data, error } = await admin.rpc('push_session_valid', { p_user: id, p_iat: iat, p_session: sid }); return error || !data ? { ok: false, motivo: 'ERROR_DE_VERIFICACION' } : data; },
+  });
+  if (!gate.ok) return json(gate.status, { error: gate.error });
 
   const { data:cfg, error:cfgErr } = await admin.from('push_vapid_config').select('public_key,private_key').eq('id','DEFAULT').single();
   if (cfgErr || !cfg) return json(500,{ error:'Push no configurado' });
@@ -43,8 +34,12 @@ Deno.serve(async (req:Request) => {
   const appUrl = (Deno.env.get('APP_URL') || 'https://admin-despacho.github.io').replace(/\/$/, '');
 
   // Toma atómica (FOR UPDATE SKIP LOCKED): cada trabajo lo procesa una sola ejecución; incluye reintentos de ERROR con espera
-  const { data:claimed, error:jErr } = await admin.rpc('claim_push_jobs', { p_limit: 100 });
+  // Prioridad: primero los trabajos de ALARMA COMERCIAL (urgentes), después la cola general; misma toma atómica, sin repetir trabajos
+  const { data:urgent, error:uErr } = await admin.rpc('claim_com_alarm_push_jobs', { p_limit: 50 });
+  if (uErr) return json(500,{ error:uErr.message });
+  const { data:general, error:jErr } = await admin.rpc('claim_push_jobs', { p_limit: 100 });
   if (jErr) return json(500,{ error:jErr.message });
+  const seenJob = new Set<string>(); const claimed = [...(urgent || []), ...(general || [])].filter((j:any) => !seenJob.has(j.id) && seenJob.add(j.id));
   const ids = (claimed || []).map((j:any) => j.notification_id);
   const { data:notifs } = ids.length ? await admin.from('notifications').select('id,type,title,body,route_id,route_version').in('id', ids) : { data: [] as any[] };
   const jobs = (claimed || []).map((j:any) => ({ ...j, notification: (notifs || []).find((n:any) => n.id === j.notification_id) || null }));
@@ -55,6 +50,18 @@ Deno.serve(async (req:Request) => {
     if (!n) {
       await admin.from('push_jobs').update({ status:'SKIPPED', processed_at:new Date().toISOString(), last_error:'Notification missing' }).eq('id',j.id);
       continue;
+    }
+    // N-V5-03: un aviso de ALARMA COMERCIAL se envía solo si el destinatario CONSERVA el acceso al momento del envío (la omisión queda auditada)
+    if (n.type === 'COM_ALARMA') {
+      const { data:acc, error:aErr } = await admin.rpc('push_recipient_allowed', { p_notification: n.id });
+      if (aErr || !acc) {   // falla TÉCNICA de la verificación: no se envía y se REINTENTA (no se pierde una alarma legítima)
+        await admin.from('push_jobs').update({ status:'ERROR', last_error:'Verificación de destinatario fallida', next_attempt_at:new Date(Date.now() + 60000).toISOString() }).eq('id',j.id);
+        results.push({ id:j.id, status:'ERROR' }); continue;
+      }
+      if (acc.ok !== true) {   // destinatario SIN acceso actual: se omite (auditado en push_recipient_allowed)
+        await admin.from('push_jobs').update({ status:'SKIPPED', processed_at:new Date().toISOString(), last_error:'DESTINATARIO_SIN_ACCESO_ACTUAL' }).eq('id',j.id);
+        results.push({ id:j.id, status:'SKIPPED' }); continue;
+      }
     }
     const { data:subs } = await admin.from('push_subscriptions').select('id,endpoint,p256dh,auth').eq('user_id',j.user_id).is('revoked_at',null);
     if (!subs?.length) {

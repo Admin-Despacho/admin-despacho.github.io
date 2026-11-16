@@ -4,9 +4,9 @@ const b64 = s => {
   const raw = atob((s + pad).replace(/-/g,'+').replace(/_/g,'/'));
   return Uint8Array.from(raw, c => c.charCodeAt(0));
 };
-const capable = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+export const capable = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;   // también la usa la alarma comercial
 
-async function subscribe(api) {
+export async function subscribe(api) {   // también la usa la alarma comercial (misma suscripción; sin cambios de lógica)
   const reg = await navigator.serviceWorker.ready;
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {

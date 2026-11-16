@@ -13,8 +13,12 @@ import { canSwitch, viewMode, switchTo, switcherHtml, wireSwitcher, checkRevoked
 import { initStickyHeader } from './online/sticky-header.js';   // V4.27: cabecera, buscador y filtros fijos (solo presentación)
 try { initStickyHeader(); } catch (e) { /* nunca bloquea el arranque */ }
 
+import { installComCapture } from './online/com-capture.js';
 const api = createApi();
+installComCapture(api);
+import('./online/com-ingest.js').then(m => m.installComIngest(api)).catch(() => {});   // Autorizaciones Comerciales: historial desde las cargas de Depósito (en segundo plano)
 import { initApprovalsBell } from './online/approvals-bell.js';   // V4.27: campana de aprobaciones (solo lectura y navegación)
+try { window.__okdBootHash = location.hash; } catch (e) { }   // Autorizaciones comerciales: enlace directo de la alarma (antes de cualquier redirección)
 try { initApprovalsBell(api); } catch (e) { /* nunca bloquea el arranque */ }
 const $ = s => document.querySelector(s);
 const show = id => ['#auth', '#noPanel', '#operario'].forEach(s => { $(s).hidden = s !== id; });
@@ -38,6 +42,7 @@ async function loadLegacy() {
   if (!legacyLoaded) {
   // Puente con el servidor: la confirmación de envíos provisorios se guarda server-side
   window.OKD_BRIDGE = {
+    com: { alerts: (orders, cuits) => api.comOrderAlerts(orders, cuits), alarm: (order, sheet, client, cuit, reason, op) => api.comAlarmRaise(order, sheet, client, cuit, reason, op) },   // Autorizaciones comerciales: «CONSULTAR APROBACIÓN» (solo lectura)
     shipping: { confirm: p => api.shippingConfirm(p), invalidate: p => api.shippingInvalidate(p) },
     orders: { reserve: (k, o) => api.reserveOrders(k, o), release: (k, o) => api.releaseOrders(k, o) },
     noc: { reconcile: (imp, items, complete) => api.reconcileCreditNotes(imp, items, complete), reassociate: (app, k) => api.nocReassociate(app, k), detect: (k, items) => api.detectCreditNotes(k, items), apply: p => api.applyCreditNote(p), applyFinancing: p => api.consumeCreditNoteFinancing(p), release: (k, fp) => api.releaseCreditNote(k, fp) },
@@ -97,6 +102,8 @@ const MODULE_ROUTES = {
   '#/conciliacion-noc': { ok: me => hasPerm(me, 'credit_notes.manage'), open: async me => (await adminUi()).openNocRecon(api, me) },
   '#/auditoria': { ok: me => hasPerm(me, 'audit.view'), open: async me => (await adminUi()).openAudit(api, me) },
   // Comunicaciones internas (módulo separado): el servidor valida cada operación; el menú solo refleja los permisos efectivos
+  // Autorizaciones comerciales (módulo separado): se carga SOLO al entrar; el servidor valida cada operación
+  '#/autorizaciones': { ok: me => ['com.request', 'com.approve', 'com.track'].some(p => hasPerm(me, p)) || me.role === 'ADMIN', open: async me => { const [a, c] = await Promise.all([adminUi(), import('./online/com-ui.js')]); return c.openCom(api, me, a.frameFor); } },
   '#/comunicaciones': { ok: me => hasPerm(me, 'comms.view'), open: async me => { const [a, c] = await Promise.all([adminUi(), import('./online/comms-ui.js')]); return c.openComms(api, me, a.frameFor); } },
   '#/backup': { ok: me => hasPerm(me, 'settings.manage') || hasPerm(me, 'backup.manage'), open: async me => (await adminUi()).openBackup(api, me) },
   // transportistas: su pantalla sin panel (igual que antes). Usuario habilitado con "Permitir asignación de hojas de ruta":
@@ -192,7 +199,7 @@ async function openRoute() {
 }
 window.addEventListener('hashchange', () => (location.hash.startsWith('#/nueva-contrasena') ? route() : openRoute()));
 // Sesión realmente vencida (no se pudo renovar): vuelve al acceso con aviso
-window.addEventListener('okd-session-expired', async () => { await api.signOut().catch(() => null); history.replaceState(null, '', location.pathname); showLogin('Tu sesión venció. Ingresá de nuevo.'); });
+window.addEventListener('okd-session-expired', async () => { window.dispatchEvent(new Event('okd-com-cleanup')); await api.signOut().catch(() => null); history.replaceState(null, '', location.pathname); showLogin('Tu sesión venció. Ingresá de nuevo.'); });
 async function moduleButtons(me, top) {
   const { navHtml } = await adminUi();
   const host = top.parentElement; if (!host || host.querySelector('#adNav')) return;
@@ -212,7 +219,7 @@ async function addHeaderControls(me) {
   out.addEventListener('click', logout);
   top.appendChild(out);
 }
-async function logout() { try { Object.keys(sessionStorage).filter(k => k.startsWith('okd_veh_draft:')).forEach(k => sessionStorage.removeItem(k)); } catch (e) { }   // lo escrito en Vehículos no queda para el próximo usuario
+async function logout() { window.dispatchEvent(new Event('okd-com-cleanup')); try { Object.keys(sessionStorage).filter(k => k.startsWith('okd_veh_draft:')).forEach(k => sessionStorage.removeItem(k)); } catch (e) { }   // lo escrito en Vehículos no queda para el próximo usuario
   if (stopPinWatcher) { stopPinWatcher(); stopPinWatcher = null; } await revokePushOnLogout(api); await api.signOut(); location.hash = ''; location.reload(); }
 
 async function route() {
@@ -253,6 +260,7 @@ async function route() {
   if (stopPinWatcher) stopPinWatcher();
   stopPinWatcher = startPinLockWatcher(api, me, { onForceLogin: () => { history.replaceState(null, '', location.pathname); location.reload(); } });
   initPushNotifications(api, me).catch(() => null);
+  import('./online/com-alarm.js').then(m => m.installComAlarm(api, me)).catch(() => null);   // Autorizaciones comerciales: ALARMA URGENTE (en cualquier pantalla)
   api.flushPushQueue && api.flushPushQueue().catch(() => null);
   window.OKD_LOGOUT = logout;
   // Celular/tablet (< 1000 px): el menú lateral es una barra con "MENÚ"; al elegir un ítem se cierra y se muestra el contenido arriba
@@ -327,6 +335,11 @@ async function route() {
     if (!location.hash && RC4_HOME(me)) location.hash = '#/dashboard';
   } else {
     show('#noPanel');
+    if ((hasPerm(me, 'com.request') || hasPerm(me, 'com.approve')) && !hasPerm(me, 'routes.view_assigned')) {   // Comercial / aprobador sin panel: DIRECTO a Autorizaciones (optimizado para celular)
+      const chip = $('#np-who'); chip.innerHTML = esc(me.full_name) + ' · <b>' + esc(ROLE_LABEL[me.role] || me.role) + '</b>'; chip.onclick = () => openAccount(api, me, logout);
+      const { mountComHome } = await import('./online/com-ui.js'); await mountComHome(api, me);
+      return;
+    }
     if (hasPerm(me, 'routes.view_assigned')) { const { DriverApp } = await import('./online/driver-ui.js'); new DriverApp(api, me, logout).start(); }
     else if (hasPerm(me, 'routes.view_all')) { const { DriverApp } = await import('./online/driver-ui.js'); new DriverApp(api, me, logout, { readOnly: true }).start(); }
     else {
@@ -386,7 +399,8 @@ route().then(() => { bootState(document.getElementById('loginEmail') && document
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   let reloadingForUpdate = false;
   // V4.24.1 · una sola recarga por versión nueva, POSTERGADA mientras hay trabajo en curso (PIN a la vista, entrega abierta, firma, sincronización)
-  const busy = () => !!document.getElementById('pinGate') || !!document.querySelector('.drv-form:not([hidden]), .drv-sign-modal') || !!window.OKD_SYNCING;
+  const busy = () => !!document.getElementById('pinGate') || !!document.querySelector('.drv-form:not([hidden]), .drv-sign-modal') || !!window.OKD_SYNCING
+    || !!document.querySelector('[data-okd-unsaved="1"]');   // Autorizaciones comerciales: formulario con datos escritos y sin enviar (solicitud, alarma)
   const reloadWhenIdle = () => { if (busy()) { setTimeout(reloadWhenIdle, 3000); return; } location.reload(); };
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (reloadingForUpdate) return;

@@ -42,7 +42,7 @@ describe('Acciones de usuarios', () => {
   it('U14 sin historial se puede eliminar', () => expect(validateUserAction('delete', ctx({ target: U.despacho, hasHistory: false }))).toBeNull());
   it('U15 sin users.manage no se crea', () => expect(validateUserAction('create', { actor: U.despacho, allUsers: all, payload: { email: 'a@b.c', full_name: 'A', role: 'DESPACHO' } }).code).toBe('FORBIDDEN'));
   it('U16 transportista externo requiere carrier', () => expect(validateUserAction('create', ctx({ payload: { email: 'n@b.c', full_name: 'N', role: 'TRANSPORTISTA', carriers: [] } })).code).toBe('CARRIER_REQUIRED'));
-  it('U17 email duplicado rechazado (sin importar mayúsculas)', () => expect(validateUserAction('create', ctx({ payload: { email: 'X@OK.test', full_name: 'N', role: 'DESPACHO' }, allUsers: [{ email: 'x@ok.test' }, U.admin] })).code).toBe('DUPLICATE'));
+  it('U17 email duplicado rechazado (sin importar mayúsculas)', () => expect(validateUserAction('create', ctx({ payload: { email: 'X@OK.test', full_name: 'N', role: 'OPERARIO_DEPOSITO' }, allUsers: [{ email: 'x@ok.test' }, U.admin] })).code).toBe('DUPLICATE'));
 });
 
 describe('Fase 1.1 — reglas', () => {

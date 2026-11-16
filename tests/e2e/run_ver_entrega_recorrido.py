@@ -21,9 +21,15 @@ TRACE = '''()=>{const p=document.querySelector("#deliveryTraceBox .dt"); if(!p) 
 async def open_trace(pg, rid, stop_index, tab=None):
     await pg.evaluate('()=>{location.hash="#/historial"}'); await pg.wait_for_timeout(1500)
     if await pg.locator('[data-htab="list"]').count() and await pg.locator('#hList').is_hidden(): await pg.click('[data-htab="list"]'); await pg.wait_for_timeout(500)   # V4.20: Historial reabre la hoja abierta
+    # V4.28: VER HOJA es una ventana superpuesta; si quedó abierta de la consulta anterior, se CIERRA como lo haría la persona (botón CERRAR)
+    if await pg.locator('#vhClose').count() and await pg.locator('#vhClose').is_visible():
+        await pg.locator('#vhClose').click(); await pg.wait_for_timeout(600)
     if not await pg.locator(f'#histTable tr[data-rid="{rid}"] [data-view]').count():
         return {'norow': await pg.evaluate('()=>[...document.querySelectorAll("#histTable tbody tr")].map(t=>t.textContent.slice(0,60))'), 'hash': await pg.evaluate('()=>location.hash')}
     await pg.locator(f'#histTable tr[data-rid="{rid}"] [data-view]').click(); await pg.wait_for_timeout(1500)
+    # V4.28: VER HOJA muestra la hoja completa dentro de «ACCIONES Y DETALLE COMPLETO» (sección plegada): se DESPLIEGA como lo haría la persona
+    if await pg.locator('#vhFullSec').count() and not await pg.evaluate('()=>document.querySelector("#vhFullSec").open'):
+        await pg.locator('#vhFullSec > summary').click(); await pg.wait_for_timeout(500)
     rows = pg.locator('#hSheet tr[data-stop]')
     if not await pg.locator('#hSheet [data-delivery-detail]').count(): return None
     await rows.nth(stop_index).locator('[data-delivery-detail]').click(); await pg.wait_for_timeout(1500)
@@ -47,7 +53,7 @@ async def main():
                 await pg.fill('#drvKmIni', '50100'); await pg.click('#drvStart'); await pg.wait_for_timeout(2000)
                 st = await pg.evaluate(gd.ROUTE, ids['gb']); sc, sm, ss = [x['id'] for x in st['stops']]
                 await pg.locator(S(sc, '[data-arrive]')).click(); await pg.wait_for_timeout(1100)
-                await dp.choose(pg, sc, 'ENTREGADO'); await pg.fill(S(sc, '[data-f="recv"]'), 'Receptor VE'); await pg.fill(S(sc, '[data-f="cuil"]'), '20987654321')
+                await dp.choose(pg, sc, 'ENTREGADO'); await pg.fill(S(sc, '[data-f="recv"]'), 'Receptor VE'); await pg.fill(S(sc, '[data-f="cuil"]'), '20987654326')
                 await pg.press(S(sc, '[data-f="cuil"]'), 'Tab'); await dp.sign(pg, sc); await dp.save(pg, sc)
                 await pg.locator(S(sm, '[data-arrive]')).click(); await pg.wait_for_timeout(1100)
                 await gd.resolve_internal(pg, sm, 'ENTREGADO', 'Encargada Montecaseros'); await pg.locator(S(sm, '[data-locfinish]')).click(); await pg.wait_for_timeout(1100)
@@ -78,7 +84,7 @@ async def main():
                 e = await open_trace(pg, ids['gb'], 0)
                 await pg.screenshot(path=os.path.join(SHOTS, 'ver_entrega_comercial.png'), full_page=True)
                 res('VE-04 entrega COMERCIAL: receptor, CUIL, email usado, firma visible, pedidos; SOLO LECTURA (ningún campo ni botón que modifique)',
-                    e and e['tabs'][0] == 'ENTREGA' and e['sig'] and 'Receptor VE' in e['txt'] and '20987654321' in e['txt'] and 'SOLO LECTURA' in e['txt'] and e['edit'] == 0, e and {'pestañas': e['tabs'], 'controles': e['edit']})
+                    e and e['tabs'][0] == 'ENTREGA' and e['sig'] and 'Receptor VE' in e['txt'] and '20987654326' in e['txt'] and 'SOLO LECTURA' in e['txt'] and e['edit'] == 0, e and {'pestañas': e['tabs'], 'controles': e['edit']})
                 # ===== SALIDA Y RECORRIDO (Administrador General) =====
                 await pg.evaluate('()=>{location.hash="#/recorridos"}'); await pg.wait_for_timeout(1600)
                 await pg.locator(f'#rcTable tr[data-rid="{ids["gb"]}"] [data-rcview]').click(); await pg.wait_for_timeout(1300)

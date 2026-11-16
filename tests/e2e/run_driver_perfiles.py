@@ -71,6 +71,14 @@ async def fill_id(pg, sid, cuil, png):
 async def save(pg, sid):
     await pg.locator(f'.drv-stop[data-s="{sid}"] [data-save]').click(); await pg.wait_for_timeout(1800)
     return await pg.evaluate(f'()=>{{const e=document.querySelector(\'.drv-stop[data-s="{sid}"] .shiperr\'); return e&&!e.hidden?e.textContent:null}}')
+# V4.28 (regla vigente de Dirección): documento faltante o inválido NO bloquea → advertencia «necesita revisión» con CORREGIR / CONTINUAR CON ENTREGA
+DOCWARN = lambda sid: f'()=>{{const e=document.querySelector(\'.drv-stop[data-s="{sid}"] [data-docwarn]\'); return e?e.innerText.replace(/\\s+/g," "):null}}'
+async def doc_warning(pg, sid):   # toca GUARDAR y devuelve la ADVERTENCIA de documento (o None)
+    await pg.locator(f'.drv-stop[data-s="{sid}"] [data-save]').click(); await pg.wait_for_timeout(1500)
+    return await pg.evaluate(DOCWARN(sid))
+async def doc_fix(pg, sid):   # CORREGIR DOCUMENTO (cierra la advertencia sin guardar)
+    b = pg.locator(f'.drv-stop[data-s="{sid}"] [data-docfix]')
+    if await b.count(): await b.click(); await pg.wait_for_timeout(300)
 async def main():
     if not os.path.isfile(os.path.join(DIST, 'index.html')): raise RuntimeError('falta el build demo en ' + DIST)
     os.makedirs(SHOTS, exist_ok=True); png = os.path.join(SHOTS, '_dni_sintetico.png'); open(png, 'wb').write(PNG)
@@ -130,15 +138,15 @@ async def main():
             await choose(pg, sc, 'ENTREGADO'); fc = await pg.evaluate(FORM, sc)
             await pg.locator(f'.drv-stop[data-s="{sc}"] [data-f="recv"]').fill('Responsable QA Dos'); await sign(pg, sc)
             await pg.locator(f'.drv-stop[data-s="{sc}"] [data-f="email"]').fill('receptor.dos@ejemplo.test')
-            e_no_cuil = await save(pg, sc)
-            await fill_id(pg, sc, '20987654321', png)
+            w_no_doc = await doc_warning(pg, sc); pend_no_doc = (await pg.evaluate(DB, ids['gb']))[0]['outcome']; await doc_fix(pg, sc)   # sin documento: ADVERTENCIA, no guarda
+            await fill_id(pg, sc, '20987654326', png)
             await pg.locator(f'.drv-stop[data-s="{sc}"] [data-save]').scroll_into_view_if_needed(); await pg.screenshot(path=os.path.join(SHOTS, 'gabriel_entrega_cliente.png'))
             e_c = await save(pg, sc); stg = await pg.evaluate(DB, ids['gb'])
             ag = await pg.evaluate(ASSOC, sc)
-            res('DRV-06 entrega comercial de Gabriel: pide email (opcional) y exige CUIL (además de nombre y firma), sin foto del DNI, y guarda', fc and fc['cuil'] and fc['email'] and fc['recv'] and fc['sign'] and not fc['cob'] and e_no_cuil and 'CUIL' in e_no_cuil
-                and e_c is None and stg[0]['outcome'] == 'ENTREGADO', {'form': fc, 'sin_cuil': e_no_cuil, 'parada': stg[0]})
+            res('DRV-06 entrega comercial de Gabriel: pide email (opcional) y documento; SIN documento ADVIERTE sin guardar (V4.28: no bloquea; se corrige o se continúa); exige nombre y firma; sin foto del DNI; guarda con CUIL válido', fc and fc['cuil'] and fc['email'] and fc['recv'] and fc['sign'] and not fc['cob'] and w_no_doc and 'necesita revisión' in w_no_doc and 'Falta el documento' in w_no_doc and pend_no_doc == 'PENDIENTE'
+                and e_c is None and stg[0]['outcome'] == 'ENTREGADO', {'form': fc, 'sin_documento': w_no_doc, 'pendiente_tras_advertencia': pend_no_doc, 'parada': stg[0]})
             res('DRV-16 Gabriel (INTERNO): entrega SIN foto del DNI (V4.19), CUIL y email vinculados y Recibido Conforme encolado (simulado)',
-                ag['cuil'] == '20987654321' and ag['email'] == 'receptor.dos@ejemplo.test' and not ag['dni'] and not ag['dniStored'] and ag['receipt'] and ag['job'] == 'RECIBIDO_CONFORME', ag)
+                ag['cuil'] == '20987654326' and ag['email'] == 'receptor.dos@ejemplo.test' and not ag['dni'] and not ag['dniStored'] and ag['receipt'] and ag['job'] == 'RECIBIDO_CONFORME', ag)
             # MONTECASEROS (ubicación interna): solo nombre y apellido + firma
             if await pg.locator(f'.drv-stop[data-s="{sm}"] [data-arrive]').count(): await pg.locator(f'.drv-stop[data-s="{sm}"] [data-arrive]').click(); await pg.wait_for_timeout(1500)
             await choose(pg, sm, 'ENTREGADO'); fm = await pg.evaluate(FORM, sm)
