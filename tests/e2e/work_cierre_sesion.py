@@ -58,9 +58,12 @@ async def main():
                 boton = await click_logout(pg); t = await wait_login(pg)
                 res('CS-E01 [REAL] OPERARIO · «Cerrar sesión» de su cabecera principal: vuelve al ingreso y una RECARGA posterior NO recupera la cuenta anterior',
                     t is not None and not await logged_in_after_reload(pg) and not await pg.evaluate(SESSION), {'segundos': t, 'boton': boton})
-                pg = await fresh('gabriel@okdespacho.demo', mob)
-                await pg.click('#drvPk'); await pg.wait_for_selector('#acLogout'); print('WORK_ACCOUNT_DIAG', await pg.evaluate('()=>({modals:document.querySelectorAll("#accountModal").length,buttons:[...document.querySelectorAll("#acLogout")].map(e=>{const r=e.getBoundingClientRect(),h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {x:r.x,y:r.y,w:r.width,h:r.height,hit:h&&h.outerHTML.slice(0,100)}})})'), flush=True); await click_front(pg, '#acLogout'); t = await wait_login(pg)
-                res('CS-E02 [REAL] PANEL DE CUENTA (abierto desde la pantalla del transportista) · «Cerrar sesión»: vuelve al ingreso sin recuperar la cuenta al recargar', t is not None and not await logged_in_after_reload(pg), {'segundos': t})
+                try:
+                    pg = await fresh('gabriel@okdespacho.demo', mob)
+                    await pg.click('#drvPk'); await pg.wait_for_selector('#acLogout'); print('WORK_ACCOUNT_DIAG', await pg.evaluate('()=>({modals:document.querySelectorAll("#accountModal").length,buttons:[...document.querySelectorAll("#acLogout")].map(e=>{const r=e.getBoundingClientRect(),h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {x:r.x,y:r.y,w:r.width,h:r.height,hit:h&&h.outerHTML.slice(0,100)}})})'), flush=True); await click_front(pg, '#acLogout'); t = await wait_login(pg)
+                    res('CS-E02 [REAL] PANEL DE CUENTA (abierto desde la pantalla del transportista) · «Cerrar sesión»: vuelve al ingreso sin recuperar la cuenta al recargar', t is not None and not await logged_in_after_reload(pg), {'segundos': t})
+                except Exception as ex:
+                    res('CS-E02 [REAL] PANEL DE CUENTA móvil · botón físicamente accesible y cierre', False, str(ex))
                 pg = await fresh('admin@okdespacho.demo')
                 boton = await click_logout(pg); t = await wait_login(pg)
                 res('CS-E03 [REAL] ADMINISTRACIÓN escritorio · «Cerrar sesión»', t is not None and not await logged_in_after_reload(pg), {'segundos': t})

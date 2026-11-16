@@ -31,8 +31,11 @@ jobs:
       - name: Logout browser acceptance (demo, failures injected)
         run: python tests/e2e/work_cierre_sesion.py dist-demo /tmp/logout-results
       - name: Driver signature regression (demo)
+        if: success() || failure()
         run: python tests/e2e/run_firma_cuil.py dist-demo
       - name: Delivery and route regression (demo)
+        if: success() || failure()
         run: python tests/e2e/run_ver_entrega_recorrido.py dist-demo
       - name: Commercial alarm regression (demo)
+        if: success() || failure()
         run: python tests/e2e/run_com_alarma.py dist-demo
