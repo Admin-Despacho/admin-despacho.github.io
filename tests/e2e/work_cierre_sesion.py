@@ -74,7 +74,7 @@ async def main():
                 pg = await fresh('gabriel@okdespacho.demo', mob)
                 boton = await click_logout(pg); t = await wait_login(pg)
                 res('CS-E05 [REAL] TRANSPORTISTA (móvil, con GPS) · «Cerrar sesión» de su pantalla', t is not None and not await logged_in_after_reload(pg), {'segundos': t, 'boton': boton})
-                pg = await fresh('operario@okdespacho.demo'); await base.builder(pg); await pg.wait_for_timeout(800)
+                pg = await fresh('operario@okdespacho.demo'); await base.builder(pg, load=False); await pg.wait_for_timeout(800)
                 boton = await click_logout(pg); t = await wait_login(pg)
                 res('CS-E14 [REAL] CONSTRUCTOR abierto · «Cerrar sesión» de su cabecera', t is not None and not await logged_in_after_reload(pg), {'segundos': t, 'boton': boton})
                 # ---- push SIMULADO: cada operación pendiente ----
