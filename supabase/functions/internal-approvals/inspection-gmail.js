@@ -26,7 +26,7 @@ export function inspectionGmailSender({ provider, gmailStore, claim, finish, aut
         const raw = base64url(buildMime({from:status.email,fromName:'OK Despacho',to,subject:j.subject,
           html:'<pre>' + esc(j.body) + '</pre>',attachments:[]}));
         posting = true;
-        const response = await provider.post(raw, token);
+        const response = await provider.post(raw, token, {idempotencyKey:'inspection:'+j.id+':'+to,beforeData:async()=>{if(!await authorized(j))throw Object.assign(new Error('ABORTED'),{code:'ABORTED'});}});
         const sent = provider.interpret(response);
         accepted++;
         posting = false;
@@ -35,7 +35,7 @@ export function inspectionGmailSender({ provider, gmailStore, claim, finish, aut
       await finish(j,lock,{status:'ENVIADO',sent_at:new Date().toISOString(),error:null});
       return {id:j.id,status:'ENVIADO'};
     } catch (e) {
-      const held = accepted > 0 || e.phase === 'AFTER_SEND' || (posting && (!e.status || e.status >= 500));
+      const held = accepted > 0 || e.phase === 'AFTER_SEND' || (posting && e.phase !== 'BEFORE_SEND' && (!e.status || e.status >= 500));
       const error = String(e.message || e).slice(0,400);
       if (held) {
         // No liberar la reserva: también cubre caída después del envío y fallo de auditoría/DB.

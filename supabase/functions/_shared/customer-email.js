@@ -78,7 +78,7 @@ export function customerEmail({ kind, stop }) {
 /** store: { listJobs(q), stopFor(job), updateJob(id, patch) } — idempotente por job; una falla no revierte la entrega */
 export async function sendCustomerEmails({ store, provider, onlyIds, inlineLogo }) {
   const out = [];
-  for (const j of await store.listJobs({ statuses: ['QUEUED', 'ERROR'], ids: onlyIds })) {
+  for (const j of (await store.listJobs({ statuses: ['QUEUED', 'ERROR'], ids: onlyIds })).slice(0,provider.batchLimit?await provider.batchLimit():Infinity)) {
     const stop = await store.stopFor(j);
     let mail;
     try { mail = j.kind === 'RECIBIDO_CONFORME' ? receiptEmail({ receipt: await store.receiptFor(j), stop, inlineLogo }) : customerEmail({ kind: j.kind, stop }); }

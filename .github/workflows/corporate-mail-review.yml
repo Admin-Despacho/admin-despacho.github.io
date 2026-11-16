@@ -1,0 +1,36 @@
+name: Corporate mail review without deployment
+on:
+  push:
+    branches: ["work/corporate-mail-20261116"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - run: npx vitest run
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.2.12
+      - name: Check four Edge entrypoints
+        run: deno check --config supabase/functions/deno.json supabase/functions/comm-dispatcher/index.ts supabase/functions/internal-approvals/index.ts supabase/functions/commercial-reports/index.ts supabase/functions/password-recovery/index.ts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install playwright==1.51.0 openpyxl==3.1.5
+          python -m playwright install --with-deps chromium
+      - run: npx vite build --outDir dist-demo
+        env:
+          VITE_SUPABASE_URL: ""
+          VITE_SUPABASE_ANON_KEY: ""
+      - name: Mobile commercial mail settings (demo)
+        run: python tests/e2e/run_corporate_mail_ui.py dist-demo

@@ -1,7 +1,7 @@
 // Edge Function "commercial-reports": informe comercial de Cristian Torres.
 // Ver/descargar: can_view_commercial_transport_reports · Generar/enviar/configurar: can_manage_commercial_transport_reports
 // Programado (cron): solo con el secreto CRON_SECRET en el header x-cron-secret.
-import { hasPerm } from '../_shared/rules.js';
+import { hasPerm } from './mail-legacy-rules.js';
 import { buildReport, period } from '../_shared/report-engine.js';
 
 import { json, withCors } from '../_shared/http.js';
@@ -19,6 +19,12 @@ async function handleRaw(req, deps) {
   let body; try { body = await req.json(); } catch (e) { return json(400, { error: 'JSON inválido.' }); }
   const { action } = body || {};
 
+  if(action==='drain_corporate'){
+    if(!deps.cronSecret||req.headers.get('x-cron-secret')!==deps.cronSecret)return json(401,{error:'No autorizado.'});
+    if(!await deps.smtpModeActive())return json(200,{skipped:true});
+    const results=await deps.service.drainQueued();
+    await deps.audit({actor_id:null,action:'REPORT_CORPORATE_QUEUE',target_type:'email',after:{results}});return json(200,{results});
+  }
   if (action === 'scheduled') {
     const secret = req.headers.get('x-cron-secret') || '';
     if (!deps.cronSecret || secret !== deps.cronSecret) return json(401, { error: 'No autorizado.' });

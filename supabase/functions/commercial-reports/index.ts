@@ -1,3 +1,4 @@
+import { routedMailProvider } from '../_shared/corporate-mail.js';
 // Edge Function "commercial-reports" en Supabase (Deno).
 // Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (automáticos), CRON_SECRET, RESEND_API_KEY, REPORT_FROM
 import { loadCristianRoutes } from '../_shared/report-loader.js';
@@ -62,6 +63,7 @@ const store = {
   },
   async savePdf(id: string, bytes: Uint8Array) { const path = id + '.pdf'; must(await admin.storage.from(BUCKET).upload(path, bytes, { contentType: 'application/pdf', upsert: false })); return path; },
   async loadPdf(id: string) { const { data, error } = await admin.storage.from(BUCKET).download(id + '.pdf'); if (error) throw new Error(error.message); return new Uint8Array(await data.arrayBuffer()); },
+  async listPendingMail(limit: number) { return must(await admin.from('report_emails').select('*').in('status',['QUEUED','ERROR']).lt('retry_count',5).order('queued_at').limit(limit)); },
   async findEmail(key: string) { return must(await admin.from('report_emails').select('*').eq('idempotency_key', key).maybeSingle()); },
   async saveEmail(e: any) { return must(await admin.from('report_emails').insert(e).select().single()); },
   async updateEmail(id: string, patch: any) { must(await admin.from('report_emails').update(patch).eq('id', id)); },
@@ -70,7 +72,7 @@ const store = {
 };
 
 // Proveedor de email: Resend (https://resend.com). Cambiable por otro con el mismo contrato send().
-const provider = {
+const legacyMailProvider = {
   async send(m: any) {
     const toB64 = (b: Uint8Array) => { let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); };
     const r = await fetch('https://api.resend.com/emails', {
@@ -83,14 +85,17 @@ const provider = {
   }
 };
 
+const provider=routedMailProvider(admin,legacyMailProvider,{connectTls:(o:Deno.ConnectTlsOptions)=>Deno.connectTls(o),scope:'informes'});
 const service = createReportService({ store, pdfMaker: reportPdf, provider });
 const deps = {
+  smtpModeActive:async()=>{const x=await admin.rpc('comm_mail_runtime');return !x.error&&x.data?.provider==='SMTP';},
   cronSecret: Deno.env.get('CRON_SECRET') ?? '', store, service, now: () => Date.now(),
   async getUserFromJwt(jwt: string) { const { data } = await admin.auth.getUser(jwt); return data?.user ? { id: data.user.id } : null; },
   async getProfile(id: string) { return must(await admin.from('profiles').select('*').eq('id', id).maybeSingle()); },
   async audit(e: any) { await admin.from('audit_log').insert(e); }
 };
 
+await admin.rpc('comm_mail_register',{p_component:'commercial-reports'});
 Deno.serve(async (req) => {
   try { return await handle(req, deps); }
   catch (e) { return json(500, { error: String((e as Error).message || e), code: 'SERVER_ERROR' }); }

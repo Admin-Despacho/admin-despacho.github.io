@@ -37,10 +37,10 @@ export async function openComms(api, me, frame) {
   if (qs.get('r') === 'ok') st.flash = { text: 'Gmail conectado. El token quedó guardado en el servidor (nunca en este navegador).' };
   if (qs.get('r') === 'error') st.flash = { err: true, text: 'No se pudo conectar Gmail (' + (qs.get('m') || 'error') + '). Probá de nuevo.' };
   const say = (m) => { const box = w.querySelector('#cmMsg'); if (box) { box.className = 'msg ' + (m.err ? 'err' : 'ok'); box.textContent = m.text; box.hidden = false; box.scrollIntoView({ block: 'nearest' }); } };
-  const tabs = () => '<div class="uact comms-tabs" role="tablist">' + [['MSGS', 'COMUNICADOS'], ['COLAB', 'COLABORADORES'], ['GMAIL', 'CONEXIÓN GMAIL']]
+  const tabs = () => '<div class="uact comms-tabs" role="tablist">' + [['MSGS', 'COMUNICADOS'], ['COLAB', 'COLABORADORES'], ['GMAIL', 'CONEXIÓN DE CORREO']]
     .map(([k, t]) => '<button class="btn ' + (st.tab === k ? 'dark' : 'soft') + '" type="button" role="tab" data-ctab="' + k + '" aria-selected="' + (st.tab === k) + '">' + t + '</button>').join('') + '</div>';
   const shell = inner => { w.innerHTML = '<div class="grid comms"><section class="card span12"><div class="section-title"><h2>Comunicaciones internas</h2><span class="tag">' +
-      esc(api.mode === 'online' ? 'Correo por Gmail · WhatsApp manual' : 'MODO DEMO: Gmail y envíos SIMULADOS') + '</span></div>' + tabs() +
+      esc(api.mode === 'online' ? 'Correo automático · WhatsApp manual' : 'MODO DEMO: Gmail y envíos SIMULADOS') + '</span></div>' + tabs() +
       '<div class="msg" id="cmMsg" hidden></div>' + inner + '</section></div>';
     w.querySelectorAll('[data-ctab]').forEach(b => b.onclick = () => { st.tab = b.dataset.ctab; st.edit = null; st.detail = null; draw(); });
     if (st.flash) { say(st.flash); st.flash = null; } };
@@ -72,6 +72,9 @@ export async function openComms(api, me, frame) {
   // ===================== CONEXIÓN GMAIL =====================
   async function drawGmail() {
     let g; try { g = await api.commsGmailStatus(); } catch (e) { shell('<div class="msg err">No se pudo consultar la conexión: ' + esc(e.message) + ' <button class="btn soft" type="button" data-retry>REINTENTAR</button></div>'); w.querySelector('[data-retry]').onclick = () => draw(); return; }
+    if(g.provider==='SMTP'){
+      shell('<div class="grid"><section class="card span6"><h3>Correo corporativo</h3><p>Remitente: <b>'+esc(g.email)+'</b></p><p>Estado: '+(g.connected?'Conexión verificada':'Requiere revisar conexión o credencial')+'</p><p class="rp-note">Los envíos programados usan el correo corporativo. Las credenciales se administran en el servidor.</p><p class="rp-note">Cupo compartido de la app: '+esc(g.hourly_cap)+' intentos por hora. No incluye los mensajes enviados por Supabase Auth.</p></section><section class="card span6"><h3>Última ejecución</h3><p>'+esc(g.last_dispatch?dt(g.last_dispatch.at)+' · '+g.last_dispatch.status:'Sin ejecuciones registradas')+'</p></section></div>');return;
+    }
     const d = g.last_dispatch, fresh = d && Date.now() - Date.parse(d.at) < 20 * 60e3, mg = can(me, 'comms.gmail_manage');
     const conn = !g.connected ? pill('warn', 'No conectada') : g.needs_reconnect ? pill('bad', 'Requiere reconexión') : pill('ok', 'Conectada');
     const auto = g.mode === 'demo' ? pill('warn', 'Simulada (demo)') : !d ? pill('bad', 'No operativa: el programador del servidor nunca se ejecutó (falta configurarlo)')
@@ -101,7 +104,7 @@ export async function openComms(api, me, frame) {
     catch (e) { shell('<div class="msg err">No se pudieron cargar los comunicados: ' + esc(e.message) + ' <button class="btn soft" type="button" data-retry>REINTENTAR</button></div>'); w.querySelector('[data-retry]').onclick = () => draw(); return; }
     if (st.edit) return drawEditor(st.edit === 'NEW' ? null : ms.find(m => m.id === st.edit), cs, g);
     if (st.detail) return drawDetail(ms.find(m => m.id === st.detail), cs);
-    const warnConn = !g.connected || g.needs_reconnect ? '<p class="msg warn" id="cmNoGmail">Gmail ' + (g.needs_reconnect ? 'requiere reconexión' : 'no está conectado') + ': los comunicados se pueden redactar y compartir por WhatsApp, pero no programar envíos por correo.</p>' : '';
+    const warnConn = !g.connected || g.needs_reconnect ? '<p class="msg warn" id="cmNoGmail">El correo ' + (g.needs_reconnect ? 'requiere reconexión' : 'no está conectado') + ': los comunicados se pueden redactar y compartir por WhatsApp, pero no programar envíos por correo.</p>' : '';
     shell(warnConn + (can(me, 'comms.compose') ? '<div class="uact"><button class="btn go" type="button" id="cmNew">+ NUEVO COMUNICADO</button></div>' : '') + '<div class="comms-list" id="cmList">' +
       (ms.map(m => { if (m.system_kind) return sysItem(m);
         const [c, t] = MSTATE[m.status] || ['warn', m.status], nx = m.status === 'ACTIVO' ? nextRuns(m.schedule, Date.now(), 1)[0] : null, n = resolveRecipients(cs, m.selection).list.length;
@@ -130,7 +133,7 @@ export async function openComms(api, me, frame) {
       if (a === 'activate') return confirmActivate(m, cs);
       if (a === 'pause') return guard(() => api.commsPause(m.id), 'Pausado. Al reanudar NO se envía lo que venció durante la pausa.');
       if (a === 'resume') return guard(() => api.commsResume(m.id), 'Reanudado. Sigue desde el próximo horario (no se envían de golpe los vencidos).');
-      if (a === 'cancel') { if (await modal(w, 'Cancelar envíos futuros', '<p>Se cancelan los envíos pendientes y futuros de <b>' + esc(m.internal_name) + '</b>. Lo que Gmail ya aceptó no se puede retirar. El historial se conserva.</p>', { okText: 'CANCELAR ENVÍOS', cancelText: 'VOLVER' }))
+      if (a === 'cancel') { if (await modal(w, 'Cancelar envíos futuros', '<p>Se cancelan los envíos pendientes y futuros de <b>' + esc(m.internal_name) + '</b>. Lo que el proveedor ya aceptó no se puede retirar. El historial se conserva.</p>', { okText: 'CANCELAR ENVÍOS', cancelText: 'VOLVER' }))
         return guard(() => api.commsCancel(m.id), 'Envíos cancelados. El historial se conserva.'); }
     });
   }
@@ -139,7 +142,7 @@ export async function openComms(api, me, frame) {
   function sysItem(m) {
     return '<article class="card comms-item" data-mid="' + esc(m.id) + '" data-system="1"><div class="section-title"><h3>' + esc(m.internal_name) + '</h3>' +
       pill('ok', 'Automático') + ' ' + pill(...(MSTATE[m.status] || ['warn', m.status])) + '</div>' +
-      '<p class="rp-note">Envía por Gmail los PDF de las hojas del día (un correo por hoja y destinatario). Horario, destinatarios y canal: Configuración → F · PDF y envíos.</p><div class="uact">' +
+      '<p class="rp-note">Envía por el proveedor de correo activo los PDF de las hojas del día (un correo por hoja y destinatario). Horario, destinatarios y canal: Configuración → F · PDF y envíos.</p><div class="uact">' +
       '<button class="btn soft" type="button" data-act="detail">HISTORIAL</button>' +
       (can(me, 'comms.schedule') && m.status === 'ACTIVO' ? '<button class="btn soft" type="button" data-act="pause">PAUSAR</button>' : '') +
       (can(me, 'comms.schedule') && m.status === 'PAUSADO' ? '<button class="btn dark" type="button" data-act="resume">REANUDAR</button>' : '') + '</div></article>';
@@ -177,7 +180,7 @@ export async function openComms(api, me, frame) {
       '<a class="btn soft" id="waOpen" href="https://wa.me/?text=' + encodeURIComponent(text) + '" target="_blank" rel="noopener">ABRIR WHATSAPP CON EL TEXTO</a></div>' +
       '<ol class="rp-note"><li>Compartí o copiá el mensaje (y los adjuntos).</li><li>En WhatsApp elegí el grupo.</li><li>Revisá y tocá Enviar.</li></ol>' +
       '<textarea class="ed comms-wa" id="waText" readonly rows="8">' + esc(text) + '</textarea><p class="msg" id="waMsg" hidden></p>' +
-      (can(me, 'comms.compose') ? '<hr><p><b>Registro manual</b> (separado de los correos por Gmail): copiar, abrir WhatsApp o usar «compartir» NO lo marca solo.</p><button class="btn dark" type="button" id="waRegister">REGISTRAR COMO COMPARTIDO POR WHATSAPP</button>' : '');
+      (can(me, 'comms.compose') ? '<hr><p><b>Registro manual</b> (separado de los correos automáticos): copiar, abrir WhatsApp o usar «compartir» NO lo marca solo.</p><button class="btn dark" type="button" id="waRegister">REGISTRAR COMO COMPARTIDO POR WHATSAPP</button>' : '');
     const p = modal(w, 'Compartir por WhatsApp', body, { wide: true });
     const box = [...w.querySelectorAll('.comms-modal')].pop(), note = t => { const e = box.querySelector('#waMsg'); e.hidden = false; e.className = 'msg ok'; e.textContent = t; };
     const s = box.querySelector('#waShare'); if (s) s.onclick = async () => { try { await navigator.share(canBoth ? { text, files } : { text }); note(canBoth ? 'Listo el diálogo de compartir. Recordá: compartirlo no lo registra.' : 'Mensaje compartido. Ahora compartí o adjuntá los archivos por separado.'); } catch (e) { if (e && e.name !== 'AbortError') note('No se pudo abrir «compartir»: usá COPIAR MENSAJE.'); } };
@@ -198,14 +201,14 @@ export async function openComms(api, me, frame) {
     const nx = m.status === 'ACTIVO' ? nextRuns(m.schedule, Date.now(), 5) : [], rs = can(me, 'comms.schedule');
     const count = r => Object.entries(r.deliveries.reduce((a, d) => (a[d.status] = (a[d.status] || 0) + 1, a), {})).map(([k, v]) => STATUS_LABEL[k] + ': ' + v).join(' · ');
     shell('<div class="uact"><button class="btn soft" type="button" id="cmBack">← VOLVER</button></div><h3>' + esc(m.internal_name) + ' ' + pill(...(MSTATE[m.status] || ['warn', m.status])) + '</h3>' +
-      '<p class="rp-note">"Enviado — aceptado por Gmail" significa que Gmail lo recibió para enviarlo; no significa entregado ni leído.</p>' +
+      '<p class="rp-note">"Enviado — aceptado por el proveedor" significa que el proveedor lo recibió para enviarlo; no significa entregado ni leído.</p>' +
       '<h4>Próximos envíos</h4>' + (nx.length ? '<ul id="dtNext">' + nx.map(t => '<li>' + esc(fmtLocal(t)) + ' (hora de Argentina)</li>').join('') + '</ul>' : '<p id="dtNext">' + (m.status === 'PAUSADO' ? 'Pausado: no hay envíos hasta reanudar.' : 'No hay envíos programados.') + '</p>') +
       '<h4>Ejecuciones y resultados por destinatario</h4>' + (runs.map(r => '<details class="card comms-run" data-rid="' + esc(r.id) + '"' + (r.kind === 'PRUEBA' || r === runs[0] ? ' open' : '') + '><summary><b>' + esc(dt(r.scheduled_for)) + '</b> · ' + (r.kind === 'PRUEBA' ? 'Prueba' : r.kind === 'HOJAS' ? 'Hoja' : 'Programado') + ' · ' +
         pill(...(RSTATE[r.status] || ['warn', r.status])) + ' · ' + esc(count(r)) + '</summary>' + (r.note ? '<p class="msg warn">' + esc(r.note) + '</p>' : '') + '<p class="rp-note">Copia usada: «' + esc(r.snapshot && r.snapshot.subject) + '»' + (r.kind === 'HOJAS' ? ' (PDF de la hoja adjunto)' : ' (versión ' + esc(r.snapshot && r.snapshot.message_version || '—') + ')') + '</p>' +
         '<div class="tscroll"><table class="table"><thead><tr><th>Destinatario</th><th>Estado</th><th>Intentos</th><th>Detalle</th><th></th></tr></thead><tbody>' +
         r.deliveries.map(d => '<tr data-did="' + esc(d.id) + '"><td>' + esc(d.name || '') + '<br><small>' + esc(d.email || '') + '</small></td><td>' + pill(DSTATE[d.status] || 'warn', STATUS_LABEL[d.status] || d.status) + '</td><td>' + (d.attempts || 0) + '</td><td><small>' +
-          esc([d.sent_at && (d.sent_at_source === 'ESTIMADA_INICIO_INTENTO' ? 'Envío estimado (inicio del intento): ' : 'Aceptado por Gmail: ') + dt(d.sent_at),
-            d.confirmed_at && 'Confirmado manualmente: ' + dt(d.confirmed_at), d.gmail_message_id && 'Id Gmail: ' + d.gmail_message_id, d.next_attempt_at && d.status === 'ERROR' && d.retryable && 'Próximo intento: ' + dt(d.next_attempt_at), d.reason, d.last_error].filter(Boolean).join(' · ')) + '</small></td><td>' +
+          esc([d.sent_at && (d.sent_at_source === 'ESTIMADA_INICIO_INTENTO' ? 'Envío estimado (inicio del intento): ' : 'Aceptado por el proveedor: ') + dt(d.sent_at),
+            d.confirmed_at && 'Confirmado manualmente: ' + dt(d.confirmed_at), d.gmail_message_id && 'Referencia del proveedor: ' + d.gmail_message_id, d.next_attempt_at && d.status === 'ERROR' && d.retryable && 'Próximo intento: ' + dt(d.next_attempt_at), d.reason, d.last_error].filter(Boolean).join(' · ')) + '</small></td><td>' +
           (d.status === 'POR_VERIFICAR' && rs ? '<div class="uact"><button class="btn soft" type="button" data-vok>FIGURA EN ENVIADOS</button><button class="btn soft" type="button" data-vretry>NO FIGURA: REINTENTAR</button></div>' : '') +
           (d.status === 'VENCIDO' && rs ? '<div class="uact"><button class="btn soft" type="button" data-vlate>ENVIAR IGUAL (MANUAL)</button></div>' : '') + '</td></tr>').join('') +
         '</tbody></table></div></details>').join('') || '<p>Todavía no hubo ejecuciones.</p>') +
@@ -216,7 +219,7 @@ export async function openComms(api, me, frame) {
     w.querySelectorAll('[data-vok]').forEach(b => b.onclick = () => guard(() => api.commsResolveVerify(Number(b.closest('tr').dataset.did) || b.closest('tr').dataset.did, 'CONFIRMADO_ENVIADO'), 'Marcado como enviado (confirmado en Enviados).'));
     w.querySelectorAll('[data-vlate]').forEach(b => b.onclick = async () => { if (await modal(w, 'Enviar un vencido', '<p>Este envío no salió a tiempo (pausa, desconexión o interrupción). Enviarlo ahora es una decisión manual: el destinatario lo recibirá tarde.</p>', { okText: 'ENVIAR AHORA', cancelText: 'CANCELAR' }))
       guard(() => api.commsResolveVerify(Number(b.closest('tr').dataset.did) || b.closest('tr').dataset.did, 'REINTENTAR'), 'Habilitado: se envía en la próxima ejecución del programador.'); });
-    w.querySelectorAll('[data-vretry]').forEach(b => b.onclick = async () => { if (await modal(w, 'Reintentar envío', '<p>Reintentá SOLO si comprobaste que el correo NO figura en «Enviados» de la cuenta Gmail. Si llegó a enviarse, el destinatario lo recibiría dos veces.</p>', { okText: 'REINTENTAR', cancelText: 'CANCELAR' }))
+    w.querySelectorAll('[data-vretry]').forEach(b => b.onclick = async () => { if (await modal(w, 'Reintentar envío', '<p>Reintentá SOLO después de verificar con Administración que el proveedor NO lo aceptó. En SMTP, consultar los registros del servidor; no se presupone que exista una copia en «Enviados». Si llegó a enviarse, el destinatario lo recibiría dos veces.</p>', { okText: 'REINTENTAR', cancelText: 'CANCELAR' }))
       guard(() => api.commsResolveVerify(Number(b.closest('tr').dataset.did) || b.closest('tr').dataset.did, 'REINTENTAR'), 'Vuelve a la cola.'); });
   }
 

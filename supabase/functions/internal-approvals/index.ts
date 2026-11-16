@@ -1,3 +1,4 @@
+import { routedMailProvider, mailChannel } from '../_shared/corporate-mail.js';
 // Edge Function "internal-approvals". Secrets: CRON_SECRET, RESEND_API_KEY, REPORT_FROM, APP_URL.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { json } from '../_shared/http.js';
@@ -41,16 +42,18 @@ const inspStore = {
   },
   async update(id: number, p: Record<string, unknown>) { must(await admin.from('vehicle_inspection_email_requests').update(p).eq('id', id)); },
 };
-const provider = { async send(m: any) {
+const legacyMailProvider = { async send(m: any) {
   const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { authorization: 'Bearer ' + Deno.env.get('RESEND_API_KEY'), 'content-type': 'application/json', 'idempotency-key': m.idempotencyKey },
     body: JSON.stringify(resendBody(m, Deno.env.get('REPORT_FROM'))) });
   const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error('Resend ' + r.status + ': ' + (j.message ?? 'error')); return { id: j.id };
 } };
+const provider=routedMailProvider(admin,legacyMailProvider,{connectTls:(o: Deno.ConnectTlsOptions)=>Deno.connectTls(o),scope:'operaciones'});
 // Reutiliza la conexión y el control de cuota de Comunicaciones, sin ejecutar su despachador.
-const gmailStore = pgStore(admin);
-const gmail = gmailProvider(gmailStore, { clientId: Deno.env.get('GOOGLE_CLIENT_ID') ?? '', clientSecret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '' });
+const originalGmailStore = pgStore(admin);
+const originalGmail = gmailProvider(originalGmailStore, { clientId: Deno.env.get('GOOGLE_CLIENT_ID') ?? '', clientSecret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '' });
 const sendInspectionGmail = inspectionGmailSender({
-  provider: gmail, gmailStore,
+  provider: {async prepare(){const c=await mailChannel(admin,{legacyStore:originalGmailStore,legacyProvider:originalGmail,connectTls:(o:Deno.ConnectTlsOptions)=>Deno.connectTls(o),scope:'inspecciones'});return {channel:c,token:await c.provider.prepare(false)};},async post(raw:any,t:any,opts:any){return t.channel.provider.post(raw,t.token,opts);},interpret:r=>originalGmail.interpret(r)},
+  gmailStore:{...originalGmailStore,async gmailStatus(){const r=await admin.rpc('comm_mail_runtime');if(r.error)throw Error('MAIL_CONFIG');return r.data;}} ,
   async claim(j: any, lock: string) {
     let q = admin.from('vehicle_inspection_email_requests').update({status:'ERROR', error:lock}).eq('id',j.id).eq('status',j.status).eq('retry_count',j.retry_count);
     q = j.error === null ? q.is('error',null) : q.eq('error',j.error);
@@ -68,6 +71,7 @@ const sendInspectionGmail = inspectionGmailSender({
   async audit(j: any, action: string, after: any) { must(await admin.from('audit_log').insert({actor_id:j.requested_by,action,target_type:'inspection_email',target_id:String(j.id),after})); },
 });
 const deps = {
+  mailBatchLimit:()=>provider.batchLimit(),
   cronSecret: Deno.env.get('CRON_SECRET') ?? '', appUrl: (Deno.env.get('APP_URL') ?? '').replace(/\/$/, ''), store, customerStore, sheetStore, inspStore, provider, sendInspectionGmail,
   inlineLogo: inlineLogoFrom(logoModule),   // RC4.1: logo del Recibido Conforme embebido por CID (no depende de APP_URL)
   async sheetVia() { const r = must(await admin.from('notification_settings').select('sheet_email_via').eq('id', 'DEFAULT').single()) as any; return r && r.sheet_email_via || 'RESEND'; },
@@ -102,7 +106,7 @@ const deps = {
         }
       }
     }
-    const jobs = must(await admin.from('vehicle_service_email_jobs').select('*, vehicle:vehicles(name,plate,current_km,last_service_km,last_service_date,service_interval_km,habitual_driver_id)').in('status', ['QUEUED','ERROR']).lt('retry_count', 5).order('queued_at').limit(200)) as any[];
+    const jobs = must(await admin.from('vehicle_service_email_jobs').select('*, vehicle:vehicles(name,plate,current_km,last_service_km,last_service_date,service_interval_km,habitual_driver_id)').in('status', ['QUEUED','ERROR']).lt('retry_count', 5).order('queued_at').limit(Math.min(200,await provider.batchLimit()))) as any[];
     for (const j of jobs) {
       const v = j.vehicle || {};
       const currentCycle = Number(v.last_service_km ?? 0);
@@ -136,4 +140,5 @@ const deps = {
   async setSettings(s: any) { must(await admin.from('internal_route_notification_settings').update(s).eq('id', 'DEFAULT')); },
   async audit(e: any) { await admin.from('audit_log').insert(e); }
 };
+await admin.rpc('comm_mail_register',{p_component:'internal-approvals'});
 Deno.serve(async (req) => { try { return await handle(req, deps); } catch (e) { return json(500, { error: String((e as Error).message || e), code: 'SERVER_ERROR' }); } });

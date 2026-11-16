@@ -1,5 +1,5 @@
 // Edge Function "internal-approvals": envío de emails de rutas internas (cola idempotente), reintento y configuración.
-import { hasPerm } from '../_shared/rules.js';
+import { hasPerm } from './mail-legacy-rules.js';
 import { sendQueuedEmails } from '../_shared/internal-route.js';
 import { sendCustomerEmails } from '../_shared/customer-email.js';
 
@@ -39,7 +39,7 @@ async function handleRaw(req, deps) {
     if (deps.sheetVia && (await deps.sheetVia()) === 'GMAIL') return json(200, { results: [], skipped: 'GMAIL' });
     if (deps.queueSheetEmails) await deps.queueSheetEmails();
     const out = [];
-    for (const j of await deps.sheetStore.listJobs()) {
+    for (const j of (await deps.sheetStore.listJobs()).slice(0,deps.mailBatchLimit?await deps.mailBatchLimit():Infinity)) {
       try {
         const pdf = await deps.sheetStore.pdfFor(j);
         const r = await deps.provider.send({ to: j.recipient, idempotencyKey: j.idempotency_key, subject: 'OK Despacho · Hoja ' + pdf.number + ' (v' + j.route_version + ')',
@@ -58,7 +58,7 @@ async function handleRaw(req, deps) {
     if (me && !activeInspectorSender(me)) return json(403, { error: 'Sin permiso.' });
     if (!deps.inspStore) return json(200, { results: [] });
     const out = [];
-    for (const j of await deps.inspStore.pending(me ? me.id : null, Array.isArray(body.request_ids) ? body.request_ids : null)) {
+    for (const j of (await deps.inspStore.pending(me ? me.id : null, Array.isArray(body.request_ids) ? body.request_ids : null)).slice(0,deps.mailBatchLimit?await deps.mailBatchLimit():Infinity)) {
       if (me && j.requested_by !== me.id) continue;   // con usuario: SOLO sus propios pedidos (aunque el almacén devolviera otros)
       if (!me && !activeInspectorSender(await deps.getProfile(j.requested_by))) continue;   // cron: no se envía en nombre de un solicitante que ya no está ACTIVO (queda intacto)
       // Gmail exclusivo de Inspecciones; nunca cae al proveedor de otros correos.
