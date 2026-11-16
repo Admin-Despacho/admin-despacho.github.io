@@ -360,6 +360,7 @@ async function route() {
     show('#noPanel');
     if ((hasPerm(me, 'com.request') || hasPerm(me, 'com.approve')) && !hasPerm(me, 'routes.view_assigned')) {   // Comercial / aprobador sin panel: DIRECTO a Autorizaciones (optimizado para celular)
       const chip = $('#np-who'); chip.innerHTML = esc(me.full_name) + ' · <b>' + esc(ROLE_LABEL[me.role] || me.role) + '</b>'; chip.onclick = () => openAccount(api, me, logout);
+      $('#np-logout').onclick = logout;
       const { mountComHome } = await import('./online/com-ui.js'); await mountComHome(api, me);
       return;
     }
