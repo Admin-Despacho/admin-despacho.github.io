@@ -1,7 +1,7 @@
 name: Permiso y reenvios QA
 on:
   push:
-    branches: [main, release/permiso-reenvios-20261028]
+    branches: [main, release/permiso-reenvios-20261028, qa/orden-migraciones-permisos]
 permissions:
   contents: read
 jobs:
