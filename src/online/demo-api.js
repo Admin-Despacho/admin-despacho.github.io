@@ -38,7 +38,15 @@ export function demoSeed() {
       u('u-lucas', 'Lucas Méndez', 'lucas@okdespacho.demo', 'TRANSPORTISTA_INTERNO', 'DESHABILITADO', [], 2),
       u('u-cristian', 'Cristian Torres', 'cristian@okdespacho.demo', 'TRANSPORTISTA', 'ACTIVO', ['CT-ESTE', 'CT-ALR'], 2, '261 555-0202'),
       u('u-diego', 'Diego Ríos', 'diego@okdespacho.demo', 'TRANSPORTISTA', 'ACTIVO', ['CT-ALR'], 3),
-      u('u-invitada', 'Paula Invitada', 'paula@okdespacho.demo', 'DESPACHO', 'INVITACION_PENDIENTE', [], 7)
+      u('u-invitada', 'Paula Invitada', 'paula@okdespacho.demo', 'DESPACHO', 'INVITACION_PENDIENTE', [], 7),
+      // Autorizaciones comerciales (demo): Comerciales por sucursal/cartera, aprobador Wilfredo (permiso por usuario) y Administradores Generales
+      u('u-com-mc', 'Comercial Montecaseros', 'comercial.montecaseros@okdespacho.demo', 'COMERCIAL', 'ACTIVO', [], 8),
+      u('u-com-sj', 'Comercial San Juan', 'comercial.sanjuan@okdespacho.demo', 'COMERCIAL', 'ACTIVO', [], 8),
+      u('u-com-hernan', 'Hernán Arcar', 'hernan@okdespacho.demo', 'COMERCIAL', 'ACTIVO', [], 8),
+      Object.assign(u('u-wilfredo', 'Wilfredo Guzmán', 'wilfredo@okdespacho.demo', 'SOLO_LECTURA', 'ACTIVO', [], 8), { permission_overrides: { 'com.approve': true } }),
+      u('u-franco', 'Franco Gutiérrez', 'franco@okdespacho.demo', 'ADMIN', 'ACTIVO', [], 8),
+      u('u-gabriela', 'Gabriela Brandani', 'gabriela@okdespacho.demo', 'ADMIN', 'ACTIVO', [], 8),
+      u('u-operario', 'Operario Depósito', 'operario@okdespacho.demo', 'OPERARIO_DEPOSITO', 'ACTIVO', [], 8)
     ],
     // Hojas de prueba (la publicación real llega en Fase 2)
     routes: [

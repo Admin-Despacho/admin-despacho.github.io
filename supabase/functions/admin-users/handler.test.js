@@ -71,7 +71,7 @@ Deno.test('F05 admin crea usuario por invitación + perfil + auditoría USER_CRE
   eq(r.status, 200); eq(db.invited[0].email, 'nuevo@ok.test'); eq(r.body.user.status, 'INVITACION_PENDIENTE');
   ok(db.profiles.some(p => p.email === 'nuevo@ok.test')); eq(lastAudit(db).action, 'USER_CREATED');
 });
-Deno.test('F06 email duplicado → 409', async () => { const { deps } = fakeDeps(); eq((await read(await call(deps, 'tok-adm', { action: 'create', email: 'gabriel@ok.test', full_name: 'X', role: 'DESPACHO' }))).status, 409); });
+Deno.test('F06 email duplicado → 409', async () => { const { deps } = fakeDeps(); eq((await read(await call(deps, 'tok-adm', { action: 'create', email: 'gabriel@ok.test', full_name: 'X', role: 'OPERARIO_DEPOSITO' }))).status, 409); });
 Deno.test('F07 transportista externo sin carrier → 400', async () => {
   const { deps } = fakeDeps(); const r = await read(await call(deps, 'tok-adm', { action: 'create', email: 'z@ok.test', full_name: 'Z', role: 'TRANSPORTISTA', carriers: [] })); eq(r.status, 400); eq(r.body.code, 'CARRIER_REQUIRED');
 });
@@ -172,7 +172,7 @@ Deno.test('F1.1-09 Cambio de carriers falla → responde error y conserva los an
 });
 Deno.test('F1.1-10 Falla el perfil después de invitar → se borra el usuario de Auth (sin huérfano) y no hay USER_CREATED', async () => {
   const { deps, db } = fakeDeps({ createProfileAtomic: async () => { throw new Error('insert profile falló'); } });
-  const r = await read(await call(deps, 'tok-adm', { action: 'create', email: 'nuevo@ok.test', full_name: 'Nuevo', role: 'DESPACHO' }));
+  const r = await read(await call(deps, 'tok-adm', { action: 'create', email: 'nuevo@ok.test', full_name: 'Nuevo', role: 'OPERARIO_DEPOSITO' }));
   eq(r.status, 500); eq(db.authDeleted, ['u1']); ok(!('u1' in db.authEmails));
   ok(!db.audit.some(a => a.action === 'USER_CREATED')); eq(lastAudit(db).action, 'USER_CREATE_FAILED'); eq(lastAudit(db).after.auth_cleanup, 'ok');
 });

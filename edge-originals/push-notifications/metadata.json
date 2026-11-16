@@ -1,0 +1,13 @@
+{
+  "id": "5a13124e-9d76-4305-b41f-7921d74a76f1",
+  "slug": "push-notifications",
+  "name": "push-notifications",
+  "status": "ACTIVE",
+  "version": 13,
+  "created_at": 1792009415250,
+  "updated_at": 1792342525533,
+  "verify_jwt": true,
+  "import_map": false,
+  "entrypoint_path": "/tmp/user_fn_uqwilzzeyfuatlmwzxna_5a13124e-9d76-4305-b41f-7921d74a76f1_3/source/index.ts",
+  "ezbr_sha256": "4dc5b71fc45bf235d70c306976df255945997ed5a979ab18f91411492caa4407"
+}

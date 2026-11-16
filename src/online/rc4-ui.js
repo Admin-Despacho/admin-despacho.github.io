@@ -26,6 +26,7 @@ export function roleNav(me) {
     ['#/conciliacion-noc', 'NOC'],
     ['#/informes', 'Informes'],
     hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones'],
+    ['#/autorizaciones', 'Autorizaciones comerciales'],
     ['#/inspecciones', 'Inspecciones de vehículos'],   // V4.25
     ['#/auditoria', 'Auditoría'],
     ['#/usuarios', 'Usuarios y permisos'],
@@ -38,7 +39,8 @@ export function roleNav(me) {
     (hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/vehiculos', 'Vehículos'],
     ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'].includes(me.role) && ['#/inspecciones', 'Inspecciones'],   // V4.25
     (hasPerm(me, 'columns.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/config-operativa', 'Configuración operativa'],
-    hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones']].filter(Boolean);
+    hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones'],
+    (hasPerm(me, 'com.track') || hasPerm(me, 'com.approve')) && ['#/autorizaciones', 'Autorizaciones comerciales']].filter(Boolean);
   return [
     ['#/dashboard', 'Dashboard'], ['#/nueva-hoja', 'Nueva hoja / Preparar hoja'], ['#/despacho', 'Despacho'], ['#/borradores', hasPerm(me, 'drafts.manage_all') ? 'Borradores de despacho' : 'Mis borradores'],
     (hasPerm(me, 'routes.view_all') || hasPerm(me, 'routes.view_team')) ? ['#/historial', 'Hojas publicadas'] : hasPerm(me, 'routes.view_own') && ['#/historial', 'Mis hojas publicadas'], ['#/notificaciones', 'Notificaciones'], canRequests(me) && ['#/solicitudes', 'Solicitudes'],
@@ -46,7 +48,8 @@ export function roleNav(me) {
     (hasPerm(me, 'vehicles.view') || hasPerm(me, 'vehicle_mileage.view')) && ['#/vehiculos', 'Vehículos / Kilometraje / Service'],
     ['ADMIN', 'SUPERVISOR_DESPACHO', 'OPERARIO_DEPOSITO'].includes(me.role) && ['#/inspecciones', 'Inspecciones'],   // V4.25
     hasPerm(me, 'columns.view') && ['#/config-operativa', 'Columnas predeterminadas'],
-    hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones']].filter(Boolean);
+    hasPerm(me, 'comms.view') && ['#/comunicaciones', 'Comunicaciones'],
+    (hasPerm(me, 'com.track') || hasPerm(me, 'com.approve')) && ['#/autorizaciones', 'Autorizaciones comerciales']].filter(Boolean);
 }
 export const ROUTE_OF = h => h.split('?')[0];
 const NAV_MATCH = (target, active) => {

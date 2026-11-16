@@ -43,7 +43,7 @@ async def main():
                 for t in ('roles', 'jerarquia', 'actividad'):
                     await pg.click(f'[data-v3tab="{t}"]'); await pg.wait_for_timeout(500); info[t] = await pg.evaluate('()=>({cajas:document.querySelectorAll(".v3-box").length, filas:document.querySelectorAll(".v3-row").length, sticky:!!document.querySelector(".v3-sticky")})')
                 await pg.screenshot(path=os.path.join(OUT, 'usuarios_v3_jerarquia_notebook.png'))
-                res('UV-05 pestañas Roles y permisos (6 roles) · Jerarquía y equipos · Actividad: mismo diseño (encabezado fijo) y datos reales', info['roles']['cajas'] == 6 and info['jerarquia']['cajas'] >= 1 and info['actividad']['filas'] >= 3 and all(v['sticky'] for v in info.values()), info)
+                res('UV-05 pestañas Roles y permisos (7 roles: se agrega COMERCIAL del módulo de Autorizaciones) · Jerarquía y equipos · Actividad: mismo diseño (encabezado fijo) y datos reales', info['roles']['cajas'] == 7 and info['jerarquia']['cajas'] >= 1 and info['actividad']['filas'] >= 3 and all(v['sticky'] for v in info.values()), info)
                 await ctx.close()
                 c2 = await b.new_context(viewport={'width': 412, 'height': 915}, is_mobile=True, device_scale_factor=2.625); m = await c2.new_page(); m.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
                 await m.goto(f'http://127.0.0.1:{dp.PORT}/'); await m.evaluate('()=>localStorage.clear()'); await dp.login(m, 'admin@okdespacho.demo'); await m.evaluate(ADD)

@@ -294,6 +294,91 @@ const OrderIndex = {
 };
 
 /* ---------------- FinancialIndex ---------------- */
+// AUTORIZACIONES COMERCIALES · «CONSULTAR APROBACIÓN» en la publicación (REVISAR): INFORMATIVO. No bloquea, no cambia importes, no autoriza
+// descuentos ni se conecta con NOC. Se completa en segundo plano; sin permiso o sin servidor no se muestra nada.
+const ComAlerts = {
+  KIND: { FINANCIACION: 'Financiación propia', ECHEQ: 'Aceptación de e-cheq' },
+  ST: { PENDIENTE: 'PENDIENTE DE APROBACIÓN', DEVUELTA: 'DEVUELTA A COMERCIAL (NO es aprobación)', RECHAZADA: 'RECHAZADA', APROBADA: 'APROBADA', APROBADA_MOD: 'APROBADA CON MODIFICACIONES' },
+  BOX: 'border:1px solid #e3b56a;background:#fff8ec;border-radius:12px;padding:10px 12px;margin:0 0 12px',
+  async fill(m, rows) {
+    const el = m && m.querySelector('#pubCom'), b = window.OKD_BRIDGE && window.OKD_BRIDGE.com; if (!el || !b || !b.alerts) return;
+    const ped = (rows || []).filter(r => !r.stopType || r.stopType === 'PEDIDO');
+    const orders = [...new Set(ped.flatMap(r => RouteStore.stopOrders(r)).map(String))], cuits = [...new Set(ped.map(r => r.calc && r.calc.cuit).filter(Boolean))];
+    if (!orders.length && !cuits.length) return;
+    let L = null, alertsHtml = '';
+    try { L = await Promise.race([b.alerts(orders, cuits), new Promise((_, ko) => setTimeout(() => ko(Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' })), 8000))]); }
+    catch (e) {
+      if ((e && e.code === 'FORBIDDEN') || /FORBIDDEN|42501/.test(String(e && e.message))) return;   // sin permisos del módulo: no se muestra nada (tampoco la alarma)
+      // O-01: el silencio NO significa «sin solicitudes» → se avisa explícitamente (sigue siendo informativo: no bloquea)
+      alertsHtml = '<div class="comalert" role="status" style="' + this.BOX + '"><b>NO SE PUDO VERIFICAR LAS AUTORIZACIONES COMERCIALES</b> · sin conexión o sin respuesta del servidor. Consultá el estado en Autorizaciones antes de continuar con estos pedidos. ' +
+        '<small>Informativo: no bloquea la publicación ni cambia importes.</small></div>';
+    }
+    if (!document.body.contains(el)) return;
+    if (Array.isArray(L) && L.length) {
+      const pend = L.filter(a => a.alert).length;
+      alertsHtml = '<div class="comalert" role="status" style="' + this.BOX + '">' +
+        '<b>' + (pend ? 'CONSULTAR APROBACIÓN' : 'AUTORIZACIONES COMERCIALES') + '</b> · ' + (pend ? pend + ' solicitud(es) requieren resolución comercial antes de continuar con esos pedidos. ' : '') +
+        '<small>Informativo: no bloquea la publicación ni cambia importes.</small>' +
+        L.map(a => '<div style="margin-top:6px"><b>' + esc(a.number) + '</b> · ' + esc(this.KIND[a.kind] || a.kind) + ' · <b>' + esc(this.ST[a.status] || a.status) + '</b> · ' +
+          esc(a.match === 'PEDIDO' ? 'pedido ' + (a.order_ref || '') : 'cliente') + ' · ' + esc(a.client || '') +
+          (a.final_terms ? ' · autorizado ' + ars(a.final_terms.amount) + (a.final_terms.installments ? ' en ' + a.final_terms.installments + ' cuota(s) semanal(es)' : a.final_terms.due_date ? ' · vence ' + esc(isoToDMY(a.final_terms.due_date)) : '') : '') + '</div>').join('') + '</div>';
+    }
+    // ALARMA URGENTE: activación EXPLÍCITA por pedido (nunca automática); no cambia importes ni aprueba nada
+    const form = b.alarm ? '<div class="comalarmform" style="border:1px solid #f0b4ad;background:#fff3f2;border-radius:12px;padding:10px 12px;margin:0 0 12px">' +
+      '<b>¿NECESITÁS UNA AUTORIZACIÓN COMERCIAL YA?</b> <small>Avisa al responsable comercial con alarma sonora; a los 3 minutos sin atención se escala. No aprueba nada ni cambia importes.</small>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center"><select data-al-order style="min-height:40px;max-width:100%">' +
+      ped.map((r, k) => '<option value="' + k + '">' + esc(String(r.mainOrder || RouteStore.stopOrders(r)[0] || '')) + ' · ' + esc(r.cliente || '') + '</option>').join('') + '</select>' +
+      '<input data-al-reason maxlength="300" placeholder="Motivo (obligatorio)" style="min-height:40px;flex:1;min-width:200px">' +
+      '<button type="button" class="btn" data-al-go style="min-height:40px;background:#b42318;color:#fff;border:0;font-weight:800">SOLICITAR APROBACIÓN URGENTE</button></div><div data-al-res style="margin-top:6px"></div></div>' : '';
+    el.innerHTML = alertsHtml + form;
+    const go = el.querySelector('[data-al-go]'); if (!go) return;
+    // B-W06 · INTENCIÓN de la operación: el op_id nace con (hoja, pedido, motivo) y se CONSERVA en los reintentos (respuesta perdida, sin conexión),
+    // así el servidor devuelve el resultado guardado y no duplica. Solo «NUEVA ALARMA» (acción explícita) renueva el identificador.
+    const KEY = 'okd_alarm_intent:' + RouteStore.sheetId, out = el.querySelector('[data-al-res]');
+    const load = () => { try { return JSON.parse(sessionStorage.getItem(KEY) || 'null'); } catch (e) { return null; } };
+    const save = v => { try { v ? sessionStorage.setItem(KEY, JSON.stringify(v)) : sessionStorage.removeItem(KEY); } catch (e) { } };
+    const newOp = () => 'alr-' + RouteStore.sheetId + '-' + (crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2));
+    const show = it => {
+      if (!it || !it.state) { out.innerHTML = ''; return; }
+      const r = it.result || {};
+      if (it.state === 'SENT') out.innerHTML = (r.existing ? '<b>Ya hay una alarma ACTIVA para el pedido ' + esc(it.order) + (r.number ? ' (' + esc(r.number) + ')' : '') + '</b>: no se duplica.'
+        : '<b>ALARMA ' + esc(r.number || '') + ' ENVIADA · PENDIENTE DE ATENCIÓN</b> · si nadie la atiende en 3 minutos se escala automáticamente.') +
+        ' <button type="button" class="btn outline" data-al-new>NUEVA ALARMA</button>';
+      else if (it.state === 'REJECTED') out.innerHTML = '<b>NO SE ENVIÓ:</b> ' + esc(it.message || 'el servidor rechazó la operación') + ' <button type="button" class="btn outline" data-al-new>NUEVA ALARMA</button>';
+      else if (it.state === 'UNKNOWN') out.innerHTML = '<b>SIN RESPUESTA DEL SERVIDOR</b> (' + esc(it.message || 'sin conexión') + '). Tocá de nuevo para reintentar: se usa la MISMA operación, no se duplica.';
+      const nb = out.querySelector('[data-al-new]'); if (nb) nb.onclick = () => { save(null); out.innerHTML = ''; el.querySelector('[data-al-reason]').value = ''; };
+    };
+    { const it = load(); if (it) { const sel = el.querySelector('[data-al-order]'); const k = ped.findIndex(r => String(r.mainOrder || RouteStore.stopOrders(r)[0] || '') === it.order);
+      if (k >= 0) sel.value = String(k); el.querySelector('[data-al-reason]').value = it.reason || ''; show(it); } }
+    let busy = false;
+    // motivo escrito y sin enviar: la actualización de la app se POSTERGA (main.js · busy) para no perderlo
+    const formEl = el.querySelector('.comalarmform'), rs = el.querySelector('[data-al-reason]');
+    const mark = () => { const it = load(); if (rs.value.trim() && !(it && it.state === 'SENT' && it.reason === rs.value.trim())) formEl.setAttribute('data-okd-unsaved', '1'); else formEl.removeAttribute('data-okd-unsaved'); };
+    rs.addEventListener('input', mark);
+    go.onclick = async () => {
+      if (busy) return;   // doble clic: una sola llamada a la vez
+      const r = ped[Number(el.querySelector('[data-al-order]').value)], reason = el.querySelector('[data-al-reason]').value.trim();
+      if (reason.length < 10) { out.innerHTML = '<b>Indicá el motivo (al menos 10 caracteres).</b>'; return; }
+      const order = String(r.mainOrder || RouteStore.stopOrders(r)[0] || '');
+      let it = load();
+      if (it && it.state === 'SENT' && it.order === order && it.reason === reason) { show(it); return; }   // ya respondida: se muestra el resultado (no se reenvía)
+      // misma intención sin respuesta → MISMO op_id; otra intención (otro pedido o motivo) o rechazo previo → op_id NUEVO
+      if (!it || it.order !== order || it.reason !== reason || it.state === 'SENT' || it.state === 'REJECTED') it = { order, reason, op: newOp(), state: 'PENDING' };
+      save(it); busy = true; go.disabled = true; out.innerHTML = '<b>Enviando…</b>';
+      try {
+        const res = await b.alarm(order, RouteStore.sheetId, r.cliente || '', (r.calc && r.calc.cuit) || '', reason, it.op);
+        if (res && res.ok === false) { it.state = 'REJECTED'; it.message = res.message || res.code; }   // B-W06: un rechazo NUNCA se muestra como enviada
+        else { it.state = 'SENT'; it.result = { number: res && res.number, existing: !!(res && res.existing) };
+          RouteStore.log({ tipo: 'Alarma comercial urgente', pedido: order, numero: res && res.number, existente: !!(res && res.existing) }); }
+      } catch (e) {
+        const t = String((e && (e.code || e.message)) || e);
+        if (/OFFLINE|Failed to fetch|NetworkError|TIMEOUT|sin conexi/i.test(t) || !navigator.onLine) { it.state = 'UNKNOWN'; it.message = 'sin conexión o sin respuesta'; }
+        else { it.state = 'REJECTED'; it.message = String((e && e.message) || e).replace(/^[A-Z_]+:\s*/, ''); }
+      }
+      save(it); show(it); busy = false; go.disabled = false; mark();
+    };
+  }
+};
 const FinancialIndex = {
   comps: new Map(), byClient: new Map(), saByClient: new Map(), ccByCuit: new Map(), ccByName: new Map(), ccByFull: new Map(),
   scVersion: 0,
@@ -1490,7 +1575,7 @@ const Publisher = {
     const nocInfo = await this.nocDetect(rows); // estado REAL de cada NOC en el servidor (nunca solo el Excel)
     const blockMsg = this.blockFor({ carrier, names, external, resp }, bad);
     const title = external ? 'DESPACHAR E IMPRIMIR' : 'PUBLICAR HOJA';
-    m.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"><header><b>' + title + '</b></header><div class="body">' +
+    m.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"><header><b>' + title + '</b></header><div class="body">' + '<div id="pubCom"></div>' +   // Autorizaciones comerciales: «CONSULTAR APROBACIÓN»
       '<p>Transportista: <b>' + esc(carrier ? carrier.name : (names.join(', ') || '—')) + '</b> · ' + rows.length + ' entregas</p>' +
       (external ? '<p>Al confirmar, la hoja quedará registrada como <b>despachada al transporte tercerizado</b>, contará en Informes → Otros transportistas, se guardará el PDF y se abrirá la impresión.</p>' : '') +
       (!external && resp.length ? '<label>Responsable <select class="ed" id="pubResp">' + resp.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select></label>' : '') +
@@ -1505,6 +1590,7 @@ const Publisher = {
       '<footer><button class="btn ghost" type="button" id="pubCancel">Cancelar</button>' + (this.tplErr || rows.some(r => FinancingPlans.blocked(rowKey(r))) ? '<button class="btn soft" type="button" id="pubRetry">REINTENTAR</button>' : '') +
       '<button class="btn go" type="button" id="pubGo"' + (blockMsg ? ' disabled' : '') + '>' + title + '</button></footer></div>';
     document.body.appendChild(m);
+    ComAlerts.fill(m, rows);   // Autorizaciones comerciales: «CONSULTAR APROBACIÓN» en segundo plano (no se espera; no bloquea)
     m.querySelector('#pubCancel').onclick = () => m.remove();
     const bulVals = () => [...m.querySelectorAll('[data-bul]')].map(x => x.value.trim());
     m.querySelectorAll('[data-bul]').forEach(inp => inp.oninput = () => { const v = bulVals(); m.querySelector('#pubSum').textContent = sheetSummary(rows.map((r, i) => ({ sale: true, bultos: v[i] }))); });
@@ -2237,6 +2323,7 @@ const UI = {
       RouteStore.data[res.kind] = payload;
       await DB.set('ds:' + res.kind, payload);
       this.applyData(res.kind);
+      try { if ((res.kind === 'sc' || res.kind === 'cc') && typeof window.OKD_COM_INGEST === 'function') await window.OKD_COM_INGEST(res.kind, payload, f); } catch (e) { alert('La carga operativa se conservó, pero no se confirmó el respaldo Comercial. Conservá el archivo y avisá a Administración.'); }   // Autorizaciones Comerciales: historial en segundo plano (nunca bloquea la carga)
       toast(this.kindLabel(res.kind) + ' cargado: ' + res.count + ' registros.', 2600);
     }
   },

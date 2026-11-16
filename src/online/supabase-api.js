@@ -182,6 +182,9 @@ export class SupabaseApi {
   async markViewed(id) { return this._rpc('mark_route_viewed', { p_route: id }); }
   async startRoute(id, kmStart) { return this._rpc('start_route', { p_route: id, p_km_start: kmStart ?? null }); }
   async setStopOutcome(stop, outcome, note, reason, opId, extra) { const r = await this._rpc('set_stop_outcome', { p_stop: stop, p_outcome: outcome, p_note: note || null, p_reason: reason || null, p_op_id: opId, p_extra: extra || null }); this.sendCustomerQueued().catch(() => null); return r; }
+  // Autorizaciones Comerciales · ingesta INTERNA de las cargas diarias de Depósito (registros ya leídos por el Constructor)
+  async comIngest(kind, meta, rows) { return this._rpc('com_ingest', { p_kind: kind, p_meta: meta, p_rows: rows }); }
+  async comIngestError(kind, meta, error) { return this._rpc('com_ingest_error', { p_kind: kind, p_meta: meta, p_error: error }); }
   async finalizeRoute(id, kmEnd) { const r = await this._rpc('finalize_route', { p_route: id, p_km_end: kmEnd ?? null }); this.sendServiceAlerts().catch(() => null); return r; }
   // V4.23 · G2: TERMINÉ EN la ubicación · Diamante: LLEGUÉ A DIAMANTE · padrón: email sugerido SOLO para la parada propia
   async finishInternalLocation(stop, location, opId) { return this._rpc('finish_internal_location', { p_stop: stop, p_location: location, p_op_id: opId }); }

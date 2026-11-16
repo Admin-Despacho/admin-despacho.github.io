@@ -29,7 +29,7 @@ describe('Modo demo (mismas reglas que el servidor)', () => {
     expect(r.id).toBe('u-diego'); await api.signOut(); await expect(api.signIn('diego@okdespacho.demo', 'demo')).resolves.toBeTruthy();
   });
   it('D07 responsables: interno sin Cristian; Este solo Cristian; Alrededores Cristian y Diego', async () => {
-    await api.signIn('despacho@okdespacho.demo', 'demo');
+    await api.signIn('admin@okdespacho.demo', 'demo');   // el rol DESPACHO está retirado (sin routes.assign): se usa un perfil vigente que asigna responsables
     expect((await api.responsables('INTERNO')).map(x => x.full_name)).toEqual(['Gabriel Figueroa', 'Martín Sosa']);
     expect((await api.responsables('CT-ESTE')).map(x => x.full_name)).toEqual(['Cristian Torres']);
     expect((await api.responsables('CT-ALR')).map(x => x.full_name)).toEqual(['Cristian Torres', 'Diego Ríos']);

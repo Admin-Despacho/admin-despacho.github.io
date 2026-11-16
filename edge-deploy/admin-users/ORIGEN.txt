@@ -1,0 +1,2 @@
+admin-users a desplegar = fuente DESPLEGADA v25 (evidencia de Work, rules.js SHA-256 104b0775…) + SOLO lo de COMERCIAL (tools/gen_edge_deploy.py).
+index.ts, handler.js, _shared/http.js y deno.json: idénticos a lo desplegado.

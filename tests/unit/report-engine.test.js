@@ -59,10 +59,11 @@ describe('Informe — filtros, programación y costo', () => {
     expect(local(atLocal('2026-10-10', '15:00')).weekday).toBe(6);
   });
   it('REPORT-MAIL-12 mensual: mes CALENDARIO, al cierre (último día, hora configurable)', () => {
-    const d = dueReports(atLocal('2026-10-31', '23:30'));
+    const M = { schedule_mode: 'MONTHLY' };   // el modo predeterminado vigente es WEEKLY: el mensual se configura EXPLÍCITAMENTE
+    const d = dueReports(atLocal('2026-10-31', '23:30'), M);
     expect(d.find(x => x.type === 'MONTHLY').sel).toEqual({ kind: 'MONTHLY', year: 2026, month: 10 });
-    expect(dueReports(atLocal('2026-10-30', '23:30')).some(x => x.type === 'MONTHLY')).toBe(false);
-    expect(dueReports(atLocal('2026-10-31', '22:00'), { monthly_time: '22:00' }).some(x => x.type === 'MONTHLY')).toBe(true);
+    expect(dueReports(atLocal('2026-10-30', '23:30'), M).some(x => x.type === 'MONTHLY')).toBe(false);
+    expect(dueReports(atLocal('2026-10-31', '22:00'), { ...M, monthly_time: '22:00' }).some(x => x.type === 'MONTHLY')).toBe(true);
     const p = period({ kind: 'MONTHLY', year: 2026, month: 2 });
     expect([p.start, p.end, p.days]).toEqual(['2026-02-01', '2026-02-28', 28]);
   });

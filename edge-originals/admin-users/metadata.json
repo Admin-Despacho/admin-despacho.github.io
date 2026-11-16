@@ -1,0 +1,14 @@
+{
+  "id": "b3d29567-2029-484e-8e1c-cbffc81ad486",
+  "slug": "admin-users",
+  "name": "admin-users",
+  "status": "ACTIVE",
+  "version": 25,
+  "created_at": 1791750365618,
+  "updated_at": 1792075237316,
+  "verify_jwt": true,
+  "import_map": true,
+  "entrypoint_path": "/tmp/user_fn_uqwilzzeyfuatlmwzxna_b3d29567-2029-484e-8e1c-cbffc81ad486_15/source/admin-users/index.ts",
+  "import_map_path": "/tmp/user_fn_uqwilzzeyfuatlmwzxna_b3d29567-2029-484e-8e1c-cbffc81ad486_15/source/deno.json",
+  "ezbr_sha256": "2ab804da399f58607551a4c0d5a9c568adc6d5c7de0ca0160c5052dd32ab38cd"
+}
