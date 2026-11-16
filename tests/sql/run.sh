@@ -17,7 +17,14 @@ $PSQL -d okd -f "$HERE/supabase_stub.sql" >/dev/null
 ORDER="$HERE/migration_order.txt"
 for f in "$ROOT"/supabase/migrations/*.sql; do grep -qx "$(basename "$f")" "$ORDER" || { echo "MIGRACIÓN SIN ORDEN: $(basename "$f") (agregala a tests/sql/migration_order.txt)"; exit 2; }; done
 $PSQL -d okd -f "$HERE/prod_drift_stubs.sql" >/dev/null   # drift de producción conocido (ver el archivo)
-while read -r m; do [ -n "$m" ] && $PSQL -d okd -f "$ROOT/supabase/migrations/$m" >/dev/null; done < "$ORDER"
+while IFS= read -r migration; do
+  case "$migration" in
+    "") continue ;;
+    tests/sql/*|propuestas/*) file="$ROOT/$migration" ;;
+    *) file="$ROOT/supabase/migrations/$migration" ;;
+  esac
+  $PSQL -d okd -f "$file" >/dev/null
+done < "$ORDER"
 $PSQL -d okd -f "$HERE/post_migration_grants.sql" >/dev/null
 # SQL_TESTS permite elegir archivos (p. ej. SQL_TESTS="g2_revision_test" para las pruebas autónomas de G2/TAREA/traslados).
 TESTS="${SQL_TESTS:-fase1_test fase1_1_test fase2a_test fase2a1_test fase2b1_test fase2b11_test fase2b2_test fase2b3_test rc1_test rc11_test rc12_test}"
