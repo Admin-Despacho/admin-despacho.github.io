@@ -15,6 +15,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: npx vitest run
       - run: node scripts/verify_production_carrier_flow.mjs
       - uses: actions/setup-python@v5
