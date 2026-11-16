@@ -19,9 +19,9 @@ jobs:
       - run: npx vitest run
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.2.12
+          deno-version: v2.9.3
       - name: Check four Edge entrypoints
-        run: deno check --config supabase/functions/deno.json supabase/functions/comm-dispatcher/index.ts supabase/functions/internal-approvals/index.ts supabase/functions/commercial-reports/index.ts supabase/functions/password-recovery/index.ts
+        run: deno check --frozen --config supabase/functions/deno.json supabase/functions/comm-dispatcher/index.ts supabase/functions/internal-approvals/index.ts supabase/functions/commercial-reports/index.ts supabase/functions/password-recovery/index.ts
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

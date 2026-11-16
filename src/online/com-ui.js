@@ -88,6 +88,8 @@ async function mount(api, me, host) {
   const HKEY = 'okd_com_hist_v1:' + me.id, H0 = { scope: scopes.length ? scopes[0][0] : 'MIS', f: {} };
   let saved = {}; try { saved = JSON.parse(sessionStorage.getItem(HKEY) || '{}'); } catch (e) { }
   st.hist = { scope: scopes.some(x => x[0] === saved.scope) ? saved.scope : H0.scope, f: saved.f || {}, items: [], cursor: null, has_more: false, loaded: false, detail: null, scroll: 0, err: null };
+  const mailRequest=new URLSearchParams(location.hash.split('?')[1]||'').get('solicitud');
+  if(st.tab==='historial'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(mailRequest||''))st.hist.detail={id:mailRequest};
   const saveHist = () => { try { sessionStorage.setItem(HKEY, JSON.stringify({ scope: st.hist.scope, f: st.hist.f })); } catch (e) { } };
   const toast = (msg, bad) => { const t = document.createElement('div'); t.className = 'toast' + (bad ? ' danger' : ''); t.textContent = msg; $('#comToast').appendChild(t); setTimeout(() => t.remove(), 4200); };
   const nav = () => { $('#comNav').innerHTML = tabs.map(([k, l]) => '<button type="button" class="tab ' + (st.tab === k ? 'active' : '') + '" data-tab="' + k + '">' + l + '</button>').join('') +

@@ -11,7 +11,7 @@ export async function sendCommercialDecisionEmails(sb,options){
    await guard();
    const label=String(j.event_kind).replace(/_/g,' ');
    // No enviar saldo, KPI, documento, condiciones ni lista de copias. El detalle requiere ingreso con permisos vigentes.
-   const body='La autorización '+j.request_number+' cambió a '+label+'. Ingresá a OK Despacho para consultar el detalle: https://admin-despacho.github.io/#/autorizaciones';
+   const body='La autorización '+j.request_number+' cambió a '+label+'. Ingresá a OK Despacho para consultar el detalle: https://admin-despacho.github.io/#/autorizaciones?v=historial&solicitud='+encodeURIComponent(j.request_id);
    const res=await mail.send({to:j.recipient,idempotencyKey:'evento:'+j.event_id+':'+j.recipient,subject:'OK Despacho · '+j.request_number+' · '+label,text:body,html:'<p>'+body+'</p>',attachments:[],beforeData:guard});
    await finish('SENT',res.id);out.sent++;
   }catch(e){if(e.code==='ABORTED')continue;const held=e.phase==='AFTER_SEND'||e.message==='MAIL_RESULT_UNRECORDED';await finish(held?'HELD':'ERROR',null,e.code||'MAIL_RESULT_UNRECORDED').catch(()=>{});if(held)out.held++;else out.errors++;}

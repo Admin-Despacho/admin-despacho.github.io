@@ -24,6 +24,12 @@ async def main():
     print('UI-03 PASS: dirección inválida rechazada sin perder guardado',flush=True)
     await pg.fill('#comMailCopies','');await pg.click('#comMailSave');await pg.wait_for_function('document.querySelector("#comMailResult").textContent.includes("guardados")');result=await pg.evaluate('window.OKD_ONLINE.api.comMailSettings()');assert result['copies']==[] and result['author_always'] is True
     print('UI-04 PASS: quitar copias no quita al autor',flush=True)
+    request_id='11111111-2222-4333-8444-555555555555'
+    number=await pg.evaluate('(id)=>{const a=window.OKD_ONLINE.api,c=a._com();const q=c.requests[0];if(!q)throw Error("QA_REQUEST_MISSING");q.id=id;a._save();return q.number;}',request_id)
+    await pg.goto('http://127.0.0.1:'+str(dp.PORT)+'/#/autorizaciones?v=historial&solicitud='+request_id);await pg.reload();await pg.wait_for_selector('#hBack');assert number in await pg.inner_text('#comMain')
+    await pg.click('#hBack');await pg.wait_for_selector('#hNum')
+    print('UI-05 PASS: enlace del correo abre el detalle y permite volver al historial',flush=True)
+
    finally:await b.close()
  finally:srv.terminate()
 asyncio.run(main())
