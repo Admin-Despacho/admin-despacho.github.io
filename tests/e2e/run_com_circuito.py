@@ -12,6 +12,8 @@ K = 'okd_online_demo_v2'
 def res(n, ok, d=''): R.append((n, 'PASS' if ok else 'FAIL', str(d)[:420])); print('..', ' | '.join(R[-1]), flush=True)
 DB = '()=>JSON.parse(localStorage.getItem("%s")).com' % K
 OV = '()=>document.documentElement.scrollWidth-document.documentElement.clientWidth'
+# fecha ARGENTINA de hoy + n días (AAAA-MM-DD), como la calcula la app
+AR_PLUS = '(n)=>{const t=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Argentina/Mendoza"}).format(new Date()); const d=new Date(t+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10)}'
 async def relog(pg, email):
     await pg.evaluate('async()=>{try{await window.OKD_ONLINE.api.signOut()}catch(e){}}'); await pg.goto(f'http://127.0.0.1:{dp.PORT}/'); await dp.login(pg, email); await pg.wait_for_timeout(800)
     try: await pg.wait_for_selector('#comMain .heading, #comMain .note, .dash, #rc4LegacyNav, nav', timeout=15000)
@@ -44,8 +46,8 @@ async def main():
                 sug = await q.evaluate('()=>[...document.querySelectorAll("#cSugg button")].map(b=>({t:b.innerText.replace(/\\s+/g," "), dis:b.disabled}))')
                 await q.locator('#cSugg button', has_text='TECNOLOGIA DEL NORTE').first.click(); await q.wait_for_timeout(900)
                 cuit = await q.input_value('#cCuit'); kpi = await q.evaluate('()=>document.getElementById("cKpi").innerText.replace(/\\s+/g," ")')
-                await q.fill('#cOrder', '26764'); await q.fill('#cAmount', '2750000'); await q.select_option('#cInst', '4'); await q.wait_for_timeout(300)
-                sched = await q.locator('.scheditem').count(); ov1 = await q.evaluate(OV)
+                await q.fill('#cOrder', '26764'); await q.fill('#cAmount', '2750000'); await q.select_option('#cInst', '4'); await q.select_option('#cFreq', 'SEMANAL'); await q.fill('#cFirst', await q.evaluate(AR_PLUS, 7)); await q.wait_for_timeout(300)
+                sched = await q.locator('#cSched .scheditem').count(); ov1 = await q.evaluate(OV)   # financiación con calendario: 4 semanales desde hoy+7 (las mismas fechas que antes)
                 await q.screenshot(path=os.path.join(OUT, '01_comercial_nueva_solicitud_android.png'), full_page=True)
                 await q.click('#cSend'); await q.wait_for_timeout(1500)
                 mine = await q.evaluate('()=>[...document.querySelectorAll(".requests [data-select]")].map(b=>b.innerText.replace(/\\s+/g," "))')
@@ -53,7 +55,7 @@ async def main():
                     tabs == ['comercial', 'historial'] and any('TECNOCASA' in s['t'] and s['dis'] and 'EN REVISIÓN' in s['t'] for s in sug) and cuit == '30500010912' and '$ 2.000.000' in kpi and '$ 3.000.000' in kpi and '$ 2.500.000' in kpi
                     and 'RECOMENDACIÓN PROVISORIA' in kpi and sched == 4 and ov1 <= 0 and mine and 'Pendiente de aprobación' in mine[0] and '26764' in mine[0], {'tabs': tabs, 'cuit': cuit, 'kpi': kpi[:200], 'mis': mine[:1]})
                 await q.fill('#cSearch', 'ZZZZZZ'); await q.wait_for_timeout(900); nf = await q.evaluate('()=>document.getElementById("cSugg").innerText')
-                await q.fill('#cSearch', 'TECNOLOGIA'); await q.wait_for_timeout(200); await q.fill('#cAmount', '1000'); await q.click('#cSend'); await q.wait_for_timeout(600)
+                await q.fill('#cSearch', 'TECNOLOGIA'); await q.wait_for_timeout(200); await q.fill('#cAmount', '1000'); await q.fill('#cFirst', await q.evaluate(AR_PLUS, 7)); await q.click('#cSend');   # calendario válido: el ÚNICO motivo de rechazo es el cliente sin elegir await q.wait_for_timeout(600)
                 tst = await q.evaluate('()=>[...document.querySelectorAll("#comToast .toast")].map(t=>t.textContent).join(" | ")')
                 res('CO-02 CLIENTE NO ENCONTRADO con el procedimiento; escribir un nombre SIN elegirlo de la lista NO permite enviar (nombre y CUIT siempre vinculados al registro)', 'CLIENTE NO ENCONTRADO' in nf and 'Elegí el cliente de la lista' in tst, {'no': nf[:120], 'toast': tst[:120]})
                 # ---- CO-03 Wilfredo aprueba con cambios ----
@@ -95,7 +97,7 @@ async def main():
                 res('CO-06 DESPACHO: busca por CUIT y ve estado, línea de tiempo y condiciones FINALES; NO ve el KPI ni notas internas; «en curso» filtra', all(k in dd.upper() for k in ['APROBADA CON MODIFICACIONES', 'SOLICITUD ENVIADA A ADMINISTRACIÓN', 'CONDICIONES AUTORIZADAS'])
                     and not any(k in dd.upper() for k in ['KPI AL MOMENTO', 'CUENTA CORRIENTE']) and en_curso == 0, {'en_curso': en_curso, 'chequeos': {k: (k in dd.upper()) for k in ['APROBADA CON MODIFICACIONES', 'SOLICITUD ENVIADA A ADMINISTRACIÓN', 'CONDICIONES AUTORIZADAS', 'KPI AL MOMENTO', 'CUENTA CORRIENTE']}})
                 # ---- CO-07 Devolución (cartera → Franco) ----
-                await relog(pg, 'hernan@okdespacho.demo'); await pick_client(pg, 'COMERCIAL CUYO', 'COMERCIAL CUYO'); await pg.fill('#cAmount', '1800000'); await pg.select_option('#cInst', '2'); await pg.click('#cSend'); await pg.wait_for_timeout(1300)
+                await relog(pg, 'hernan@okdespacho.demo'); await pick_client(pg, 'COMERCIAL CUYO', 'COMERCIAL CUYO'); await pg.fill('#cAmount', '1800000'); await pg.select_option('#cInst', '2'); await pg.select_option('#cFreq', 'SEMANAL'); await pg.fill('#cFirst', await pg.evaluate(AR_PLUS, 7)); await pg.click('#cSend'); await pg.wait_for_timeout(1300)
                 await relog(pg, 'franco@okdespacho.demo'); await admin_tab(pg, 'gerencia')
                 await pg.locator('.requests [data-select]', has_text='Cartera').first.click(); await pg.wait_for_timeout(900)
                 await pg.click('[data-dec="DEVOLVER"]'); await pg.wait_for_timeout(300); await pg.fill('#dAmount', '1500000'); await pg.fill('#dReason', 'Bajar el importe'); await pg.click('#dGo'); await pg.wait_for_timeout(1200)

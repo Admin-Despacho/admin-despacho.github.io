@@ -1,5 +1,6 @@
 // AUTORIZACIONES COMERCIALES · API. En línea: funciones del servidor (validan TODO). Demo: las MISMAS reglas sobre el almacenamiento local.
 import { hasPerm } from '../../supabase/functions/_shared/rules.js';
+import { computeSchedule, arDate, addDays as schedAddDays } from './com-schedule.js';
 
 export const SupabaseCom = {
   comMailSettings() { return this._rpc('com_mail_settings_get', {}); },
@@ -234,9 +235,16 @@ export const DemoCom = {
   _comTerms(kind, t, cl, base) {
     const s = this.db.com.settings, a = r2(Number(t && t.amount));
     if (!(a > 0) || a > 999999999) throw E('BAD_AMOUNT', 'importe inválido');
-    if (kind === 'FINANCIACION') {
-      const k = Number(t.installments); if (!Number.isInteger(k) || k < 1 || k * 7 > s.fin_max_days) throw E('BAD_INSTALLMENTS', 'cuotas semanales; el último vencimiento no puede superar ' + s.fin_max_days + ' días');
-      const part = r2(a / k); return { amount: a, installments: k, schedule: Array.from({ length: k }, (_, i) => ({ n: i + 1, due: addDays(base, (i + 1) * 7), amount: i < k - 1 ? part : r2(a - part * (k - 1)) })), last_due: addDays(base, k * 7), days: k * 7 };
+    if (kind === 'FINANCIACION') {   // MISMA regla que el servidor (001200): calendario con primer vencimiento y frecuencia, tope de 30 días desde la creación
+      const maxd = Math.min(s.fin_max_days, 30), k = /^[0-9]{1,3}$/.test(String(t.installments ?? '')) ? Number(t.installments) : NaN;
+      let first = t.first_due, freq = t.frequency;
+      if (!('first_due' in t)) {   // formato ANTERIOR: semanal desde el día 7, mismo error de siempre
+        if (!(k >= 1) || k * 7 > maxd) throw E('BAD_INSTALLMENTS', 'cuotas semanales; el último vencimiento no puede superar ' + maxd + ' días');
+        first = schedAddDays(base, 7); freq = k > 1 ? 'SEMANAL' : null;
+      }
+      const c = computeSchedule({ base, installments: k, frequency: freq, first_due: first, amount: a, maxDays: maxd });
+      if (!c.ok) throw E(c.error.code, c.error.message);
+      return { amount: a, installments: k, frequency: c.frequency, first_due: first, schedule: c.schedule, last_due: c.last_due, days: c.days, limit_date: c.limit, max_days: maxd };
     }
     const due = t.due_date; if (!due || due < base || due > addDays(base, s.cheq_max_days)) throw E('BAD_DUE_DATE', 'el vencimiento del e-cheq debe estar entre hoy y ' + s.cheq_max_days + ' días');
     const iname = String(t.issuer_name || '').trim(), icuit = digits(t.issuer_cuit);
@@ -257,7 +265,7 @@ export const DemoCom = {
     if (!apu) throw E('NO_APPROVER', 'no hay aprobador ACTIVO configurado para ' + key);
     const cl = c.clients.find(x => x.id === clientId); if (!cl) throw E('CLIENT_NOT_FOUND', 'CLIENTE NO ENCONTRADO');
     if (cl.status !== 'ACTIVO') throw E('CLIENT_IN_REVIEW', 'el cliente está pendiente de revisión (' + cl.review_reasons.join(', ') + ')');
-    const t = this._comTerms(kind, terms, cl, ymd(new Date())), now = new Date().toISOString();
+    const t = this._comTerms(kind, terms, cl, arDate()), now = new Date().toISOString();   // fecha ARGENTINA de creación (= servidor)
     const q = { id: 'aut-' + (++c.seq), number: 'AUT-' + String(c.seq).padStart(6, '0'), kind, client_id: cl.id, client: { id: cl.id, erp_id: cl.erp_id, razon_social: cl.razon_social, nombre: cl.nombre, doc_type: cl.doc_type, doc_number: cl.doc_number, cuit: cl.cuit },
       channel: a.channel, branch: a.branch || null, cartera_label: a.cartera_label || null, requested_by: me.id, assigned_approver_id: ap, order_ref: String(orderRef || '').trim().slice(0, 60) || null, notes: String(notes || '').trim().slice(0, 600) || null,
       original_terms: t, current_terms: t, final_terms: null, kpi: kind === 'FINANCIACION' ? this._comKpi(cl.id) : { status: 'NO_APLICA' }, status: 'PENDIENTE', decided_by: null, decided_at: null, decided_as: null, version: 1, op_id: opId || null, created_at: now, updated_at: now };
@@ -271,7 +279,7 @@ export const DemoCom = {
     if (q.status !== 'PENDIENTE' || q.version !== version) throw E('CONFLICT', 'la solicitud ya fue resuelta o cambió (estado ' + q.status + ', por ' + (this._comName(q.decided_by) || '—') + ')');
     if (!['APROBAR', 'APROBAR_CON_CAMBIOS', 'RECHAZAR', 'DEVOLVER'].includes(decision)) throw E('BAD_DECISION');
     if (decision !== 'APROBAR' && String(reason || '').trim().length < 5) throw E('REASON_REQUIRED', 'indicá el motivo');
-    const cl = c.clients.find(x => x.id === q.client_id), t = ['APROBAR_CON_CAMBIOS', 'DEVOLVER'].includes(decision) ? this._comTerms(q.kind, terms, cl, q.created_at.slice(0, 10)) : q.current_terms;
+    const cl = c.clients.find(x => x.id === q.client_id), t = ['APROBAR_CON_CAMBIOS', 'DEVOLVER'].includes(decision) ? this._comTerms(q.kind, terms, cl, arDate(q.created_at))   /* fecha ARGENTINA de la creación ORIGINAL (= servidor) */ : q.current_terms;
     if (['APROBAR_CON_CAMBIOS', 'DEVOLVER'].includes(decision) && JSON.stringify(t) === JSON.stringify(q.current_terms)) throw E('NO_CHANGES', 'no hay cambios en importe, cuotas o plazo');
     const st = { APROBAR: 'APROBADA', APROBAR_CON_CAMBIOS: 'APROBADA_MOD', RECHAZAR: 'RECHAZADA', DEVOLVER: 'DEVUELTA' }[decision], before = q.current_terms;
     Object.assign(q, { status: st, current_terms: t, final_terms: ['APROBADA', 'APROBADA_MOD'].includes(st) ? t : null, decided_by: st === 'DEVUELTA' ? null : me.id, decided_at: st === 'DEVUELTA' ? null : new Date().toISOString(), decided_as: st === 'DEVUELTA' ? null : as, version: q.version + 1, updated_at: new Date().toISOString() });

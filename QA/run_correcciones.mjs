@@ -9,7 +9,7 @@ const vars={};
 const pre=s=>s.split('\n').map(l=>{if(l.startsWith('\\set ')){const m=l.match(/^\\set\s+(\w+)\s+(.+)$/);if(m)vars[m[1]]=m[2].trim().replace(/^'|'$/g,'');return ''}if(l.startsWith('\\'))throw Error('Metacomando '+l);return l}).join('\n').replace(/:'([A-Za-z0-9_]+)'/g,(_,k)=>"'"+vars[k].replaceAll("'","''")+"'");
 let c;const out={};try{
  await server.initialise();await server.start();c=new pg.Client({host:'127.0.0.1',port:55449,user:'postgres',password:'local-commercial-qa',database:'postgres'});await c.connect();
- for(const f of ['QA/base_setup.sql','QA/storage_stub.sql','propuestas/comercial/20261201000100_comercial_autorizaciones.sql','propuestas/comercial/20261201000200_comercial_cuotas_respaldo.sql','propuestas/comercial/20261201000300_comercial_consultar_aprobacion.sql','propuestas/comercial/20261201000400_comercial_alarma_urgente.sql','propuestas/comercial/20261201000500_comercial_admin_sesion_vigente.sql','propuestas/comercial/20261201000600_comercial_modulo_historial.sql','propuestas/comercial/20261201000700_comercial_sesion_vigente_total.sql','propuestas/comercial/20261201000800_comercial_v4_alarma_escala_push.sql','propuestas/comercial/20261201000900_comercial_v5_permisos_kpi_fechas.sql','propuestas/comercial/20261201001000_comercial_v6_push_instalacion.sql','propuestas/comercial/20261201001100_comercial_kpi_facturacion.sql'])await c.query(pre(readFileSync(f,'utf8')));
+ for(const f of ['QA/base_setup.sql','QA/storage_stub.sql','propuestas/comercial/20261201000100_comercial_autorizaciones.sql','propuestas/comercial/20261201000200_comercial_cuotas_respaldo.sql','propuestas/comercial/20261201000300_comercial_consultar_aprobacion.sql','propuestas/comercial/20261201000400_comercial_alarma_urgente.sql','propuestas/comercial/20261201000500_comercial_admin_sesion_vigente.sql','propuestas/comercial/20261201000600_comercial_modulo_historial.sql','propuestas/comercial/20261201000700_comercial_sesion_vigente_total.sql','propuestas/comercial/20261201000800_comercial_v4_alarma_escala_push.sql','propuestas/comercial/20261201000900_comercial_v5_permisos_kpi_fechas.sql','propuestas/comercial/20261201001000_comercial_v6_push_instalacion.sql','propuestas/comercial/20261201001100_comercial_kpi_facturacion.sql','propuestas/comercial/20261201001200_comercial_cuotas_calendario.sql'])await c.query(pre(readFileSync(f,'utf8')));
  // N-V4-03: el modo del KPI que deja la INSTALACIÓN (se verifica en V5-K01). Después, activación EXPLÍCITA de PROVISORIO solo para probar el CÁLCULO del KPI
  out.kpi_tras_instalar=(await c.query("select kpi_mode from public.com_settings where id='DEFAULT'")).rows[0].kpi_mode; console.log('KPI tras instalar:', out.kpi_tras_instalar);
  await c.query({text:'create temp table v5_kpi_instalacion(modo text); insert into v5_kpi_instalacion values ($1)', values:[out.kpi_tras_instalar]}).catch(async()=>{ await c.query('create temp table v5_kpi_instalacion(modo text)'); await c.query({text:'insert into v5_kpi_instalacion values ($1)', values:[out.kpi_tras_instalar]}); });
@@ -68,6 +68,19 @@ let c;const out={};try{
  await c.query("update public.com_settings set kpi_mode='DESHABILITADO' where id='DEFAULT'");   // el KPI de facturación se valida con el KPI DESHABILITADO (rótulo)
  await c.query(pre(readFileSync('QA/extra_kpi.sql','utf8')));out.kpi=(await c.query('select * from kpi_checks order by name')).rows;console.log('KPI FACTURACIÓN',out.kpi.filter(x=>x.ok).length,'/',out.kpi.length);
  for(const x of out.kpi)console.log((x.ok?'PASS':'FAIL')+' | '+x.name+' | '+String(x.detail||'').slice(0,300));
+ await c.query(pre(readFileSync('QA/extra_cuotas.sql','utf8')));out.cuotas=(await c.query('select * from cu_checks order by name')).rows;console.log('CUOTAS',out.cuotas.filter(x=>x.ok).length,'/',out.cuotas.length);
+ for(const x of out.cuotas)console.log((x.ok?'PASS':'FAIL')+' | '+x.name+' | '+String(x.detail||'').slice(0,260));
+ // reversión EXACTA de 001200 y reaplicación (los datos con calendario se conservan)
+ { const nreq=(await c.query("select count(*)::int n from public.com_requests where original_terms ? 'first_due'")).rows[0].n;
+   await c.query(readFileSync('propuestas/comercial/REVERSION_CUOTAS_CALENDARIO.sql','utf8'));
+   const md5r=(await c.query("select md5(pg_get_functiondef('public._com_terms(text,jsonb,public.com_clients,date)'::regprocedure)) m")).rows[0].m;
+   const nreq2=(await c.query("select count(*)::int n from public.com_requests where original_terms ? 'first_due'")).rows[0].n;
+   let again; try{ await c.query(readFileSync('propuestas/comercial/REVERSION_CUOTAS_CALENDARIO.sql','utf8')); again='SIN ERROR'; }catch(e){ await c.query('rollback').catch(()=>{}); again=e.message; }
+   await c.query(readFileSync('propuestas/comercial/20261201001200_comercial_cuotas_calendario.sql','utf8'));
+   let twice; try{ await c.query(readFileSync('propuestas/comercial/20261201001200_comercial_cuotas_calendario.sql','utf8')); twice='SIN ERROR'; }catch(e){ await c.query('rollback').catch(()=>{}); twice=e.message; }
+   const ok=md5r==='cd4e5a9e0a39ac7bcdd712ef57b25bef' && nreq>0 && nreq2===nreq && /NADA_QUE_REVERTIR/.test(again) && /YA_APLICADA/.test(twice);
+   out.cuotas.push({name:'CU-21 REVERSIÓN exacta (huella original) que CONSERVA las solicitudes con calendario; segunda reversión y doble aplicación se detienen; reaplicable',ok,detail:`md5=${md5r} · solicitudes=${nreq}→${nreq2} · 2.ª reversión=${again.slice(0,30)} · doble=${twice.slice(0,20)}`});
+   console.log((ok?'PASS':'FAIL')+' | CU-21 reversión exacta | '+out.cuotas.at(-1).detail); }
  // REVERSIÓN del módulo: AL FINAL, sobre la base con los datos de todas las pruebas
  const REV=readFileSync('propuestas/comercial/REVERSION_MODULO_COMERCIAL.sql','utf8');
  await c.query(pre(readFileSync('QA/extra_reversion_pre.sql','utf8')));
@@ -81,5 +94,5 @@ let c;const out={};try{
  const k02=out.work.find(x=>/WORK-K02/.test(x.name));
  console.log('PENDIENTE DE ARCHIVO REAL | '+(k02?k02.name+' → '+(k02.ok?'pasa':'sigue fallando (bloqueo abierto, NO se altera)')+' · '+k02.detail:'no encontrado'));
  writeFileSync('QA/results/correcciones.json',JSON.stringify(out,null,2));
- if(out.paquete.some(x=>!x.ok)||out.correcciones.some(x=>!x.ok)||out.consultar.some(x=>!x.ok)||out.alarma.some(x=>!x.ok)||(out.concurrencia||[]).some(x=>!x.ok)||(out.historial||[]).some(x=>!x.ok)||(out.reversion||[]).some(x=>!x.ok)||(out.v5||[]).some(x=>!x.ok)||(out.v6||[]).some(x=>!x.ok)||(out.kpi||[]).some(x=>!x.ok)||(out.cron||[]).some(x=>!x.ok)||(out.v4||[]).some(x=>!x.ok)||out.work.some(x=>!x.ok&&!/WORK-K02/.test(x.name)))process.exitCode=1;
+ if(out.paquete.some(x=>!x.ok)||out.correcciones.some(x=>!x.ok)||out.consultar.some(x=>!x.ok)||out.alarma.some(x=>!x.ok)||(out.concurrencia||[]).some(x=>!x.ok)||(out.historial||[]).some(x=>!x.ok)||(out.reversion||[]).some(x=>!x.ok)||(out.v5||[]).some(x=>!x.ok)||(out.v6||[]).some(x=>!x.ok)||(out.kpi||[]).some(x=>!x.ok)||(out.cuotas||[]).some(x=>!x.ok)||(out.cron||[]).some(x=>!x.ok)||(out.v4||[]).some(x=>!x.ok)||out.work.some(x=>!x.ok&&!/WORK-K02/.test(x.name)))process.exitCode=1;
 }finally{await c?.end();await server.stop();}

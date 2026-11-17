@@ -25,3 +25,7 @@
 .com-app .hist-top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .com-app .hist-cli { font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
 .com-app .hist-meta { font-size: 12.5px; color: var(--mut, #5b6b75); overflow-wrap: anywhere; }
+
+/* Financiación propia: calendario solicitado / propuesto / autorizado lado a lado (una columna en el celular) */
+.calcompare{display:grid;gap:12px;grid-template-columns:1fr;margin:10px 0}
+@media(min-width:720px){.calcompare{grid-template-columns:1fr 1fr}}

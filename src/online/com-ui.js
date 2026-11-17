@@ -1,6 +1,7 @@
 // AUTORIZACIONES COMERCIALES · pantallas con el DISEÑO APROBADO (HTML de referencia). Liviano para celular: sin librerías,
 // búsqueda en el servidor, sin descargar el padrón ni archivos financieros. El servidor valida TODO (permisos, términos, decisiones).
 import '../styles/com.css';
+import { computeSchedule, arDate, FREQ, FREQ_PLURAL, dmyFull, addDays as calAddDays } from './com-schedule.js';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = n => n == null || n === '' ? '—' : '$ ' + Number(n).toLocaleString('es-AR', { maximumFractionDigits: 0 });
 const dmy = s => { if (!s) return '—'; const [y, m, d] = String(s).slice(0, 10).split('-'); return d + '/' + m + '/' + y; };
@@ -15,7 +16,30 @@ const pill = s => '<span class="pill ' + (ST[s] || ['neutral'])[0] + '">' + esc(
 const EV = { ENVIADA: 'Solicitud enviada a Administración', PENDIENTE: 'Pendiente de aprobación', APROBADA: 'Aprobada', APROBADA_CON_MODIFICACIONES: 'Aprobada con modificaciones',
   RECHAZADA: 'Rechazada', DEVUELTA_CON_MODIFICACIONES: 'Devuelta con modificaciones (no es aprobación)', CAMBIOS_ACEPTADOS_REENVIADA: 'Comercial aceptó los cambios y reenvió', RETIRADA_POR_COMERCIAL: 'Retirada por Comercial' };
 const origin = r => r.channel === 'CARTERA' ? 'Cartera · ' + (r.cartera_label || '') : r.branch === 'SAN_JUAN' ? 'San Juan' : r.branch === 'MONTECASEROS' ? 'Montecaseros' : (r.branch || '—');
-const terms = (k, t) => !t ? '—' : k === 'FINANCIACION' ? t.installments + ' cuota' + (t.installments > 1 ? 's' : '') + ' semanal' + (t.installments > 1 ? 'es' : '') + ' · último vencimiento ' + dmy(t.last_due) + ' (' + t.days + ' días)'
+const finTerms = t => { const k = t.installments, f = t.frequency || (k > 1 ? 'SEMANAL' : null), first = t.first_due || (t.schedule && t.schedule[0] && t.schedule[0].due);
+  return k + ' cuota' + (k > 1 ? 's ' + FREQ_PLURAL[f] : '') + (k > 1 && first ? ' · 1.ª ' + dmy(first) : '') + ' · ' + (k > 1 ? 'último vencimiento ' : 'vence ') + dmy(t.last_due) + ' (' + t.days + ' días)'; };
+// calendario GUARDADO (nunca se recalcula: una solicitud histórica se muestra como se registró)
+const calList = (sched, mark) => '<div class="schedule">' + (sched || []).map(c => '<div class="scheditem"' + (c.n === mark ? ' data-cal-excede style="border-color:#b42318;background:#fdecea"' : '') + '><strong>Cuota ' + c.n + ' · ' + money(c.amount) + '</strong><small>' + dmy(c.due) + (c.n === mark ? ' · <b style="color:#b42318">SUPERA EL LÍMITE</b>' : '') + '</small></div>').join('') + '</div>';
+// formulario de calendario (Comercial «c» y aprobador «d»): cantidad → frecuencia (2+) → primer vencimiento
+const calForm = (p, v) => '<label class="field"><span>CANTIDAD DE CUOTAS</span><select id="' + p + 'Inst">' + Array.from({ length: 8 }, (_, i) => '<option value="' + (i + 1) + '"' + (i + 1 === v.k ? ' selected' : '') + '>' + (i + 1) + ' cuota' + (i ? 's' : '') + '</option>').join('') + '</select></label>' +
+  '<label class="field" id="' + p + 'FreqW"' + (v.k > 1 ? '' : ' hidden') + '><span>FRECUENCIA DE PAGO</span><select id="' + p + 'Freq"><option value="">Elegí la frecuencia…</option>' + Object.keys(FREQ).map(f => '<option value="' + f + '"' + (f === v.freq ? ' selected' : '') + '>' + FREQ[f] + '</option>').join('') + '</select></label>' +
+  '<label class="field"><span id="' + p + 'FirstL">' + (v.k > 1 ? 'PRIMER VENCIMIENTO' : 'FECHA DE VENCIMIENTO') + '</span><input class="input" type="date" id="' + p + 'First" min="' + v.base + '" max="' + calAddDays(v.base, 30) + '" value="' + esc(v.first || '') + '"></label>' +
+  '<div class="spanall" id="' + p + 'Sched"></div>';
+function calWire(p, base, amountOf, after) {
+  const $$ = id => document.getElementById(p + id);
+  const upd = () => {
+    const k = Number($$('Inst').value); $$('FreqW').hidden = k < 2; $$('FirstL').textContent = k > 1 ? 'PRIMER VENCIMIENTO' : 'FECHA DE VENCIMIENTO';
+    const c = computeSchedule({ base, installments: k, frequency: $$('Freq').value, first_due: $$('First').value, amount: amountOf() });
+    $$('Sched').innerHTML = '<p class="micro" data-cal-limit>Fecha límite: <b>' + dmyFull(c.limit) + '</b> · 30 días corridos desde la creación de la solicitud (' + dmyFull(base) + '), el día 30 incluido.</p>' +
+      (c.ok ? '<span class="label">Calendario de pago</span>' + calList(c.schedule)
+        : c.error.code === 'BAD_SCHEDULE' ? '<div class="note warn" data-cal-error>' + esc(c.error.message) + '</div>' + calList(c.schedule, c.error.cuota)
+        : '<p class="micro" data-cal-pending>' + esc(c.error.message) + '</p>');
+    if (after) after(c); return c;
+  };
+  ['Inst', 'Freq', 'First'].forEach(x => { const e = $$(x); if (e) { e.onchange = upd; e.oninput = upd; } });
+  return upd;
+}
+const terms = (k, t) => !t ? '—' : k === 'FINANCIACION' ? finTerms(t)
   : 'Vence ' + dmy(t.due_date) + ' (' + t.days + ' días) · Emisor: ' + (t.issuer_is_client ? 'el mismo cliente' : esc(t.issuer_name)) + (t.issuer_cuit ? ' · CUIT ' + t.issuer_cuit : '');
 const head = (sub, title, desc, extra = '') => '<div class="heading"><div><div class="eyebrow">' + sub + '</div><h1>' + title + '</h1><p class="lead">' + desc + '</p></div>' + extra + '</div>';
 
@@ -24,7 +48,8 @@ function timeline(r) {
     const last = i === a.length - 1, cls = last ? (r.status === 'RECHAZADA' ? 'fail' : ['APROBADA', 'APROBADA_MOD'].includes(r.status) ? 'ending' : '') : '';
     const sup = e.assigned && e.by && !String(e.by).startsWith(String(e.assigned).split(' — ')[0]) && /APROBADA|RECHAZADA|DEVUELTA/.test(e.kind) ? '<small>Solicitud asignada a ' + esc(e.assigned) + '</small>' : '';
     return '<div class="step ' + cls + '"><strong>' + esc(EV[e.kind] || e.kind) + (e.kind === 'PENDIENTE' && e.assigned ? ' · ' + esc(e.assigned) : '') + '</strong><small>' + esc(e.by || '—') + ' · ' + when(e.at) + '</small>' + sup +
-      (e.reason ? '<p>' + esc(e.reason) + '</p>' : '') + '</div>';
+      (e.reason ? '<p>' + esc(e.reason) + '</p>' : '') +
+      (r.kind === 'FINANCIACION' && e.terms_after && e.terms_after.schedule ? '<small data-cal-paso>' + money(e.terms_after.amount) + ' · ' + e.terms_after.schedule.map(c => 'C' + c.n + ' ' + dmy(c.due)).join(' · ') + '</small>' : '') + '</div>';
   }).join('') + '</div>';
 }
 function kpiBox(k, amount, compact) {
@@ -55,6 +80,10 @@ function details(r, opts = {}) {
     '<div class="spanall"><span class="label">' + (ok ? 'Condiciones autorizadas' : r.status === 'DEVUELTA' ? 'Condiciones PROPUESTAS en la devolución' : 'Condiciones solicitadas') + '</span><div><b>' + (ok || r.status === 'DEVUELTA' ? money(t.amount) + ' · ' : '') + terms(r.kind, t) + '</b></div></div>' +
     (r.decided_by ? '<div class="spanall"><span class="label">Resolvió</span><div><b>' + esc(r.decided_by) + '</b>' + (r.decided_as === 'SUPLENTE_ADMIN' ? ' · suplencia de ' + esc(r.assigned_approver) : '') + ' · ' + when(r.decided_at) + '</div></div>' : '') + '</div>' +
     (r.status === 'DEVUELTA' ? '<div class="note warn">La devolución propone <b>' + money(t.amount) + '</b> · ' + terms(r.kind, t) + '. <b>NO es una aprobación.</b> Comercial debe revisar y reenviar.</div>' : '') +
+    (r.kind === 'FINANCIACION' && o && o.schedule ? '<div class="calcompare" data-cal-detalle>' +
+      '<div><span class="label">Calendario SOLICITADO</span>' + calList(o.schedule) + (o.limit_date ? '<small class="micro">Fecha límite: ' + dmy(o.limit_date) + '</small>' : '') + '</div>' +
+      (r.status === 'DEVUELTA' ? '<div><span class="label">Calendario PROPUESTO por el aprobador</span>' + calList(t.schedule) + '</div>'
+        : ok ? '<div><span class="label">Calendario AUTORIZADO</span>' + (JSON.stringify(t.schedule) === JSON.stringify(o.schedule) && t.amount === o.amount ? '<p class="micro">El mismo que se solicitó.</p>' : calList(t.schedule)) + '</div>' : '') + '</div>' : '') +
     (opts.kpi && r.kpi ? '<h3 style="margin:14px 0 6px">KPI al momento de la solicitud</h3>' + kpiBox(r.kpi, o && o.amount, true) : '') + (opts.finance || '') +
     '<h3 style="margin:14px 0 6px">Trazabilidad de la autorización</h3>' + timeline(r) + (opts.actions || '');
 }
@@ -125,7 +154,7 @@ async function mount(api, me, host) {
     m.innerHTML = head('ROL COMERCIAL', 'Nueva solicitud de autorización', 'Buscá el cliente, elegí el tipo, ingresá importe y plazo, y enviá. El KPI se calcula solo con las cargas de Depósito.') +
       '<div class="grid two"><section class="card"><div class="sectionhead"><h2>Cargar solicitud</h2></div>' +
       (!a ? '<div class="note warn">Administración todavía no te asignó sucursal o cartera. No podés enviar solicitudes hasta que lo haga.</div>' : '') +
-      '<div class="selecttype"><button class="typebtn ' + (st.type === 'FINANCIACION' ? 'active' : '') + '" data-type="FINANCIACION" type="button">▤ Financiación propia<small>Facturas diferidas · cuotas semanales</small></button>' +
+      '<div class="selecttype"><button class="typebtn ' + (st.type === 'FINANCIACION' ? 'active' : '') + '" data-type="FINANCIACION" type="button">▤ Financiación propia<small>Cuotas, frecuencia y primer vencimiento</small></button>' +
       '<button class="typebtn ' + (st.type === 'ECHEQ' ? 'active' : '') + '" data-type="ECHEQ" type="button">▣ Aceptación de e-cheq<small>Emisor, importe y plazo</small></button></div>' +
       '<div class="fg"><label class="field spanall"><span>CLIENTE (nombre, razón social o CUIT)</span><input class="input" id="cSearch" autocomplete="off" placeholder="Ej.: TECNO o 30-50001091-2" value="' + esc(st.client ? st.client.razon_social : st.search) + '"><div id="cSugg"></div></label>' +
       '<label class="field"><span>CUIT DEL CLIENTE</span><input class="input" readonly id="cCuit" value="' + esc(st.client ? (st.client.cuit || 'Sin CUIT · ' + st.client.doc_type + ' ' + (st.client.doc_number || '')) : '') + '"></label>' +
@@ -134,7 +163,7 @@ async function mount(api, me, host) {
       '<div class="field"><span>' + (a && a.channel === 'CARTERA' ? 'CARTERA' : 'SUCURSAL') + '</span><div class="input" style="background:var(--soft)">' + esc(a ? (a.channel === 'CARTERA' ? 'Cartera · ' + (a.cartera_label || '') : a.branch === 'SAN_JUAN' ? 'San Juan' : 'Montecaseros') : '—') + '</div></div>' +
       '<div class="field"><span>RESPONSABLE DE APROBACIÓN</span><div class="input" style="background:var(--soft)"><b>' + esc(a && a.approver ? String(a.approver).split(' — ')[0] : '—') + '</b><small style="display:block;color:var(--mut)">Asignación automática</small></div></div>' +
       '<label class="field"><span>IMPORTE SOLICITADO</span><input class="input" id="cAmount" inputmode="numeric" placeholder="Ej.: 2750000"></label>' +
-      (st.type === 'FINANCIACION' ? '<label class="field"><span>CUOTAS SEMANALES</span><select id="cInst">' + Array.from({ length: maxK }, (_, i) => '<option value="' + (i + 1) + '"' + (i + 1 === maxK ? ' selected' : '') + '>' + (i + 1) + ' cuota' + (i ? 's' : '') + ' · hasta ' + (i + 1) * 7 + ' días</option>').join('') + '</select></label><div class="spanall" id="cSched"></div>'
+      (st.type === 'FINANCIACION' ? calForm('c', { k: 1, freq: '', first: '', base: arDate() })
         : '<label class="field"><span>VENCIMIENTO DEL E-CHEQ</span><input class="input" type="date" id="cDue" min="' + today + '" max="' + addDays(today, s.cheq_max_days) + '"></label><label class="field"><span>EMISOR (vacío = el mismo cliente)</span><input class="input" id="cIssuer" placeholder="Nombre del emisor"></label><label class="field"><span>CUIT DEL EMISOR</span><input class="input" id="cIssuerCuit" inputmode="numeric" placeholder="Opcional"></label>') +
       '<label class="field spanall"><span>OBSERVACIONES (opcional)</span><textarea class="input" id="cNotes" rows="2" maxlength="600" placeholder="Información adicional para quien autoriza"></textarea></label></div>' +
       '<button class="btn primary wfull" type="button" id="cSend"' + (a ? '' : ' disabled') + '>Enviar solicitud a ' + esc(a && a.approver ? String(a.approver).split(' — ')[0] : 'aprobación') + '</button>' +
@@ -144,12 +173,15 @@ async function mount(api, me, host) {
     host.querySelectorAll('[data-type]').forEach(b => b.onclick = () => { st.type = b.dataset.type; render(); });
     if ($('#goHist')) $('#goHist').onclick = () => { st.tab = 'historial'; nav(); render(); };
     host.querySelectorAll('[data-select]').forEach(b => b.onclick = () => { st.sel = b.dataset.select; render(); });
-    const sched = () => { const el = $('#cSched'); if (!el) return; const amt = Number(String($('#cAmount').value).replace(/\D/g, '')) || 0, k = Number($('#cInst').value), part = Math.round(amt / k * 100) / 100;
-      el.innerHTML = amt ? '<div class="schedule">' + Array.from({ length: k }, (_, i) => '<div class="scheditem"><strong>Cuota ' + (i + 1) + ' · ' + money(i < k - 1 ? part : amt - part * (k - 1)) + '</strong><small>' + dmy(addDays(today, (i + 1) * 7)) + ' · +' + (i + 1) * 7 + ' días</small></div>').join('') + '</div>' : '';
-      const kb = $('#cKpi'); if (kb && st.client) kb.innerHTML = kpiBox(st.kpi, amt); };
-    if ($('#cAmount')) $('#cAmount').oninput = sched; if ($('#cInst')) $('#cInst').onchange = sched;
+    // FINANCIACIÓN: calendario en vivo con la MISMA regla que el servidor; el envío se bloquea mientras sea inválido (lo cargado se conserva)
+    const amountOf = () => Number(String(($('#cAmount') || {}).value || '').replace(/\D/g, '')) || 0;
+    let cal = null;
+    const sendState = () => { const b = $('#cSend'); if (!b || !a) return; const blk = st.type === 'FINANCIACION' && !(cal && cal.ok); b.disabled = blk; b.title = blk && cal ? cal.error.message : ''; };
+    const calUpd = $('#cSched') ? calWire('c', arDate(), amountOf, c => { cal = c; sendState(); }) : null;
+    const sched = () => { if (calUpd) calUpd(); const kb = $('#cKpi'); if (kb && st.client) kb.innerHTML = kpiBox(st.kpi, amountOf()); sendState(); };
+    if ($('#cAmount')) $('#cAmount').oninput = sched; sched();
     // actualización de la app con el formulario abierto: mientras haya datos escritos y sin enviar, la recarga se POSTERGA (main.js · busy)
-    { const card = $('#cSend') && $('#cSend').closest('section'), dirty = () => ['#cSearch', '#cOrder', '#cAmount', '#cNotes'].some(k => $(k) && $(k).value.trim());
+    { const card = $('#cSend') && $('#cSend').closest('section'), dirty = () => ['#cSearch', '#cOrder', '#cAmount', '#cNotes', '#cFirst'].some(k => $(k) && $(k).value.trim());
       if (card) card.addEventListener('input', () => { if (dirty()) card.setAttribute('data-okd-unsaved', '1'); else card.removeAttribute('data-okd-unsaved'); }); }
     // búsqueda en el SERVIDOR con sugerencias; nombre y CUIT salen SOLO del cliente elegido (vinculados)
     let tmr; const inp = $('#cSearch');
@@ -169,7 +201,9 @@ async function mount(api, me, host) {
     $('#cSend').onclick = async () => {
       if (!st.client) { toast('Elegí el cliente de la lista (el CUIT se completa solo).', true); return; }
       const amount = Number(String($('#cAmount').value).replace(/\D/g, '')); if (!amount) { toast('Ingresá el importe.', true); return; }
-      const t = st.type === 'FINANCIACION' ? { amount, installments: Number($('#cInst').value) } : { amount, due_date: $('#cDue').value, issuer_name: $('#cIssuer').value.trim(), issuer_cuit: $('#cIssuerCuit').value.trim() };
+      if (st.type === 'FINANCIACION' && !(cal && cal.ok)) { toast(cal ? cal.error.message : 'Completá el calendario de pago.', true); return; }
+      const k = Number($('#cInst') ? $('#cInst').value : 0);
+      const t = st.type === 'FINANCIACION' ? { amount, installments: k, first_due: $('#cFirst').value, ...(k > 1 ? { frequency: $('#cFreq').value } : {}) } : { amount, due_date: $('#cDue').value, issuer_name: $('#cIssuer').value.trim(), issuer_cuit: $('#cIssuerCuit').value.trim() };
       const b = $('#cSend'); b.disabled = true;
       try { const res = await api.comCreate(st.type, st.client.id, $('#cOrder').value.trim(), t, $('#cNotes').value.trim(), 'com-' + (crypto.randomUUID ? crypto.randomUUID() : Date.now()));
         toast('Solicitud ' + res.number + ' enviada' + (res.approver ? ' a ' + String(res.approver).split(' — ')[0] : '') + '.'); st.client = null; st.kpi = null; st.search = ''; st.sel = res.id; render(); }
@@ -264,13 +298,20 @@ async function mount(api, me, host) {
     const title = { APROBAR: 'Aprobar', APROBAR_CON_CAMBIOS: 'Aprobar con cambios', DEVOLVER: 'Devolver con modificaciones', RECHAZAR: 'Rechazar' }[dec];
     $('#comModal').innerHTML = '<div class="modalbg"><div class="modal"><div class="sectionhead"><h2>' + title + ' · ' + esc(r.number) + '</h2><button class="btn outline" type="button" data-close>✕</button></div>' +
       (change ? '<div class="fg"><label class="field"><span>IMPORTE</span><input class="input" id="dAmount" inputmode="numeric" value="' + Math.round(t.amount) + '"></label>' +
-        (r.kind === 'FINANCIACION' ? '<label class="field"><span>CUOTAS SEMANALES</span><select id="dInst">' + Array.from({ length: maxK }, (_, i) => '<option value="' + (i + 1) + '"' + (i + 1 === t.installments ? ' selected' : '') + '>' + (i + 1) + ' · hasta ' + (i + 1) * 7 + ' días</option>').join('') + '</select></label>'
+        (r.kind === 'FINANCIACION' ? '<div class="spanall"><span class="label">Calendario SOLICITADO por el Comercial</span>' + calList((r.original_terms || t).schedule) + '</div>' +
+          calForm('d', { k: t.installments, freq: t.frequency || (t.installments > 1 ? 'SEMANAL' : ''), first: t.first_due || (t.schedule && t.schedule[0] && t.schedule[0].due), base: arDate(r.created_at) })
           : '<label class="field"><span>VENCIMIENTO</span><input class="input" type="date" id="dDue" value="' + esc(t.due_date) + '" min="' + base + '" max="' + addDays(base, s.cheq_max_days) + '"></label>') + '</div>' : '<p>' + money(t.amount) + ' · ' + terms(r.kind, t) + '</p>') +
       (dec !== 'APROBAR' ? '<label class="field"><span>MOTIVO (obligatorio)</span><textarea class="input" id="dReason" rows="2" maxlength="400"></textarea></label>' : '') +
       '<button class="btn primary wfull" type="button" id="dGo">Confirmar decisión</button></div></div>';
     $('[data-close]').onclick = () => { $('#comModal').innerHTML = ''; };
+    if (change && r.kind === 'FINANCIACION') {   // el aprobador edita el MISMO calendario; límite desde la creación ORIGINAL (fecha argentina)
+      const dAmt = () => Number(String($('#dAmount').value).replace(/\D/g, '')) || 0;
+      const dUpd = calWire('d', arDate(r.created_at), dAmt, c => { $('#dGo').disabled = !c.ok; $('#dGo').title = c.ok ? '' : c.error.message; });
+      $('#dAmount').oninput = dUpd; dUpd();
+    }
     $('#dGo').onclick = async () => {
-      const nt = change ? (r.kind === 'FINANCIACION' ? { amount: Number(String($('#dAmount').value).replace(/\D/g, '')), installments: Number($('#dInst').value) } : { amount: Number(String($('#dAmount').value).replace(/\D/g, '')), due_date: $('#dDue').value, issuer_name: t.issuer_is_client ? '' : t.issuer_name, issuer_cuit: t.issuer_is_client ? '' : t.issuer_cuit }) : null;
+      const dk = $('#dInst') ? Number($('#dInst').value) : 0;
+      const nt = change ? (r.kind === 'FINANCIACION' ? { amount: Number(String($('#dAmount').value).replace(/\D/g, '')), installments: dk, first_due: $('#dFirst').value, ...(dk > 1 ? { frequency: $('#dFreq').value } : {}) } : { amount: Number(String($('#dAmount').value).replace(/\D/g, '')), due_date: $('#dDue').value, issuer_name: t.issuer_is_client ? '' : t.issuer_name, issuer_cuit: t.issuer_is_client ? '' : t.issuer_cuit }) : null;
       $('#dGo').disabled = true;
       try { await api.comDecide(r.id, r.version, dec, nt, $('#dReason') ? $('#dReason').value.trim() : null); $('#comModal').innerHTML = ''; toast('Decisión registrada.'); render(); }
       catch (e) { toast(errMsg(e), true); $('#dGo').disabled = false; if (/CONFLICT/.test(String(e.message))) { $('#comModal').innerHTML = ''; render(); } }
