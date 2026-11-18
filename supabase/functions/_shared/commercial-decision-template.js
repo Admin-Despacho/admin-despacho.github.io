@@ -146,7 +146,7 @@ export function buildModel(payload) {
   const url = APP_URL + '#/autorizaciones?v=historial' + (rid ? '&solicitud=' + encodeURIComponent(rid) : '');
   const subject = oneLine((e.kind === 'ENVIADA' ? 'NUEVA SOLICITUD COMERCIAL' : 'Solicitud comercial ' + st.label) + ' | ' + oneLine(q.number) + ' | ' + client).slice(0, 200);
   const subtitle = e.kind === 'ENVIADA' ? 'Pendiente de aprobación · ' + oneLine(q.number) : oneLine(q.number) + ' · ' + (KIND[kind] || oneLine(kind));
-  return { st, e, q, kind, orig, data, cmp, subtitle, isNew: e.kind === 'ENVIADA', reasonTitle, reason: has(e.reason) ? String(e.reason) : null, resolution, closing, url, subject,
+  return { st, e, q, kind, orig, data, cmp, subtitle, isNew: e.kind === 'ENVIADA', review: payload.review && typeof payload.review === 'object' ? payload.review : null, reasonTitle, reason: has(e.reason) ? String(e.reason) : null, resolution, closing, url, subject,
     showOrigCalendar: kind === 'FINANCIACION' && sched(orig).length > 0, notes: has(q.notes) ? String(q.notes) : null };
 }
 
@@ -174,6 +174,7 @@ export function renderDecisionMail(payload, { sampleBanner = '' } = {}) {
     '<p style="font-size:14px;line-height:1.6;font-weight:bold">' + esc(m.closing) + '</p>') +
     '<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" bgcolor="' + NAVY + '" style="border-radius:8px;padding:16px;background:' + NAVY + '"><a href="' + esc(m.url) + '" style="color:#ffffff;font-size:13px;font-weight:bold;text-decoration:none;display:inline-block">CONSULTAR SOLICITUD EN OK DESPACHO</a></td></tr></table>' +
     '<p style="font-size:11px;color:#60717c;line-height:1.5">Notificación automática del sistema de Autorizaciones Comerciales. El acceso a la aplicación requiere usuario y permisos vigentes. Este correo no otorga acceso ni permisos.</p>' +
+    (m.review ? '<p style="font-size:11px;color:#60717c;line-height:1.5" data-review>Aviso emitido después de una revisión administrativa (' + esc(person(m.review.by)) + ', ' + esc(stamp(m.review.at)) + '): los datos del evento son los registrados; los nombres corresponden a la fecha de la revisión.</p>' : '') +
     '</td></tr><tr><td align="center" style="background:' + SOFT + ';padding:18px;font-size:13px" bgcolor="' + SOFT + '"><b>OK ACCESORIOS</b><div style="font-size:11px;color:' + MUTED + ';margin-top:5px">Administración · Autorizaciones Comerciales</div></td></tr>' +
     '</table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>';
   return { subject: m.subject, html, text: renderText(m) };
@@ -196,7 +197,8 @@ function renderText(m) {
   else { L.push('', 'RESOLUCIÓN ADMINISTRATIVA'); m.resolution.forEach(([k, v]) => line(k, v));
     L.push('', m.reasonTitle, m.reason ? m.reason.replace(/\r\n?/g, '\n').trim() : 'No se registraron observaciones.', '', m.closing, ''); }
   L.push(
-    'CONSULTAR SOLICITUD EN OK DESPACHO: ' + m.url, 'El acceso a la aplicación requiere usuario y permisos vigentes. Este correo no otorga acceso ni permisos.', '',
+    'CONSULTAR SOLICITUD EN OK DESPACHO: ' + m.url, 'El acceso a la aplicación requiere usuario y permisos vigentes. Este correo no otorga acceso ni permisos.',
+    ...(m.review ? ['Aviso emitido después de una revisión administrativa (' + person(m.review.by) + ', ' + stamp(m.review.at) + '): los datos del evento son los registrados; los nombres corresponden a la fecha de la revisión.'] : []), '',
     'OK ACCESORIOS', 'Administración · Autorizaciones Comerciales');
   return L.join('\n') + '\n';
 }

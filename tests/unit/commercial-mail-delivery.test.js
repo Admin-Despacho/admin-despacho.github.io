@@ -15,11 +15,11 @@ describe('MIME con destinatarios visibles (Para + CC, sin CCO)',()=>{
   expect(a.raw).toBe(b.raw);expect(a.fingerprint).toBe(b.fingerprint);expect(a.messageId).toMatch(/^okd-com-7-[0-9a-f]{24}@okaccesorios\.com$/);
  });
  it('rechaza inyección de cabeceras, direcciones inválidas, Para vacío y otro remitente',async()=>{
-  for(const bad of [{to:['a@qa.invalid\r\nBcc: x@evil.invalid']},{to:['a@qa.invalid'],cc:['b@qa.invalid>, <x@evil.invalid']},{to:[]},{to:['sin-arroba']}])await expect(buildCommercialMime({...base,cc:[],...bad})).rejects.toMatchObject({code:'SMTP_MESSAGE_INVALID'});
+  for(const bad of [{to:['a@qa.invalid\r\nBcc: x@evil.invalid']},{to:['a@qa.invalid'],cc:['b@qa.invalid>, <x@evil.invalid']},{to:[],cc:[]},{to:['sin-arroba']}])await expect(buildCommercialMime({...base,cc:[],...bad})).rejects.toMatchObject({code:'SMTP_MESSAGE_INVALID'});
   await expect(buildCommercialMime({...base,from:'otro@evil.invalid',to:['a@qa.invalid']})).rejects.toMatchObject({code:'SMTP_CONFIG_INVALID'});
   const m=await buildCommercialMime({...base,subject:'Asunto\r\nBcc: x@evil.invalid',to:['a@qa.invalid']});expect(head(m.raw)).not.toMatch(/^Bcc:/mi);
  });
- it('distributionLists exige al menos un principal',()=>{expect(()=>distributionLists([],['a@qa.invalid'])).toThrow();});
+ it('distributionLists: sin destinatarios → error; solo CC (sin principales habilitados) → válido, nunca CCO',()=>{expect(()=>distributionLists([],[])).toThrow();expect(distributionLists([],['a@qa.invalid'])).toEqual({to:[],cc:['a@qa.invalid']});});
 });
 describe('Entrega por destinatario sobre el ledger (sin red)',()=>{
  const creds={host:'mail.okaccesorios.com',port:26,user:'fgutierrez@okaccesorios.com',from:'fgutierrez@okaccesorios.com',password:'x',secret_version:'v1'};

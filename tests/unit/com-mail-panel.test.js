@@ -39,3 +39,26 @@ describe('Panel de correos de autorizaciones · V2',()=>{
  });
  it('códigos nuevos con explicación',()=>{for(const c of ['APPROVER_NO_LONGER_AUTHORIZED','APPROVER_WITHOUT_EMAIL','VERSION_REVERTIDA','CONCILIADO_REVERSION','RECIPIENT_NOT_IN_DISTRIBUTION','SMTP_PREVIOUSLY_REJECTED'])expect(friendlyMailError(c,'SKIPPED',1)).not.toMatch(/Si persiste/);});
 });
+describe('Panel V3 · incidencias de integridad y tope diario',()=>{
+ const inc={incidents:[{id:5,at:'2026-11-18T14:00:00Z',request_number:'AUT-000004',event_kind:'APROBADA',code:'SNAPSHOT_MISSING',detail:'No existe la foto <b>x</b>',status:'ABIERTA',held_rows:6,can_send:true},
+  {id:4,at:'2026-11-18T13:00:00Z',request_number:'AUT-000003',event_kind:'RECHAZADA',code:'SNAPSHOT_INCONSISTENT',status:'ABIERTA',held_rows:2,can_send:false},
+  {id:3,at:'2026-11-18T12:00:00Z',request_number:'AUT-000002',event_kind:'APROBADA',code:'SNAPSHOT_MISSING',status:'RESUELTA_DESCARTE',resolved_by:'Admin QA',resolved_at:'2026-11-18T12:10:00Z',resolution_note:'Duplicado'}]};
+ it('muestra incidencias abiertas con avisos retenidos y acciones; inconsistente solo permite descartar',()=>{
+  const h=renderMailPanel({...base,...inc});
+  for(const s of ['Incidencias de integridad','2 incidencia(s) abierta(s)','RETENIDOS','6 aviso(s) retenido(s)','Falta la foto del evento','La foto no coincide con el registro','Resuelta · descartada','Duplicado'])expect(h).toContain(s);
+  expect(h).toContain('data-inc-send="5"');expect(h).not.toContain('data-inc-send="4"');expect(h).toContain('data-inc-discard="4"');expect(h).not.toContain('<b>x</b>');
+  expect(friendlyMailError('SNAPSHOT_MISSING','HELD',1)).toMatch(/revisión administrativa/);expect(friendlyMailError('DISTRIBUTION_CHANGED','PENDING',0)).toMatch(/revocación/);
+ });
+ it('tope diario: propuesto vs confirmado',()=>{
+  expect(renderMailPanel(base)).toContain('pendiente de confirmación administrativa');
+  expect(renderMailPanel({...base,transport:{...base.transport,daily_cap_confirmed:true}})).toContain('tope confirmado por Administración');
+ });
+ it('resolver exige revisión confirmada + nota; envía la acción correcta',async()=>{
+  const nodes={'#comMailResult':{textContent:''}};const note={value:''},ok={checked:false},send={dataset:{incSend:'5'},disabled:false},disc={dataset:{incDiscard:'4'},disabled:false};
+  const root={querySelector:s=>s.startsWith('[data-inc-note')?note:s.startsWith('[data-inc-ok')?ok:nodes[s]||null,querySelectorAll:s=>s==='[data-inc-send],[data-inc-discard]'?[send,disc]:[]};
+  const api={comMailIncidentResolve:vi.fn(async()=>({}))};wireMailPanel(root,api,()=>{});
+  await send.onclick();expect(api.comMailIncidentResolve).not.toHaveBeenCalled();
+  note.value='Verificado con Administración';ok.checked=true;await send.onclick();await disc.onclick();
+  expect(api.comMailIncidentResolve.mock.calls).toEqual([[5,'ENVIAR_CON_DATOS_REGISTRADOS',true,'Verificado con Administración'],[4,'DESCARTAR',true,'Verificado con Administración']]);
+ });
+});

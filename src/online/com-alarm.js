@@ -8,6 +8,7 @@
 //   (service worker sin cambios), cuando Android/Chrome y los permisos lo permiten. No se promete sonido continuo fuera de la app.
 // · Ciclo de vida (B-AL-01 / O-W01): una instancia por usuario; al destruirla se cancelan TODOS los temporizadores y nada se reprograma.
 import { capable, subscribe } from './push-notifications.js';
+import { createAlarmToasts } from './com-alarm-toasts.js';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const hhmm = s => s ? new Date(s).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '—';
 const ST = { PENDIENTE_ATENCION: 'PENDIENTE DE ATENCIÓN', ATENDIDA: 'ATENDIDA', CANCELADA: 'CANCELADA' };
@@ -38,6 +39,9 @@ function createComAlarm(api, me) {
   let ctx = null, beepTimer = null, beepEvery = 0, pollTimer = null, stopped = false, msg = '', obs = null, raf = 0;
   const timers = new Set();   // O-W01: TODO temporizador queda registrado y se cancela al destruir
   const later = (fn, ms) => { if (!alive) return 0; const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms); timers.add(id); return id; };
+  // avisos de cambio de estado (atendida / cancelada): 5 s, X, un temporizador por alarma, sin reaparecer ni mostrar historial
+  const toasts = createAlarmToasts({ later, clear: id => { clearTimeout(id); timers.delete(id); }, onChange: () => render() });
+  S.toasts = () => toasts.list();
   // ---------- sonido (Web Audio): Chrome exige un gesto del usuario para habilitar el audio ----------
   // el toque SOLO habilita el audio y NO redibuja en ese instante (si se reemplaza el aviso entre el toque y el clic, el clic no llega)
   const unlock = () => { try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); if (ctx.state === 'suspended') ctx.resume(); } catch (e) { }
@@ -104,6 +108,13 @@ function createComAlarm(api, me) {
     '#comAlarm .al-reason{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}#comAlarm .al-card details summary{cursor:pointer;font-weight:700;margin-top:4px}' +
     // formulario crítico abierto: indicador ARRIBA, compacto y SIN capturar toques (nunca intercepta GUARDAR, CONFIRMAR ni otro botón)
     '#comAlarm .al-pill{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 4px);z-index:2147482990;pointer-events:none;background:#b42318e6;color:#fff;border-radius:999px;padding:4px 12px;font-weight:800;font-size:.8em;box-shadow:0 2px 8px #0004;max-width:min(92vw,360px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    // pila inferior (alarmas PROPIAS pendientes + confirmaciones): no captura toques fuera de sus tarjetas, sin desborde horizontal
+    '#comAlarm .al-stack{position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:2147482990;display:flex;flex-direction:column;gap:8px;width:min(calc(100vw - 24px),440px);pointer-events:none}' +
+    '#comAlarm .al-stack.al-up{bottom:calc(env(safe-area-inset-bottom,0px) + 78px)}#comAlarm .al-stack>*{pointer-events:auto;box-sizing:border-box;max-width:100%}' +
+    '#comAlarm .al-mine{background:#fff8ec;color:#5a3a00;border:1px solid #e3b56a;border-radius:12px;padding:8px 12px;font-size:13px;overflow-wrap:anywhere}' +
+    '#comAlarm .al-toast{background:#fff;color:#0b2a37;border:1px solid #cfe0e5;border-left:5px solid #067647;border-radius:12px;padding:6px 6px 6px 12px;display:flex;gap:6px;align-items:flex-start;box-shadow:0 6px 18px #0b2a3726;font-size:13px;overflow-wrap:anywhere}' +
+    '#comAlarm .al-toast.al-cancel{border-left-color:#667085}#comAlarm .al-toast>div{flex:1 1 auto;min-width:0;padding-top:6px}' +
+    '#comAlarm .al-x{flex:0 0 auto;min-width:40px;min-height:40px;border:0;background:transparent;font-size:22px;line-height:1;cursor:pointer;color:inherit;border-radius:10px}#comAlarm .al-x:focus-visible{outline:3px solid #ffd166}' +
     '</style>';
   function card(a) {
     const largo = String(a.reason || '').length > 160;
@@ -139,7 +150,7 @@ function createComAlarm(api, me) {
   function render() {
     if (!alive) return;
     S.suppressed = suppression();
-    const ring = S.alarms.filter(a => a.ring), mine = S.alarms.filter(a => !a.ring && a.raised_by && nm(a.raised_by) === String(me.full_name || ''));
+    const ring = S.alarms.filter(a => a.ring), mine = S.alarms.filter(a => !a.ring && a.status === 'PENDIENTE_ATENCION' && a.raised_by && nm(a.raised_by) === String(me.full_name || ''));   // SOLO pendientes: lo resuelto se informa con una confirmación de 5 s
     setRinging(ring.length > 0);
     // B-W03 · PIN abierto: NADA visible ni accionable (ni datos operativos ni botones)
     if (S.suppressed === 'PIN' || S.suppressed === 'FIRMA') { host.innerHTML = ''; return; }   // PIN o firma abiertos: NADA visible ni accionable
@@ -163,12 +174,21 @@ function createComAlarm(api, me) {
     }
     if (!ring.length || S.suppressed !== 'CRITICO') {
       if (!ring.length) h += focusHtml(ring, false);
-      if (mine.length) h += '<div role="status" data-al-mine style="position:fixed;left:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:2147482990;background:#fff8ec;color:#5a3a00;border:1px solid #e3b56a;border-radius:12px;padding:8px 12px;max-width:min(92vw,460px);font-size:13px;overflow-wrap:anywhere">' +
-        mine.slice(0, 3).map(a => '<div><b>' + esc(a.number) + '</b> · ' + (a.sheet_key === 'AUTORIZACION' ? 'autorización ' : 'pedido ') + esc(a.order_ref) + ' · <b>' + esc(ST[a.status] || a.status) + '</b>' +
-          (a.status === 'ATENDIDA' ? ' por ' + esc(nm(a.attended_by)) + ' a las ' + hhmm(a.attended_at) : a.escalated_at ? ' · ESCALADA a las ' + hhmm(a.escalated_at) : '') + '</div>').join('') + '</div>';
+    }
+    // pila inferior: nunca con PIN, firma ni formularios críticos abiertos (no tapa operaciones de transportistas)
+    const tl = toasts.list();
+    if (!S.suppressed && (mine.length || tl.length)) {
+      h += '<div class="al-stack' + (ring.length && S.minimized ? ' al-up' : '') + '" data-al-stack>' +
+        (mine.length ? '<div role="status" class="al-mine" data-al-mine>' + mine.slice(0, 3).map(a => '<div><b>' + esc(a.number) + '</b> · ' + (a.sheet_key === 'AUTORIZACION' ? 'autorización ' : 'pedido ') + esc(a.order_ref) + ' · <b>' + esc(ST[a.status] || a.status) + '</b>' +
+          (a.escalated_at ? ' · ESCALADA a las ' + hhmm(a.escalated_at) : '') + '</div>').join('') + '</div>' : '') +
+        tl.map(a => '<div role="status" aria-live="polite" class="al-toast' + (a.status === 'ATENDIDA' ? '' : ' al-cancel') + '" data-al-toast="' + esc(a.id) + '"><div>✓ <b>' + esc(a.number) + '</b> · ' +
+          (a.sheet_key === 'AUTORIZACION' ? 'autorización ' : 'pedido ') + esc(a.order_ref) + ' · <b>' + esc(a.status === 'NO_PENDIENTE' ? 'YA NO ESTÁ PENDIENTE' : (ST[a.status] || a.status)) + '</b>' +
+          (a.status === 'ATENDIDA' ? ' por ' + esc(nm(a.attended_by)) + ' a las ' + hhmm(a.attended_at) + (nm(a.attended_by) === String(me.full_name || '') ? '<br><small>La decisión se toma en Autorizaciones comerciales.</small>' : '') : '') +
+          '</div><button type="button" class="al-x" data-al-toast-close="' + esc(a.id) + '" aria-label="Cerrar aviso">×</button></div>').join('') + '</div>';
     }
     host.innerHTML = h;
     const cb = host.querySelector('[data-al-close]'); if (cb) cb.onclick = () => { S.focus = null; render(); };
+    host.querySelectorAll('[data-al-toast-close]').forEach(b => b.onclick = () => toasts.close(b.dataset.alToastClose));
     host.querySelectorAll('[data-al-attend]').forEach(b => b.onclick = () => attend(b.dataset.alAttend, Number(b.dataset.alV), b));
     const mb = host.querySelector('[data-al-min]'); if (mb) mb.onclick = () => { S.minimized = true; render(); };
     // abrir la autorización vinculada DESDE la alarma (no registra atención; el aviso queda minimizado y pendiente)
@@ -187,7 +207,7 @@ function createComAlarm(api, me) {
     try {
       const r = await api.comAlarmAttend(id, version); if (!alive) return;
       if (r && r.ok === false) msg = r.message || 'No podés atender esta alarma.';
-      else msg = 'Atendida. La decisión (aprobar, rechazar, devolver o aprobar con cambios) se toma en Autorizaciones comerciales.';
+      else msg = '';   // la confirmación «ATENDIDA» (5 s, con X) la muestra el detector de transición al consultar
     } catch (e) { if (!alive) return; msg = /CONFLICT/.test(String(e.message || e)) ? String(e.message || e).replace(/^CONFLICT:\s*/, '') : 'No se pudo atender: ' + (e.message || e); }
     if (S.focus && S.focus.id === id && !(msg || '').startsWith('No ')) S.focus = { ...S.focus, status: 'ATENDIDA', can_attend: false, attended_by: me.full_name, attended_at: new Date().toISOString() };
     await poll();
@@ -198,14 +218,15 @@ function createComAlarm(api, me) {
   async function poll() {
     if (!alive || stopped) return; S.polls++;
     try {
-      let items, total;
-      if (typeof api.comMyAlarmsPage === 'function') { const r = await api.comMyAlarmsPage(20); items = (r && r.items) || []; total = (r && r.total_pending) || 0; }
+      let items, total, complete = true;
+      if (typeof api.comMyAlarmsPage === 'function') { const r = await api.comMyAlarmsPage(20); items = (r && r.items) || []; total = (r && r.total_pending) || 0; complete = !(r && r.has_more); }
       else { items = await api.comMyAlarms() || []; total = items.filter(a => a.status === 'PENDIENTE_ATENCION').length; }
       if (!alive) return;
       // una alarma NUEVA o una nueva ESCALADA vuelve a abrir el aviso aunque se haya minimizado
       const keys = items.filter(a => a.ring).map(a => a.id + ':' + (a.escalated_at ? 'E' : 'I'));
       if (keys.some(k => !S.known.has(k))) S.minimized = false;
       S.known = new Set(keys); S.alarms = items; S.total = total; S.lastError = null;
+      toasts.observe(items, { complete });
     } catch (e) {
       if (!alive) return;
       const t = String((e && (e.code || e.message)) || e);
@@ -225,7 +246,7 @@ function createComAlarm(api, me) {
     if (obs) { obs.disconnect(); obs = null; } if (raf) cancelAnimationFrame(raf);
     try { if (ctx && ctx.close) ctx.close(); } catch (e) { } ctx = null;
     L.forEach(([t, ev, fn, o]) => t.removeEventListener(ev, fn, o)); L.length = 0;
-    S.alarms = []; S.focus = null; msg = '';
+    toasts.dispose(); S.alarms = []; S.focus = null; msg = '';
     try { host.innerHTML = ''; host.remove(); } catch (e) { }
     if (window.__okdComAlarm === S) delete window.__okdComAlarm;
     window.__okdComAlarmInstalled = false;

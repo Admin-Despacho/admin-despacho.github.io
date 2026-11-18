@@ -22,7 +22,7 @@ export function distributionLists(to, cc) {
   const norm = a => String(a ?? '').trim().toLowerCase(), seen = new Set(), T = [], C = [];
   for (const a of to || []) { const v = norm(a); if (!validAddress(v)) throw new SmtpError('SMTP_MESSAGE_INVALID', { status: 400 }); if (!seen.has(v)) { seen.add(v); T.push(v); } }
   for (const a of cc || []) { const v = norm(a); if (!validAddress(v)) throw new SmtpError('SMTP_MESSAGE_INVALID', { status: 400 }); if (!seen.has(v)) { seen.add(v); C.push(v); } }
-  if (!T.length) throw new SmtpError('SMTP_MESSAGE_INVALID', { status: 400 });
+  if (!T.length && !C.length) throw new SmtpError('SMTP_MESSAGE_INVALID', { status: 400 });   // sin principales habilitados puede quedar solo CC (nunca CCO)
   return { to: T, cc: C };
 }
 

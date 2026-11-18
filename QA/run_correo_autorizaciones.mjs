@@ -1,4 +1,4 @@
-// SOLO PRUEBAS LOCALES · CORREOS DE AUTORIZACIONES V2 (20261202000100_correo_autorizaciones_v2.sql).
+// SOLO PRUEBAS LOCALES · CORREOS DE AUTORIZACIONES V3 (20261202000100_correo_autorizaciones_v3.sql).
 // PostgreSQL local con la base equivalente a producción (módulo comercial 000100-001300 + PANEL_SOLO + INSTALL del correo).
 // Ejecuta las FUNCIONES REALES (com_create_request, com_decide, com_respond, triggers, toma, guard, finish, ledger SMTP), el
 // TRABAJADOR REAL V2 y —para reversión— el TRABAJADOR PUBLICADO (2a8e65b), contra un SERVIDOR SMTP SIMULADO en memoria (STARTTLS).
@@ -9,8 +9,8 @@ import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {execSync} from 'node:child_process';
 import {sendCommercialDecisionEmails} from '../supabase/functions/_shared/commercial-decision-mail.js';
 const ROOT = new URL('..', import.meta.url).pathname, CFG = {host: '127.0.0.1', port: 55447, user: 'postgres'};
-const MIG = readFileSync(ROOT + 'propuestas/correo_autorizaciones/20261202000100_correo_autorizaciones_v2.sql', 'utf8');
-const REV = readFileSync(ROOT + 'propuestas/correo_autorizaciones/REVERSION_CORREO_AUTORIZACIONES_V2.sql', 'utf8');
+const MIG = readFileSync(ROOT + 'propuestas/correo_autorizaciones/20261202000100_correo_autorizaciones_v3.sql', 'utf8');
+const REV = readFileSync(ROOT + 'propuestas/correo_autorizaciones/REVERSION_CORREO_AUTORIZACIONES_V3.sql', 'utf8');
 // trabajador PUBLICADO (commit base) para probar la convivencia tras una reversión
 const OLD = '/tmp/okd_worker_publicado/'; mkdirSync(OLD + '_shared', {recursive: true});
 for (const f of ['commercial-decision-mail.js', 'corporate-mail.js', 'smtp-transport.js']) writeFileSync(OLD + '_shared/' + f, execSync('git -C ' + ROOT + ' show 2a8e65b:supabase/functions/_shared/' + f));
@@ -36,7 +36,7 @@ function smtpServer() {
         else if (t === 'STARTTLS\r\n') buf += '220 go\r\n';
         else if (t.startsWith('AUTH PLAIN')) buf += '235 ok\r\n';
         else if (t.startsWith('MAIL FROM')) buf += '250 ok\r\n';
-        else if (t.startsWith('RCPT TO')) { if (to !== null) throw Error('SEGUNDO_RCPT_NO_PERMITIDO'); to = /<([^>]+)>/.exec(t)[1]; buf += ((rules[to] || {}).rcpt || 250) + ' rcpt\r\n'; }
+        else if (t.startsWith('RCPT TO')) { if (to !== null) throw Error('SEGUNDO_RCPT_NO_PERMITIDO'); to = /<([^>]+)>/.exec(t)[1]; const r = rules[to] || {}; if (r.onRcpt) { const f = r.onRcpt; r.onRcpt = null; await f(); } const code = typeof r.rcpt === 'function' ? r.rcpt() : (r.rcpt || 250); buf += code + ' rcpt\r\n'; }
         else if (t === 'DATA\r\n') { buf += '354 go\r\n'; data = true; }
         return bytes.length;
       },
@@ -107,7 +107,7 @@ try {
   ok('PRE-01 versión publicada: aviso pendiente al autor + 5 copias antes de instalar', (await outbox('request_id=$1', [r0.id])).length === 6);
 
   // ===== INSTALACIÓN =====
-  await c0.query(MIG); ok('IN-01 la V2 se instala en una transacción (huellas de producción OK)', true);
+  await c0.query(MIG); const origBuilder = await q1("select pg_get_functiondef('public._com_decision_mail_payload(bigint)'::regprocedure)"); ok('IN-01 la V2 se instala en una transacción (huellas de producción OK)', true);
   const re = await tryErr(() => c0.query(MIG)); await c0.query('rollback').catch(() => {});
   ok('IN-02 reaplicar se detiene sin cambios (YA_APLICADA)', /YA_APLICADA/.test(re), re);
   ok('IN-03 límite horario intacto (100) y cupo diario 850', (await q1("select hourly_cap||'/'||daily_cap from public.comm_mail_transport")) === '100/850');
@@ -118,10 +118,24 @@ try {
   // Entre escenarios se «deja pasar el tiempo» del cupo (salvo en las pruebas de límites, que lo controlan explícitamente)
   const run = async (s = sb, opts = {}) => { if (!opts.keepQuota) await c0.query("update public.comm_smtp_rate set at = now() - interval '30 hours' where at > now() - interval '24 hours'"); return sendCommercialDecisionEmails(s, {...smtp.opts, ...opts}); };
   const runAll = async () => { let r, n = 0; do { r = await run(); n++; } while (r.stop === null && n < 10); return r; };   // ciclos sucesivos (máx. 20 por ciclo)
-  // aviso pendiente de la versión publicada: autor sí; copias sin ratificar NO
+  // aviso pendiente de la versión publicada (SIN foto): NO se reconstruye con el estado actual → retenido + incidencia
   let s0 = await run(); let rows = await outbox('request_id=$1', [r0.id]);
-  ok('P09-02 aviso previo a la V2: el autor recibe; las 5 copias sin ratificar NO (SKIPPED COPY_NOT_RATIFIED)', rows.filter(r => r.kind === 'COPY').every(r => r.state === 'SKIPPED' && r.error_code === 'COPY_NOT_RATIFIED')
-    && rows.find(r => r.kind === 'AUTHOR').state === 'SENT' && smtp.delivered.length === 1, JSON.stringify(s0));
+  ok('INT-01 aviso anterior a la instalación SIN foto: no se reconstruye ni se envía; los 6 quedan RETENIDOS con UNA incidencia', rows.every(r => r.state === 'HELD' && r.error_code === 'SNAPSHOT_MISSING') && smtp.delivered.length === 0
+    && (await q1("select count(*)::int from public.com_decision_mail_incidents where code='SNAPSHOT_MISSING' and status='ABIERTA'")) === 1, JSON.stringify(s0));
+  const inc0 = await q1("select id from public.com_decision_mail_incidents where status='ABIERTA' order by id limit 1");
+  const p0 = await asUser('G', 'select public.com_mail_settings_get()');
+  ok('INT-02 la incidencia se ve en el Panel General con sus avisos retenidos y la opción de enviar con datos registrados', p0.incidents.some(i => String(i.id) === String(inc0) && i.status === 'ABIERTA' && i.held_rows === 6 && i.can_send), JSON.stringify(p0.incidents));
+  const eI1 = await tryErr(() => asUser('C', 'select public.com_mail_incident_resolve($1,$2,$3,$4)', [inc0, 'DESCARTAR', true, 'Intento del comercial']));
+  const eI2 = await tryErr(() => asUser('G', 'select public.com_mail_incident_resolve($1,$2,$3,$4)', [inc0, 'ENVIAR_CON_DATOS_REGISTRADOS', false, 'sin confirmar']));
+  const eI3 = await tryErr(() => asUser('G', 'select public.com_mail_incident_resolve($1,$2,$3,$4)', [inc0, 'ENVIAR_CON_DATOS_REGISTRADOS', true, 'x']));
+  ok('INT-03 revisión controlada: un Comercial no puede; sin confirmación o sin nota se rechaza', /FORBIDDEN/.test(eI1) && /REVIEW_CONFIRMATION_REQUIRED/.test(eI2) && /REVIEW_CONFIRMATION_REQUIRED/.test(eI3), [eI1, eI2, eI3].join(' | '));
+  await asUser('G', 'select public.com_mail_incident_resolve($1,$2,$3,$4)', [inc0, 'ENVIAR_CON_DATOS_REGISTRADOS', true, 'Verificado con Administración: datos del evento registrados']);
+  smtp = smtpServer(); await run(); rows = await outbox('request_id=$1', [r0.id]);
+  const hRev = smtp.delivered.length ? decodeHtml(smtp.delivered[0].raw) : '';
+  ok('INT-04 liberada por revisión: foto REVISION_ADMINISTRATIVA (quién, cuándo, nota); se envía al autor con la aclaración; copias sin ratificar NO', (await q1("select source from public.com_decision_mail_payloads p join public.com_request_events e on e.id=p.event_id where e.request_id=$1", [r0.id])) === 'REVISION_ADMINISTRATIVA'
+    && smtp.delivered.length === 1 && hRev.includes('revisión administrativa') && rows.filter(r => r.kind === 'COPY').every(r => r.state === 'SKIPPED' && r.error_code === 'COPY_NOT_RATIFIED'), smtp.delivered.map(d => d.to).join(','));
+  const eI4 = await tryErr(() => asUser('G', 'select public.com_mail_incident_resolve($1,$2,$3,$4)', [inc0, 'DESCARTAR', true, 'otra vez']));
+  ok('INT-05 una incidencia se resuelve UNA vez y no se borra', /ALREADY_RESOLVED/.test(eI4) && /IMMUTABLE/.test(await tryErr(() => c0.query('delete from public.com_decision_mail_incidents'))));
 
   // ===== 9 · nueva solicitud con copias sin ratificar: aprobador + solicitante igual reciben =====
   smtp = smtpServer();
@@ -282,8 +296,8 @@ try {
     ['decisiones:evento:' + kA.event_id + ':copia1@qa.invalid', 'decisiones:evento:' + kB.event_id + ':copia3@qa.invalid']);
   await run();
   ok('P18-01 aceptado antes con la clave PUBLICADA → SENT sin reenviar', (await outbox('id=$1', [kA.id]))[0].provider_id === 'smtp:publicada' && !smtp.delivered.some(d => d.to === 'copia1@qa.invalid'));
-  ok('P18-02 clave publicada con OTRO contenido no entregado → se usa la clave V2, una sola entrega', smtp.delivered.filter(d => d.to === 'copia3@qa.invalid').length === 1
-    && (await q1("select state from public.comm_smtp_ledger where op_key=$1", ['decisiones:evento:' + kB.event_id + ':copia3@qa.invalid:v2'])) === 'ACCEPTED');
+  ok('P18-02 clave publicada con OTRO contenido no entregado → clave por contenido (:v3:), una sola entrega, sin conflicto', smtp.delivered.filter(d => d.to === 'copia3@qa.invalid').length === 1
+    && (await q1("select count(*)::int from public.comm_smtp_ledger where op_key like $1 and state='ACCEPTED'", ['decisiones:evento:' + kB.event_id + ':copia3@qa.invalid:v3:%'])) === 1);
 
   // ===== 20 · 21 · límites bajo concurrencia, fallo individual =====
   await c0.query("update public.comm_smtp_rate set at = now() - interval '30 hours'");
@@ -328,20 +342,89 @@ try {
   ok('P-PAN-01 panel: estado real SMTP, cupos, copias con estado de autorización, bitácora e historial con NUEVA SOLICITUD y participación', panel.transport.provider === 'SMTP' && panel.transport.connected && panel.transport.daily_cap === 850
     && panel.recipients.some(r => r.status === 'AUTORIZADA' && r.authorized_by) && panel.authorization_log.length > 0 && panel.history.some(h => h.event_kind === 'ENVIADA' && h.kind === 'APPROVER'), JSON.stringify(panel.transport));
 
+  // ===== V3 · 1 · DESTINATARIOS REVOCADOS (antes, concurrente, aceptación parcial + reintento) =====
+  smtp = smtpServer(); const rvk = await create('C', 'FINANCIACION', fin(88000, 1));
+  await asUser('G', 'select public.com_mail_copy_revoke($1)', [['copia3@qa.invalid']]);
+  await runAll(); rows = await outbox('request_id=$1', [rvk.id]);
+  const ccOf = to => addrs(hdr((smtp.delivered.find(d => d.to === to) || {raw: ''}).raw, 'Cc'));
+  ok('REV-01 copia revocada ANTES del envío: no recibe (SKIPPED) y no figura en el CC de ningún mensaje', !smtp.delivered.some(d => d.to === 'copia3@qa.invalid') && rows.find(r => r.recipient === 'copia3@qa.invalid').state === 'SKIPPED'
+    && smtp.delivered.every(d => !addrs(hdr(d.raw, 'Cc')).includes('copia3@qa.invalid')) && smtp.delivered.length === 6, smtp.delivered.map(d => d.to).join(','));
+  const pRvk = await q1("select payload->'distribution' from public.com_decision_mail_payloads p join public.com_request_events e on e.id=p.event_id where e.request_id=$1", [rvk.id]);
+  const meta = (await outbox("request_id=$1 and recipient='copia1@qa.invalid'", [rvk.id]))[0].delivery_meta;
+  ok('REV-02 registro histórico: la foto conserva la distribución ORIGINAL (con la revocada) y cada intento guarda la EFECTIVA', pRvk.cc.includes('copia3@qa.invalid') && Array.isArray(meta) && !meta[0].cc.includes('copia3@qa.invalid') && meta[0].key.includes(':v3:'), JSON.stringify(meta));
+  await asUser('G', 'select public.com_mail_copy_authorize($1,$2,$3)', [['copia3@qa.invalid'], SCOPE, true]);
+  // revocación CONCURRENTE: copia2 se revoca mientras se entrega a copia1 (después de MAIL FROM, antes de DATA)
+  smtp = smtpServer(); const rc = await create('C', 'FINANCIACION', fin(89000, 1));
+  smtp.rules['copia1@qa.invalid'] = {onRcpt: () => asUserOn(c1, 'G', 'select public.com_mail_copy_revoke($1)', [['copia2@qa.invalid']])};
+  const sc1 = await run(); rows = await outbox('request_id=$1', [rc.id]);
+  const c1row = rows.find(r => r.recipient === 'copia1@qa.invalid');
+  ok('REV-03 revocación CONCURRENTE antes de DATA: el envío a esa persona se suspende (sin gastar intento) y no sale con la dirección revocada', c1row.state === 'PENDING' && c1row.error_code === 'DISTRIBUTION_CHANGED' && c1row.attempts === 0
+    && !smtp.delivered.some(d => d.to === 'copia1@qa.invalid' && !d.lost), JSON.stringify({sc1, c1: [c1row.state, c1row.error_code, c1row.attempts]}));
+  await c0.query("update public.com_decision_mail_outbox set next_at=now() where request_id=$1 and state='PENDING'", [rc.id]); await runAll();
+  rows = await outbox('request_id=$1', [rc.id]);
+  ok('REV-04 reintento: sale una sola vez SIN la revocada; lo ya enviado antes de la revocación no se toca; la revocada no recibe', smtp.delivered.filter(d => d.to === 'copia1@qa.invalid').length === 1 && !ccOf('copia1@qa.invalid').includes('copia2@qa.invalid')
+    && ccOf('aprobador@qa.invalid').includes('copia2@qa.invalid') && !smtp.delivered.some(d => d.to === 'copia2@qa.invalid') && rows.find(r => r.recipient === 'copia2@qa.invalid').state === 'SKIPPED');
+  await asUser('G', 'select public.com_mail_copy_authorize($1,$2,$3)', [['copia2@qa.invalid'], SCOPE, true]);
+  // aceptación PARCIAL + reintento con distribución distinta: sin duplicados ni conflicto de claves
+  smtp = smtpServer(); let first451 = true; smtp.rules['copia4@qa.invalid'] = {rcpt: () => (first451 ? (first451 = false, 451) : 250)};
+  const rp = await create('C', 'FINANCIACION', fin(90000, 1)); await run();
+  await asUser('G', 'select public.com_mail_copy_revoke($1)', [['copia5@qa.invalid']]);
+  await c0.query("update public.com_decision_mail_outbox set next_at=now() where request_id=$1 and state='ERROR'", [rp.id]); await runAll();
+  rows = await outbox('request_id=$1', [rp.id]); const ev = rows[0].event_id;
+  ok('REV-05 aceptación parcial + reintento tras una revocación: copia4 recibe UNA vez (sin copia5 en CC); nadie recibe dos veces; sin conflicto de claves',
+    smtp.delivered.filter(d => d.to === 'copia4@qa.invalid').length === 1 && !ccOf('copia4@qa.invalid').includes('copia5@qa.invalid') && new Set(smtp.delivered.map(d => d.to)).size === smtp.delivered.length
+    && rows.find(r => r.recipient === 'copia4@qa.invalid').state === 'SENT' && (await q1("select count(*)::int from public.comm_smtp_ledger where op_key like $1 and state='ACCEPTED'", ['decisiones:evento:' + ev + ':copia4@qa.invalid%'])) === 1);
+  await asUser('G', 'select public.com_mail_copy_authorize($1,$2,$3)', [['copia5@qa.invalid', 'aprobador@qa.invalid'], SCOPE, true]);
+  await asUser('G', 'select public.com_mail_copy_revoke($1)', [['aprobador@qa.invalid']]);
+  smtp = smtpServer(); const rpp = await create('C', 'FINANCIACION', fin(91000, 1)); await run();
+  ok('REV-06 revocar la condición de COPIA de un principal no lo quita de Para ni le impide recibir', smtp.delivered.some(d => d.to === 'aprobador@qa.invalid') && addrs(hdr(smtp.delivered[0].raw, 'To')).includes('aprobador@qa.invalid'));
+
+  // ===== V3 · 2 · INTEGRIDAD: foto faltante (falla al registrar) e inconsistente =====
+  await c0.query("create or replace function public._com_decision_mail_payload(p_event bigint) returns jsonb language plpgsql stable security definer set search_path='' as $$ begin raise exception 'FALLA_SIMULADA'; end $$");
+  const im = await create('C', 'FINANCIACION', fin(92000, 1)); await decide('A', im.id, 'APROBAR', null, 'Aprobada inmediatamente');
+  await c0.query(origBuilder);
+  smtp = smtpServer(); await runAll(); rows = await outbox('request_id=$1', [im.id]);
+  ok('INT-06 foto faltante (la creación y la aprobación inmediata se registran igual): nada se envía; todo RETENIDO con incidencia por evento', smtp.delivered.length === 0 && rows.length === 13 && rows.every(r => r.state === 'HELD' && r.error_code === 'SNAPSHOT_MISSING')
+    && (await q1("select count(*)::int from public.com_decision_mail_incidents i join public.com_request_events e on e.id=i.event_id where e.request_id=$1 and i.status='ABIERTA'", [im.id])) === 2, rows.map(r => r.state + ':' + r.error_code).join(','));
+  await c0.query('alter table public.com_request_events disable trigger com_corporate_mail_event');
+  const bad = await create('C', 'FINANCIACION', fin(93000, 1)); await decide('A', bad.id, 'RECHAZAR', null, 'Motivo registrado real');
+  await c0.query('alter table public.com_request_events enable trigger com_corporate_mail_event');
+  const evR = await q1("select id from public.com_request_events where request_id=$1 and kind='RECHAZADA'", [bad.id]);
+  await c0.query("insert into public.com_decision_mail_outbox(event_id,request_id,recipient_user,recipient,kind,event_kind,request_number) select $1,id,requested_by,'comercial@qa.invalid','AUTHOR','RECHAZADA',number from public.com_requests where id=$2", [evR, bad.id]);
+  await c0.query("insert into public.com_decision_mail_payloads(event_id,payload,source) select $1, jsonb_set(public._com_decision_mail_payload($1),'{event,reason}','\"MOTIVO ALTERADO\"'),'EVENTO'", [evR]);
+  smtp = smtpServer(); await run(); rows = await outbox('event_id=$1', [evR]);
+  ok('INT-07 foto INCONSISTENTE con el evento inmutable (motivo distinto): no se envía; RETENIDO con incidencia y el detalle de la diferencia', smtp.delivered.length === 0 && rows[0].state === 'HELD' && rows[0].error_code === 'SNAPSHOT_INCONSISTENT'
+    && /no coinciden con el registro inmutable/.test(await q1("select detail from public.com_decision_mail_incidents where event_id=$1", [evR])));
+  const incBad = await q1("select id from public.com_decision_mail_incidents where event_id=$1", [evR]);
+  const eI6 = await tryErr(() => asUser('G', 'select public.com_mail_incident_resolve($1,$2,$3,$4)', [incBad, 'ENVIAR_CON_DATOS_REGISTRADOS', true, 'Intento de reemplazar la foto']));
+  await asUser('G', 'select public.com_mail_incident_resolve($1,$2,$3,$4)', [incBad, 'DESCARTAR', true, 'Foto inconsistente: se descarta']);
+  ok('INT-08 una foto inconsistente no se reemplaza (solo se descarta); descartada no se envía', /ACTION_NOT_ALLOWED/.test(eI6) && (await outbox('event_id=$1', [evR]))[0].state === 'SKIPPED' && (await outbox('event_id=$1', [evR]))[0].error_code === 'DESCARTADO_REVISION');
+
+  // ===== V3 · 3 · tope diario: confirmación administrativa =====
+  await q1('select public.comm_mail_set_daily_cap(820)');
+  ok('CAP-01 cambiar el tope lo deja «pendiente de confirmación»', (await q1("select (public.comm_mail_capacity()->>'daily_cap_confirmed')::boolean")) === false);
+  ok('CAP-02 confirmar exige la autorización escrita', /AUTORIZACION_REQUERIDA/.test(await tryErr(() => q1("select public.comm_mail_confirm_daily_cap(800,'')"))));
+  await q1("select public.comm_mail_confirm_daily_cap(800,'Dirección General · acta QA 18/11')");
+  ok('CAP-03 tope confirmado (valor, fecha y autorización) y auditado', (await q1("select daily_cap||'|'||(daily_cap_confirmed_at is not null)||'|'||daily_cap_confirmation from public.comm_mail_transport")) === '800|true|Dirección General · acta QA 18/11'
+    && (await q1("select count(*)::int from public.comm_smtp_audit where action='DAILY_CAP_CONFIRMED'")) === 1);
+
   // ===== 19 · REVERSIÓN y REINSTALACIÓN con datos, sin duplicados ni pérdida de historial =====
   const n19 = await create('C', 'FINANCIACION', fin(77000, 1));               // NUEVA pendiente al revertir (solo-V2)
   const acc19 = (await outbox("request_id=$1 and recipient='copia3@qa.invalid'", [n19.id]))[0];
   await c0.query("insert into public.comm_smtp_ledger(op_key,fingerprint,state,provider_id) values ($1, repeat('d',64),'ACCEPTED','smtp:aceptado-sin-registrar')", ['decisiones:evento:' + acc19.event_id + ':copia3@qa.invalid']);
   const counts = async () => q1(`select jsonb_build_object('payloads',(select count(*) from public.com_decision_mail_payloads),'auth',(select count(*) from public.com_mail_copy_authorizations),'log',(select count(*) from public.com_mail_copy_authorization_log),'outbox',(select count(*) from public.com_decision_mail_outbox),'ledger_ok',(select count(*) from public.comm_smtp_ledger where state='ACCEPTED'))`);
-  const c19a = await counts(), accBefore = await ledgerAccepted();
+  const c19a = await counts(), accBefore = await ledgerAccepted(), rateBefore = await q1('select count(*)::int from public.comm_smtp_rate');
   await c0.query(REV);
   const c19b = await counts();
   ok('RV-01 reversión: se CONSERVAN fotos, autorizaciones, bitácora, bandeja y ledger', JSON.stringify(c19a) === JSON.stringify(c19b), JSON.stringify([c19a, c19b]));
   ok('RV-02 funciones publicadas restauradas exactamente (huellas)', (await q1("select md5(prosrc) from pg_proc where oid='public._com_mail_event()'::regprocedure")) === 'edc79643ef9f5f07f43b40d5cd77af43');
+  ok('CAP-04 reversión: el CONTROL DIARIO permanece (comm_smtp_claim con tope 24 h), el tope confirmado (800) y los consumos NO se reinician',
+    (await q1("select md5(prosrc) from pg_proc where oid='public.comm_smtp_claim(text,text)'::regprocedure")) === 'f7803c123b4d233719989107080c8535' && (await q1("select daily_cap||'|'||(daily_cap_confirmed_at is not null) from public.comm_mail_transport")) === '800|true'
+    && (await q1('select count(*)::int from public.comm_smtp_rate')) === rateBefore);
   ok('RV-03 conciliación: lo ya ACEPTADO por SMTP queda SENT (no se reenvía)', (await outbox('id=$1', [acc19.id]))[0].state === 'SENT');
-  ok('RV-04 avisos solo-V2 pendientes → SKIPPED VERSION_REVERTIDA (la versión publicada no los envía)', (await outbox("request_id=$1 and state<>'SENT'", [n19.id])).every(r => r.state === 'SKIPPED' && r.error_code === 'VERSION_REVERTIDA'));
+  ok('RV-04 avisos solo-V3 pendientes → SKIPPED VERSION_REVERTIDA (la versión publicada no los envía)', (await outbox("request_id=$1 and state<>'SENT'", [n19.id])).every(r => r.state === 'SKIPPED' && r.error_code === 'VERSION_REVERTIDA'));
   smtp = smtpServer(); const sv = await run();
-  ok('RV-05 trabajador V2 contra base revertida: no envía y no lanza', sv.sent === 0 && sv.stop === 'QUEUE_UNAVAILABLE');
+  ok('RV-05 trabajador V3 contra base revertida: no envía y no lanza', sv.sent === 0 && sv.stop === 'QUEUE_UNAVAILABLE');
   smtp = smtpServer(); await oldWorker(sb, smtp.opts); await oldWorker(sb, smtp.opts);
   ok('RV-06 trabajador PUBLICADO tras revertir: no reenvía NADA de lo ya entregado', smtp.delivered.length === 0 && (await ledgerAccepted()) === accBefore, smtp.delivered.map(d => d.to).join(','));
   // período revertido: la versión publicada sigue funcionando (resolución → autor + copias de la lista)
@@ -349,10 +432,19 @@ try {
   smtp = smtpServer(); for (let i = 0; i < 8; i++) await oldWorker(sb, smtp.opts);
   ok('RV-07 durante la reversión la versión publicada envía sus avisos breves (sin creación, sin aprobador)', smtp.delivered.length >= 1 && (await outbox("request_id=$1 and event_kind='ENVIADA'", [rv.id])).length === 0);
   const deliveredDuringRevert = new Set(smtp.delivered.map(d => d.to + '|' + decodeSubject(d.raw)));
+  // con la base revertida, el tope diario SIGUE frenando al trabajador publicado y a los demás módulos
+  await c0.query("insert into public.comm_smtp_rate(at) select now() - interval '20 hours' from generate_series(1, 800 - (select count(*) from public.comm_smtp_rate where at>now()-interval '24 hours')::int)");
+  const rvc = await create('C', 'FINANCIACION', fin(78500, 1)); await decide('A', rvc.id, 'APROBAR');
+  smtp = smtpServer(); for (let i = 0; i < 3; i++) await oldWorker(sb, smtp.opts);
+  ok('CAP-05 revertida y con el tope diario alcanzado: el trabajador PUBLICADO no puede enviar y otro módulo recibe RATE_LIMIT', smtp.delivered.length === 0 && (await q1("select count(*)::int from public.comm_smtp_rate where at>now()-interval '24 hours'")) === 800
+    && (await q1("select public.comm_smtp_claim('otro-modulo:rev', repeat('e',64))->>'state'")) === 'RATE_LIMIT');
+  const rateAtReinstall = await q1('select count(*)::int from public.comm_smtp_rate');
   // REINSTALACIÓN
   await c0.query(MIG);
-  ok('RV-08 reinstalación sobre los datos conservados (segunda instalación)', (await q1("select status||'|'||installs from public.com_mail_v2_install")) === 'INSTALADA|2');
+  ok('RV-08 reinstalación sobre los datos conservados (segunda instalación)', (await q1("select status||'|'||installs from public.com_mail_detail_install")) === 'INSTALADA|2');
   ok('RV-09 las fotos previas siguen intactas tras reinstalar', (await q1('select count(*)::int from public.com_decision_mail_payloads')) >= c19b.payloads);
+  ok('CAP-06 reinstalación: no reinicia consumos ni el tope confirmado', (await q1('select count(*)::int from public.comm_smtp_rate')) === rateAtReinstall && (await q1("select daily_cap||'|'||(daily_cap_confirmed_at is not null) from public.comm_mail_transport")) === '800|true');
+  await c0.query("update public.comm_smtp_rate set at = now() - interval '30 hours'");   // (se deja pasar el día para seguir probando)
   smtp = smtpServer(); const sr = await run(); await run();
   const resent = smtp.delivered.filter(d => deliveredDuringRevert.has(d.to + '|' + decodeSubject(d.raw)));
   ok('RV-10 reinstalada: nada de lo enviado antes o durante la reversión se reenvía (0 entregas en el primer ciclo)', smtp.delivered.length === 0 && resent.length === 0, JSON.stringify(sr) + ' ' + smtp.delivered.map(d => d.to).join(','));
@@ -363,6 +455,6 @@ try {
 } catch (e) { ok('XX ERROR INESPERADO', false, e.stack); }
 finally { for (const x of [c0, c1]) try { await x?.end(); } catch {} try { await pool?.end(); await pool2?.end(); } catch {} }
 const lines = results.map(r => (r.ok ? 'PASS' : 'FAIL') + ' | ' + r.name + (r.ok ? '' : ' | ' + r.detail));
-lines.push('CORREO_AUTORIZACIONES_V2 ' + results.filter(r => r.ok).length + ' / ' + results.length);
+lines.push('CORREO_AUTORIZACIONES_V3 ' + results.filter(r => r.ok).length + ' / ' + results.length);
 console.log(lines.join('\n'));
 process.exit(results.every(r => r.ok) ? 0 : 1);

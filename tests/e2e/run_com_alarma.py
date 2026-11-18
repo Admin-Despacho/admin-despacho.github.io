@@ -74,7 +74,7 @@ async def main():
                 res('AL-E06 DOS RESPONSABLES: Franco intenta tomarla con la versión anterior → CONFLICT; queda atendida por Gabriela', conf == 'CONFLICT', conf)
                 await sync(ga, wi); await poll(wi); stw = await wi.evaluate(ST); await poll(fr); stf2 = await fr.evaluate(ST)
                 res('AL-E07 al ATENDER se detiene la alarma en los demás (Wilfredo y Franco dejan de sonar)', not stw['ringing'] and not stf2['ringing'], {'wilfredo': stw, 'franco': stf2})
-                await sync(ga, op); await poll(op); chip = await op.evaluate('()=>{const e=document.querySelector("[data-al-mine]"); return e?e.innerText.replace(/\\s+/g," "):""}')
+                await sync(ga, op); await poll(op); chip = await op.evaluate('()=>{const e=document.querySelector("[data-al-stack]"); return e?e.innerText.replace(/\\s+/g," "):""}')
                 res('AL-E08 quien la pidió (Despacho) ve que fue ATENDIDA y por quién', 'ATENDIDA' in chip and 'Gabriela' in chip, chip)
                 co = await (await mk()).new_page(); await co.goto(f'http://127.0.0.1:{dp.PORT}/'); await sync(ga, co); await enter(co, 'comercial.montecaseros@okdespacho.demo')
                 pc = await co.evaluate('async(id)=>{const A=window.OKD_ONLINE.api, t=async f=>{try{const r=await f(); return r&&r.code?r.code:(Array.isArray(r)?"LISTA:"+r.length:"OK")}catch(e){return e.code||e.message.split(":")[0]}};'

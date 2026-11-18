@@ -1,5 +1,5 @@
--- Contrato SQL del correo corporativo (TEST_QA.sql de Work) adaptado SOLO en la autorización expresa de la copia (cambio de V2).
--- Ejecutar con INSTALL.sql + 20261202000100_correo_autorizaciones_v2.sql aplicados. Termina en ROLLBACK.
+-- Contrato SQL del correo corporativo (TEST_QA.sql de Work) adaptado SOLO en la autorización expresa de la copia (cambio de V2/V3).
+-- Ejecutar con INSTALL.sql + 20261202000100_correo_autorizaciones_v3.sql aplicados. Termina en ROLLBACK.
 -- Ejecutar DESPUÉS de INSTALL.sql dentro de la MISMA transacción, sustituir COMMIT por este archivo + ROLLBACK.
 -- Solo datos ficticios y claims SQL simulados. No constituye prueba de gateway/Auth ni de envío real.
 DO $$DECLARE a uuid:=gen_random_uuid();u uuid:=gen_random_uuid();sid uuid:=gen_random_uuid();q uuid:=gen_random_uuid();cl uuid;ver timestamptz;r jsonb;tok uuid;rec bigint;evt bigint;h text;k text;n int:=1;BEGIN

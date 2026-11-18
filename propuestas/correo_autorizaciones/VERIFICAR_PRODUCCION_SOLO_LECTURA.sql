@@ -1,7 +1,7 @@
--- SOLO LECTURA · ejecutar en el SQL Editor ANTES de aplicar 20261202000100_correo_autorizaciones_v2.sql. No modifica nada.
+-- SOLO LECTURA · ejecutar en el SQL Editor ANTES de aplicar 20261202000100_correo_autorizaciones_v3.sql. No modifica nada.
 -- Resultado esperado: todas las filas con ok = true. Si alguna dice false, NO aplicar y revisar.
 SELECT 'objeto ' || x.n AS control, to_regclass(x.n) IS NOT NULL AS ok FROM (VALUES ('public.com_decision_mail_outbox'),('public.comm_mail_transport'),('public.comm_smtp_rate'),('public.comm_smtp_ledger'),('public.com_request_events'),('public.com_mail_settings')) x(n)
-UNION ALL SELECT 'V2 no instalada todavía', to_regclass('public.com_mail_v2_install') IS NULL
+UNION ALL SELECT 'V3 no instalada todavía', to_regclass('public.com_mail_detail_install') IS NULL
 UNION ALL SELECT 'huella ' || f.sig, to_regprocedure(f.sig) IS NOT NULL AND (f.h IS NULL OR md5((SELECT prosrc FROM pg_catalog.pg_proc WHERE oid = to_regprocedure(f.sig))) = f.h)
   FROM (VALUES ('public.comm_smtp_claim(text,text)', '122468dcb26660ecf0e1499ae0ab75fd'), ('public.com_mail_settings_get()', 'd23a96fb2cf877509b7ed51927e9c11c'),
     ('public.com_mail_settings_set(text[])', '29c88fb1fdcad74345470ae6a194e676'), ('public._com_mail_event()', 'edc79643ef9f5f07f43b40d5cd77af43'),
