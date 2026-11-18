@@ -12,18 +12,26 @@ async def main():
    try:
     c=await b.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
     pg=await c.new_page();await dp.login(pg,'admin@okdespacho.demo')
-    await pg.evaluate('location.hash="#/autorizaciones?v=general"');await pg.wait_for_selector('#comMailCopies')
-    await pg.fill('#comMailCopies',' COPY@qa.invalid,copy@qa.invalid\nsegunda@qa.invalid');await pg.click('#comMailSave')
-    await pg.wait_for_function('document.querySelector("#comMailResult").textContent.includes("guardados")')
+    await pg.evaluate('location.hash="#/autorizaciones?v=general"');await pg.wait_for_selector('#comMailNew')
+    await pg.fill('#comMailNew',' COPY@qa.invalid,copy@qa.invalid\nsegunda@qa.invalid');await pg.click('#comMailAuthorize')
+    await pg.wait_for_function('document.querySelector("#comMailResult").textContent.includes("confirmar")')
+    result=await pg.evaluate('window.OKD_ONLINE.api.comMailSettings()');assert result['copies']==[]
+    print('UI-00 PASS: sin la confirmación de autorización no se agrega ninguna copia',flush=True)
+    await pg.check('#comMailAuth');await pg.click('#comMailAuthorize')
+    await pg.wait_for_selector('[data-copy="segunda@qa.invalid"]')
     result=await pg.evaluate('window.OKD_ONLINE.api.comMailSettings()');assert result['copies']==['copy@qa.invalid','segunda@qa.invalid'];assert result['author_always'] is True
-    print('UI-01 PASS: edición móvil, normalización, guardado y autor obligatorio',flush=True)
-    await pg.reload();await pg.wait_for_selector('#comMailCopies');assert 'segunda@qa.invalid' in await pg.input_value('#comMailCopies')
-    print('UI-02 PASS: configuración persiste al recargar',flush=True)
-    await pg.fill('#comMailCopies','correo-mal-formado');await pg.click('#comMailSave');await pg.wait_for_function('document.querySelector("#comMailResult").textContent.includes("Revisá las direcciones")')
+    assert all(r['status']=='AUTORIZADA' for r in result['recipients'])
+    print('UI-01 PASS: alta móvil con confirmación, normalización, autorización y autor obligatorio',flush=True)
+    await pg.reload();await pg.wait_for_selector('[data-copy="segunda@qa.invalid"]');assert 'Autorizada' in await pg.inner_text('#comMailRecipients')
+    print('UI-02 PASS: configuración y estado de autorización persisten al recargar',flush=True)
+    await pg.fill('#comMailNew','correo-mal-formado');await pg.check('#comMailAuth');await pg.click('#comMailAuthorize');await pg.wait_for_function('document.querySelector("#comMailResult").textContent.includes("Revisá las direcciones")')
     result=await pg.evaluate('window.OKD_ONLINE.api.comMailSettings()');assert len(result['copies'])==2
-    print('UI-03 PASS: dirección inválida rechazada sin perder guardado',flush=True)
-    await pg.fill('#comMailCopies','');await pg.click('#comMailSave');await pg.wait_for_function('document.querySelector("#comMailResult").textContent.includes("guardados")');result=await pg.evaluate('window.OKD_ONLINE.api.comMailSettings()');assert result['copies']==[] and result['author_always'] is True
-    print('UI-04 PASS: quitar copias no quita al autor',flush=True)
+    print('UI-03 PASS: dirección inválida rechazada sin perder lo guardado',flush=True)
+    await pg.check('#comMailAll');await pg.click('#comMailRevoke');await pg.wait_for_function('!document.querySelector("[data-copy]")')
+    result=await pg.evaluate('window.OKD_ONLINE.api.comMailSettings()');assert result['copies']==[] and result['author_always'] is True
+    print('UI-04 PASS: revocar copias no quita al autor',flush=True)
+    sw=await pg.evaluate('document.documentElement.scrollWidth<=innerWidth+1');assert sw
+    print('UI-06 PASS: panel sin desborde horizontal en 390 px',flush=True)
     request_id='11111111-2222-4333-8444-555555555555'
     cp=await (await b.new_context()).new_page();await dp.login(cp,'comercial.montecaseros@okdespacho.demo')
     await cp.evaluate('async()=>{await window.OKD_ONLINE.api.comCreate("FINANCIACION","cli-101","MAIL-UI-1",{amount:150000,installments:2},null,"mail-ui-1")}')

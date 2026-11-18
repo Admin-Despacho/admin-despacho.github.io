@@ -95,3 +95,29 @@ describe('Plantilla de resolución · contenido obligatorio',()=>{
   expect(()=>renderDecisionMail({...SAMPLES.aprobada,event:{...SAMPLES.aprobada.event,kind:'PENDIENTE'}})).toThrow('EVENT_KIND_UNSUPPORTED');
  });
 });
+
+describe('Plantilla · NUEVA SOLICITUD',()=>{
+ it('asunto, título, subtítulo, introducción y colores aprobados',()=>{
+  const m=R('nueva'),t=plain(m.html);
+  expect(m.subject).toBe('NUEVA SOLICITUD COMERCIAL | AUT-000004 | Tecnología del Norte S.A.');
+  expect(t).toContain('NUEVA SOLICITUD COMERCIAL Pendiente de aprobación · AUT-000004');
+  expect(t).toContain('Se ha registrado una nueva solicitud comercial que requiere evaluación y autorización.');
+  for(const c of ['#102631','#56dce9','#fff2d9','#925400'])expect(m.html).toContain(c);
+  expect(m.html).toMatch(/<div style="font-size:28px;font-weight:bold;letter-spacing:1px">OK DESPACHO<\/div>/);
+  expect(m.html).toContain('color:#ffffff');
+ });
+ it('detalle completo de financiación + observaciones en bloque propio + recuadro PENDIENTE + botón + pie',()=>{
+  const t=plain(R('nueva').html);
+  for(const s of ['Datos de la solicitud','Número de autorización AUT-000004','Tipo de solicitud Financiación propia','Cliente Tecnología del Norte S.A.','CUIT 30-71234567-9','Número de pedido PV 17-000125','Sucursal San Juan',
+   'Comercial solicitante Asesor Comercial QA','Responsable de aprobación Tesorería QA','Fecha y hora de creación 18/11/2026 – 10:30','Importe solicitado $ 600.000,00','Cantidad de cuotas 3','Frecuencia Semanal',
+   'Primer vencimiento 25/11/2026','Fecha límite 18/12/2026','Calendario de pagos solicitado','3 09/12/2026 $ 200.000,00','Total $ 600.000,00','Observaciones del comercial',
+   'PENDIENTE DE APROBACIÓN Esta solicitud todavía no se encuentra autorizada.','CONSULTAR SOLICITUD EN OK DESPACHO','OK ACCESORIOS','Administración · Autorizaciones Comerciales'])expect(t).toContain(s);
+  expect(t).not.toContain('Resolución administrativa');expect(t).not.toContain('Datos de la solicitud original');
+ });
+ it('e-cheq: campos propios del tipo',()=>{
+  const t=plain(R('nueva_echeq').html);
+  for(const s of ['Aceptación de e-cheq','Importe del e-cheq $ 845.000,00','Vencimiento del e-cheq 15/12/2026','Plazo 27 días','Emisor Distribuidora Andina SRL','CUIT del emisor 30-70000001-3','Cartera Cartera Hernán'])expect(t).toContain(s);
+  expect(t).not.toContain('Calendario de pagos');
+ });
+ it('texto plano equivalente',()=>{const x=R('nueva').text;for(const s of ['NUEVA SOLICITUD COMERCIAL','Pendiente de aprobación · AUT-000004','DATOS DE LA SOLICITUD','PENDIENTE DE APROBACIÓN','Esta solicitud todavía no se encuentra autorizada.','CONSULTAR SOLICITUD EN OK DESPACHO: https://'])expect(x).toContain(s);expect(x).not.toContain('RESOLUCIÓN');});
+});

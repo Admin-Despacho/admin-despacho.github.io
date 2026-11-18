@@ -5,6 +5,8 @@ import { computeSchedule, arDate, addDays as schedAddDays } from './com-schedule
 export const SupabaseCom = {
   comMailSettings() { return this._rpc('com_mail_settings_get', {}); },
   comSetMailCopies(copies) { return this._rpc('com_mail_settings_set', { p_copies: copies }); },
+  comMailCopyAuthorize(addresses, scope, confirm) { return this._rpc('com_mail_copy_authorize', { p_addresses: addresses, p_scope: scope, p_confirm: confirm }); },
+  comMailCopyRevoke(addresses) { return this._rpc('com_mail_copy_revoke', { p_addresses: addresses }); },
   comConfig() { return this._rpc('com_config', {}); },
   comOrderAlerts(orders, cuits) { return this._rpc('com_order_alerts', { p_orders: orders, p_cuits: cuits }); },   // «CONSULTAR APROBACIÓN» (solo lectura)
   // ALARMA URGENTE (servidor: emisión, escalamiento a 3 min por pg_cron, atender, historial inmutable)
@@ -76,7 +78,9 @@ const DEMO_CLIENTS = [
 
 const arDay = iso => new Date(Date.parse(iso) - 3 * 3600e3).toISOString().slice(0, 10);   // N-V4-05: America/Argentina/Mendoza (UTC−3, sin cambio de horario)
 export const DemoCom = {
-  async comMailSettings() { const me=await this._comMe();if(!this._comAdmin(me))throw E('FORBIDDEN');return {copies:(this._com().mailCopies||[]).slice(),author_always:true,history:[],simulated:true}; },
+  async comMailSettings() { const me=await this._comMe();if(!this._comAdmin(me))throw E('FORBIDDEN');const c=this._com();c.mailAuth=c.mailAuth||{};return {copies:(c.mailCopies||[]).slice(),author_always:true,history:[],simulated:true,recipients:(c.mailCopies||[]).map(a=>({address:a,status:c.mailAuth[a]||'PENDIENTE_RATIFICACION'})),authorization_log:[]}; },
+  async comMailCopyAuthorize(addresses, scope, confirm) { const me=await this._comMe();if(!this._comAdmin(me))throw E('FORBIDDEN');if(confirm!==true||scope!=='DETALLE_COMERCIAL_COMPLETO_CC_VISIBLE')throw E('AUTHORIZATION_CONFIRMATION_REQUIRED');const c=this._com();const list=[...new Set((addresses||[]).map(x=>String(x).trim().toLowerCase()))];if(!list.length||list.some(x=>!/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(x)))throw E('INVALID_EMAIL_LIST');c.mailCopies=[...new Set([...(c.mailCopies||[]),...list])];if(c.mailCopies.length>20)throw E('INVALID_EMAIL_LIST');c.mailAuth=c.mailAuth||{};list.forEach(a=>c.mailAuth[a]='AUTORIZADA');this._save();return this.comMailSettings(); },
+  async comMailCopyRevoke(addresses) { const me=await this._comMe();if(!this._comAdmin(me))throw E('FORBIDDEN');const c=this._com();const set=new Set((addresses||[]).map(x=>String(x).trim().toLowerCase()));c.mailCopies=(c.mailCopies||[]).filter(a=>!set.has(a));this._save();return this.comMailSettings(); },
   async comSetMailCopies(copies) { const me=await this._comMe();if(!this._comAdmin(me))throw E('FORBIDDEN');const list=[...new Set((copies||[]).map(x=>String(x).trim().toLowerCase()).filter(Boolean))];if(list.length>20||list.some(x=>!/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(x)))throw E('INVALID_EMAIL_LIST');this._com().mailCopies=list;this._save();return this.comMailSettings(); },
 
   _com() {

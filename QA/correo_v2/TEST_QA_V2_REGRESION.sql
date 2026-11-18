@@ -1,0 +1,70 @@
+-- Contrato SQL del correo corporativo (TEST_QA.sql de Work) adaptado SOLO en la autorización expresa de la copia (cambio de V2).
+-- Ejecutar con INSTALL.sql + 20261202000100_correo_autorizaciones_v2.sql aplicados. Termina en ROLLBACK.
+-- Ejecutar DESPUÉS de INSTALL.sql dentro de la MISMA transacción, sustituir COMMIT por este archivo + ROLLBACK.
+-- Solo datos ficticios y claims SQL simulados. No constituye prueba de gateway/Auth ni de envío real.
+DO $$DECLARE a uuid:=gen_random_uuid();u uuid:=gen_random_uuid();sid uuid:=gen_random_uuid();q uuid:=gen_random_uuid();cl uuid;ver timestamptz;r jsonb;tok uuid;rec bigint;evt bigint;h text;k text;n int:=1;BEGIN
+ IF has_function_privilege('authenticated','public.comm_smtp_credentials()','EXECUTE') OR has_function_privilege('anon','public.comm_mail_runtime()','EXECUTE') THEN RAISE EXCEPTION 'ACL_LEAK';END IF;
+ IF has_table_privilege('authenticated','public.comm_smtp_ledger','SELECT') THEN RAISE EXCEPTION 'LEDGER_LEAK';END IF;
+ IF (public.comm_mail_runtime()->>'provider')<>'LEGACY' THEN RAISE EXCEPTION 'INSTALL_ENABLED_SMTP';END IF;
+ PERFORM vault.create_secret('SMTP-TEST-ONLY-NOT-A-REAL-PASSWORD','comm_smtp_password');
+ SELECT updated_at INTO ver FROM vault.secrets WHERE name='comm_smtp_password';
+ BEGIN PERFORM public.comm_mail_set_provider('SMTP',20,true);RAISE EXCEPTION 'ACTIVATED_WITHOUT_COMPONENTS';EXCEPTION WHEN OTHERS THEN IF SQLERRM='ACTIVATED_WITHOUT_COMPONENTS' THEN RAISE;END IF;END;
+ PERFORM public.comm_mail_register('comm-dispatcher');PERFORM public.comm_mail_register('internal-approvals');PERFORM public.comm_mail_register('commercial-reports');PERFORM public.comm_mail_register('password-recovery');
+ BEGIN PERFORM public.comm_mail_set_provider('SMTP',20,true);RAISE EXCEPTION 'ACTIVATED_WITHOUT_AUTH';EXCEPTION WHEN OTHERS THEN IF SQLERRM='ACTIVATED_WITHOUT_AUTH' THEN RAISE;END IF;END;
+ IF public.comm_smtp_probe_result(true,ver-interval '1 second') THEN RAISE EXCEPTION 'STALE_SECRET_ACCEPTED';END IF;
+ IF NOT public.comm_smtp_probe_result(true,ver) THEN RAISE EXCEPTION 'PROBE_RESULT_NOT_RECORDED';END IF;
+ BEGIN PERFORM public.comm_mail_set_provider('SMTP',20,false);RAISE EXCEPTION 'ACTIVATED_WITHOUT_NATIVE_AUTH';EXCEPTION WHEN OTHERS THEN IF SQLERRM='ACTIVATED_WITHOUT_NATIVE_AUTH' THEN RAISE;END IF;END;
+ PERFORM public.comm_mail_set_provider('SMTP',20,true);
+ r:=public.comm_smtp_claim('test:one',repeat('a',64));IF r->>'state'<>'READY' THEN RAISE EXCEPTION 'CLAIM_NOT_READY';END IF;tok:=(r->>'token')::uuid;
+ IF public.comm_smtp_claim('test:one',repeat('a',64))->>'state'<>'BUSY' THEN RAISE EXCEPTION 'CONCURRENT_CLAIM';END IF;
+ IF public.comm_smtp_claim('test:one',repeat('b',64))->>'state'<>'CONFLICT' THEN RAISE EXCEPTION 'FINGERPRINT_CROSSED';END IF;
+ BEGIN PERFORM public.comm_smtp_finish('test:one',gen_random_uuid(),'ACCEPTED','wrong');RAISE EXCEPTION 'FOREIGN_TOKEN_ACCEPTED';EXCEPTION WHEN OTHERS THEN IF SQLERRM='FOREIGN_TOKEN_ACCEPTED' THEN RAISE;END IF;END;
+ PERFORM public.comm_smtp_finish('test:one',tok,'ACCEPTED','smtp:test');
+ IF public.comm_smtp_claim('test:one',repeat('a',64))->>'state'<>'ACCEPTED' THEN RAISE EXCEPTION 'ACCEPTED_WAS_RECLAIMED';END IF;
+ r:=public.comm_smtp_claim('test:held',repeat('c',64));PERFORM public.comm_smtp_finish('test:held',(r->>'token')::uuid,'HELD',NULL);
+ IF public.comm_smtp_claim('test:held',repeat('c',64))->>'state'<>'HELD' THEN RAISE EXCEPTION 'AMBIGUOUS_RETRIED';END IF;
+ r:=public.comm_smtp_claim('test:stale',repeat('d',64));UPDATE public.comm_smtp_ledger SET claimed_at=now()-interval '3 minutes' WHERE op_key='test:stale';
+ IF public.comm_smtp_claim('test:stale',repeat('d',64))->>'state'<>'HELD' THEN RAISE EXCEPTION 'STALE_RETRIED';END IF;
+ UPDATE public.comm_mail_transport SET hourly_cap=1 WHERE id=1;
+ IF public.comm_smtp_claim('test:quota',repeat('e',64))->>'state'<>'RATE_LIMIT' THEN RAISE EXCEPTION 'QUOTA_NOT_SHARED';END IF;
+ UPDATE public.comm_mail_transport SET hourly_cap=20 WHERE id=1;
+ INSERT INTO auth.users(id,email) VALUES(a,'smtp-admin@qa.invalid'),(u,'smtp-author@qa.invalid');
+ INSERT INTO public.profiles(id,email,full_name,role,status) VALUES(a,'smtp-admin@qa.invalid','SMTP QA Admin','ADMIN','ACTIVO'),(u,'smtp-author@qa.invalid','SMTP QA Author','COMERCIAL','ACTIVO');
+ INSERT INTO auth.sessions(id,user_id,not_after) VALUES(sid,a,now()+interval '1 hour');
+ PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',a,'session_id',sid,'role','authenticated','iat',extract(epoch from now())+1)::text,true);
+ PERFORM public.com_mail_settings_set(ARRAY[' Copy@qa.invalid ','copy@qa.invalid','smtp-author@qa.invalid']);
+ -- V2: las copias requieren autorización expresa validada en el servidor antes de recibir detalle
+ PERFORM public.com_mail_copy_authorize(ARRAY['copy@qa.invalid'],'DETALLE_COMERCIAL_COMPLETO_CC_VISIBLE',true);
+ IF jsonb_array_length(public.com_mail_settings_get()->'copies')<>2 THEN RAISE EXCEPTION 'COPIES_NOT_NORMALIZED';END IF;
+ BEGIN PERFORM public.com_mail_settings_set(ARRAY['bad-address']);RAISE EXCEPTION 'INVALID_EMAIL_ACCEPTED';EXCEPTION WHEN OTHERS THEN IF SQLERRM='INVALID_EMAIL_ACCEPTED' THEN RAISE;END IF;END;
+ INSERT INTO public.com_clients(erp_id,razon_social,doc_type,search_text) VALUES('SMTP-QA-'||q::text,'CLIENTE FICTICIO SMTP','SIN_DOC','SMTP QA') RETURNING id INTO cl;
+ INSERT INTO public.com_requests(id,kind,client_id,client_snapshot,channel,requested_by,original_terms,current_terms,kpi_snapshot) VALUES(q,'FINANCIACION',cl,'{"razon_social":"QA MAIL"}','CARTERA',u,'{}','{}','{}');
+ INSERT INTO public.com_request_events(request_id,seq,kind,actor_id,actor_label) VALUES(q,1,'APROBADA',a,'QA Admin') RETURNING id INTO evt;
+ IF (SELECT count(*) FROM public.com_decision_mail_outbox WHERE event_id=evt)<>2 THEN RAISE EXCEPTION 'AUTHOR_OR_COPIES_DUPLICATED';END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.com_decision_mail_outbox WHERE event_id=evt AND recipient_user=u AND kind='AUTHOR') THEN RAISE EXCEPTION 'AUTHOR_NOT_INCLUDED';END IF;
+ FOREACH k IN ARRAY ARRAY['APROBADA_CON_MODIFICACIONES','RECHAZADA','DEVUELTA_CON_MODIFICACIONES','CANCELADA','RETIRADA_POR_COMERCIAL','CAMBIOS_ACEPTADOS_REENVIADA'] LOOP
+  n:=n+1;INSERT INTO public.com_request_events(request_id,seq,kind) VALUES(q,n,k);
+ END LOOP;
+ IF (SELECT count(*) FROM public.com_decision_mail_outbox WHERE request_id=q)<>14 THEN RAISE EXCEPTION 'MISSING_DECISION_EVENT';END IF;
+ INSERT INTO public.com_request_events(request_id,seq,kind) VALUES(q,99,'PENDIENTE');
+ IF (SELECT count(*) FROM public.com_decision_mail_outbox WHERE request_id=q)<>14 THEN RAISE EXCEPTION 'DUPLICATED_REOPEN_NOTICE';END IF;
+
+ SELECT id INTO rec FROM public.com_decision_mail_outbox WHERE event_id=evt AND kind='AUTHOR';
+ UPDATE public.com_decision_mail_outbox SET state='PROCESSING',token=sid WHERE id=rec;
+ IF NOT public.comm_decision_mail_guard(rec,sid) THEN RAISE EXCEPTION 'AUTHOR_NOT_AUTHORIZED';END IF;
+ UPDATE public.profiles SET status='DESHABILITADO' WHERE id=u;
+ IF public.comm_decision_mail_guard(rec,sid) THEN RAISE EXCEPTION 'DISABLED_AUTHOR_RECEIVES_MAIL';END IF;
+ UPDATE public.profiles SET status='ACTIVO' WHERE id=u;
+ SELECT id INTO rec FROM public.com_decision_mail_outbox WHERE event_id=evt AND kind='COPY';UPDATE public.com_decision_mail_outbox SET state='PROCESSING',token=sid WHERE id=rec;
+ PERFORM public.com_mail_settings_set('{}');IF public.comm_decision_mail_guard(rec,sid) THEN RAISE EXCEPTION 'REMOVED_COPY_RECEIVES_MAIL';END IF;
+ DELETE FROM auth.sessions WHERE id=sid;
+ BEGIN PERFORM public.com_mail_settings_get();RAISE EXCEPTION 'REVOKED_ADMIN_ALLOWED';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ INSERT INTO auth.sessions(id,user_id,not_after) VALUES(sid,a,now()+interval '1 hour');UPDATE public.profiles SET disabled_modules=ARRAY['COMERCIAL'] WHERE id=a;
+ BEGIN PERFORM public.com_mail_settings_get();RAISE EXCEPTION 'RESTRICTED_ADMIN_ALLOWED';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ UPDATE public.profiles SET disabled_modules='{}',role='COMERCIAL' WHERE id=a;
+ BEGIN PERFORM public.com_mail_settings_get();RAISE EXCEPTION 'COMMERCIAL_ALLOWED_ADMIN_CONFIG';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ UPDATE public.comm_mail_transport SET reverted=true WHERE id=1;
+ BEGIN PERFORM public.comm_mail_set_provider('SMTP',20,true);RAISE EXCEPTION 'REACTIVATED_AFTER_REVERSION';EXCEPTION WHEN OTHERS THEN IF SQLERRM='REACTIVATED_AFTER_REVERSION' THEN RAISE;END IF;END;
+ RAISE NOTICE 'SMTP_SQL_CONTRACT_PASS: ACL, default, activation, stale secret, CAS, concurrency, fingerprint, accepted/held/stale retry, shared quota, author, copies, removal, disabled author, revoked/restricted/role-changed admin, reversal gate';
+END;$$;
+ROLLBACK;

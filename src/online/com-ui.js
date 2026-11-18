@@ -2,7 +2,7 @@
 // búsqueda en el servidor, sin descargar el padrón ni archivos financieros. El servidor valida TODO (permisos, términos, decisiones).
 import '../styles/com.css';
 import { computeSchedule, arDate, FREQ, FREQ_PLURAL, dmyFull, addDays as calAddDays } from './com-schedule.js';
-import { renderMailPanel, mailCopiesToSave } from './com-mail-panel.js';
+import { renderMailPanel, wireMailPanel } from './com-mail-panel.js';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = n => n == null || n === '' ? '—' : '$ ' + Number(n).toLocaleString('es-AR', { maximumFractionDigits: 0 });
 const dmy = s => { if (!s) return '—'; const [y, m, d] = String(s).slice(0, 10).split('-'); return d + '/' + m + '/' + y; };
@@ -204,6 +204,8 @@ async function mount(api, me, host) {
         if (st.type === 'FINANCIACION') { try { st.kpi = await api.comKpi(c.id); } catch (e) { st.kpi = { status: 'SIN_HISTORIAL', detail: errMsg(e) }; } sched(); }
       });
     }
+    // misma solicitud ⇒ mismo identificador de operación hasta que el servidor confirme: un reintento tras perder la respuesta no duplica
+    const opFor = sig => { if (!st.op || st.op.sig !== sig) st.op = { sig, id: 'com-' + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random()) }; return st.op.id; };
     $('#cSend').onclick = async () => {
       if (!st.client) { toast('Elegí el cliente de la lista (el CUIT se completa solo).', true); return; }
       const amount = Number(String($('#cAmount').value).replace(/\D/g, '')); if (!amount) { toast('Ingresá el importe.', true); return; }
@@ -211,7 +213,8 @@ async function mount(api, me, host) {
       const k = Number($('#cInst') ? $('#cInst').value : 0);
       const t = st.type === 'FINANCIACION' ? { amount, installments: k, first_due: $('#cFirst').value, ...(k > 1 ? { frequency: $('#cFreq').value } : {}) } : { amount, due_date: $('#cDue').value, issuer_name: $('#cIssuer').value.trim(), issuer_cuit: $('#cIssuerCuit').value.trim() };
       const b = $('#cSend'); b.disabled = true;
-      try { const res = await api.comCreate(st.type, st.client.id, $('#cOrder').value.trim(), t, $('#cNotes').value.trim(), 'com-' + (crypto.randomUUID ? crypto.randomUUID() : Date.now()));
+      try { const res = await api.comCreate(st.type, st.client.id, $('#cOrder').value.trim(), t, $('#cNotes').value.trim(), opFor(JSON.stringify([st.type, st.client.id, $('#cOrder').value.trim(), t, $('#cNotes').value.trim()])));
+        st.op = null;
         toast('Solicitud ' + res.number + ' enviada' + (res.approver ? ' a ' + String(res.approver).split(' — ')[0] : '') + '.'); st.client = null; st.kpi = null; st.search = ''; st.sel = res.id; render(); }
       catch (e) { toast(errMsg(e), true); b.disabled = false; }
     };
@@ -442,7 +445,7 @@ async function mount(api, me, host) {
       renderMailPanel(mailSettings) +
       '<section class="card" style="margin-top:14px"><div class="sectionhead"><h2>Padrón de clientes</h2><span class="micro">listado_clientes.xlsx · sin duplicar, con historial</span></div><input type="file" id="pFile" accept=".xlsx,.xls"><div id="pRes" class="micro"></div></section>' +
       '<section class="card" style="margin-top:14px"><div class="sectionhead"><h2>Score externo · futuro</h2></div><p class="micro">XFact / Veraz: integración preparada para el futuro. No se consulta ningún servicio externo ni se simula una consulta oficial.</p></section>';
-    $('#comMailSave').onclick=async()=>{const b=$('#comMailSave'),v=mailCopiesToSave($('#comMailCopies').value,(mailSettings&&mailSettings.copies)||[],$('#comMailAuth').checked);if(v.error){$('#comMailResult').textContent=v.error;return;}b.disabled=true;try{await api.comSetMailCopies(v.list);if(mailSettings)mailSettings.copies=v.list;$('#comMailAuth').checked=false;$('#comMailResult').textContent='Destinatarios guardados (cambio auditado). El solicitante sigue recibiendo su aviso.';}catch(e){$('#comMailResult').textContent=String(e.message||e).includes('INVALID_EMAIL')?'Revisá las direcciones: hay un correo inválido o demasiados destinatarios (máximo 20).':errMsg(e);}finally{b.disabled=false;}};
+    wireMailPanel(host, api, () => render());
     $('#sSave').onclick = async () => { try { cfg.settings = await api.comSetSettings({ kpi_months: Number($('#sMonths').value), floor_pct: Number($('#sFloor').value), ceiling_pct: Number($('#sCeil').value), kpi_partial_rule: $('#sRule').value, kpi_source_verified: $('#sVerified').checked }); toast('Parámetros guardados.'); } catch (e) { toast(errMsg(e), true); } };
     host.querySelectorAll('[data-route]').forEach(sel => sel.onchange = async () => { try { await api.comSetRouting(sel.dataset.route, sel.value || null); toast('Aprobador actualizado.'); } catch (e) { toast(errMsg(e), true); render(); } });
     host.querySelectorAll('[data-asg]').forEach(b => b.onclick = async () => { const tr = b.closest('tr'); try { await api.comSetAssignment(tr.dataset.u, tr.querySelector('[data-ch]').value, tr.querySelector('[data-br]').value, tr.querySelector('[data-ca]').value); toast('Asignación guardada.'); } catch (e) { toast(errMsg(e), true); } });

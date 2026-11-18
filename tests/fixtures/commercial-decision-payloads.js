@@ -14,6 +14,11 @@ const request = (o = {}) => ({ id: RID, number: 'AUT-000004', kind: 'FINANCIACIO
 const ev = (kind, o = {}) => ({ id: 41, seq: 3, kind, at: '2026-11-18T14:05:00Z', actor: 'Tesorería QA — Administrador General', by_requester: false, substitute: false, reason: null, terms_before: ORIGINAL, terms_after: ORIGINAL, ...o });
 const P = (event, req = {}, previous = null) => ({ version: 1, event, request: request(req), previous_proposal: previous });
 export const SAMPLES = {
+  nueva: { ...P(ev('ENVIADA', { seq: 1, actor: 'Asesor Comercial QA — Comercial', by_requester: true, terms_before: null, terms_after: ORIGINAL })), version: 2,
+    distribution: { to: ['tesoreria@qa.invalid', 'comercial@qa.invalid'], cc: ['copia1@qa.invalid', 'copia2@qa.invalid'] } },
+  nueva_echeq: { ...P(ev('ENVIADA', { seq: 1, actor: 'Asesor Comercial QA — Comercial', by_requester: true, terms_before: null, terms_after: null }), { kind: 'ECHEQ', number: 'AUT-000007', channel: 'CARTERA', branch: null, cartera_label: 'Cartera Hernán',
+    original_terms: { amount: 845000, due_date: '2026-12-15', days: 27, issuer_is_client: false, issuer_name: 'Distribuidora Andina SRL', issuer_cuit: '30-70000001-3' } }), version: 2,
+    distribution: { to: ['tesoreria@qa.invalid', 'comercial@qa.invalid'], cc: [] } },
   aprobada: P(ev('APROBADA', { reason: 'Cliente con historial de pagos al día. Se autoriza según lo solicitado.' })),
   rechazada: P(ev('RECHAZADA', { reason: 'El cliente registra deuda vencida en cuenta corriente. No se autoriza una nueva financiación hasta regularizar el saldo pendiente.' })),
   devuelta: P(ev('DEVUELTA_CON_MODIFICACIONES', { reason: 'Se propone reducir el importe y pasar a dos cuotas quincenales.', terms_after: MODIFIED })),

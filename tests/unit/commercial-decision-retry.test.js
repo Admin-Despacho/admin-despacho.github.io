@@ -1,107 +1,94 @@
-import {describe,it,expect,vi,beforeEach} from 'vitest';
-import {sendCommercialDecisionEmails,DECISION_MAIL_KEY_VERSION} from '../../supabase/functions/_shared/commercial-decision-mail.js';
-import {corporateMail} from '../../supabase/functions/_shared/corporate-mail.js';
-vi.mock('../../supabase/functions/_shared/corporate-mail.js',()=>({corporateMail:vi.fn()}));
-// Datos SINTÉTICOS. Sin envíos reales: el transporte es un doble.
-const payload={version:1,event:{id:7,seq:3,kind:'APROBADA',at:'2026-11-18T14:05:00Z',actor:'QA Aprobador',reason:null,terms_before:{amount:100},terms_after:{amount:100}},
- request:{id:'11111111-1111-4111-8111-111111111111',number:'AUT-000901',kind:'ECHEQ',created_at:'2026-11-18T13:30:00Z',client_name:'CLIENTE QA',client_cuit:'30-00000000-0',
-  order_ref:'PV-QA',channel:'SUCURSAL',branch:'SAN_JUAN',requester:'QA Comercial',approver:'QA Aprobador',notes:null,original_terms:{amount:100,due_date:'2026-11-30',days:12,issuer_is_client:true,issuer_name:'CLIENTE QA',issuer_cuit:'30-00000000-0'}},previous_proposal:null};
-// Cola simulada: N destinatarios del MISMO evento; la toma devuelve de a uno (como comm_decision_mail_claim_next).
-function queue(recipients,{capacity=Infinity,claimError=false}={}){
- const rows=recipients.map((r,i)=>({id:i+1,token:'t'+(i+1),event_id:7,recipient:r,kind:i?'COPY':'AUTHOR',event_kind:'APROBADA',request_number:'AUT-000901',state:'PENDING'}));
+import {describe,it,expect,vi} from 'vitest';
+import {sendCommercialDecisionEmails,deliveryKeys} from '../../supabase/functions/_shared/commercial-decision-mail.js';
+import {SAMPLES} from '../fixtures/commercial-decision-payloads.js';
+// Datos SINTÉTICOS. Sin envíos reales: la entrega es un doble que registra (sobre, mensaje, clave).
+const err=(code,o={})=>Object.assign(new Error(code),{code,status:503,phase:'BEFORE_SEND',...o});
+function queue(principals,copies=[],{capacity=Infinity,claimError=false,kind='ENVIADA'}={}){
+ const payload={...SAMPLES.nueva,distribution:{to:principals,cc:copies}};
+ const rows=[...principals.map((r,i)=>({kind:i?'AUTHOR':'APPROVER',recipient:r})),...copies.map(r=>({kind:'COPY',recipient:r}))].map((x,i)=>({...x,id:i+1,token:'t'+(i+1),event_id:7,event_kind:kind,request_number:'AUT-000004',state:'PENDING'}));
  const calls=[];let used=0;
  const sb={rpc:async(name,args)=>{calls.push([name,args]);
   if(name==='comm_decision_mail_claim_next'){if(claimError)return {error:{message:'function does not exist'}};if(used>=capacity)return {data:{state:'NO_CAPACITY'}};const j=rows.find(x=>x.state==='PENDING');if(!j)return {data:{state:'EMPTY'}};j.state='PROCESSING';used++;return {data:{state:'CLAIMED',job:j,payload}};}
   if(name==='comm_decision_mail_guard')return {data:true};
-  if(name==='comm_decision_mail_finish'){rows.find(x=>x.id===args.p_id).state=args.p_state;return {};}
+  if(name==='comm_decision_mail_finish'){const x=rows.find(x=>x.id===args.p_id);x.state=args.p_state;x.ref=args.p_reference;x.err=args.p_error;return {};}
   if(name==='comm_decision_mail_release'){const x=rows.find(x=>x.id===args.p_id);x.state='PENDING';x.released=args.p_code;used--;return {data:true};}
   return {};}};
  return {sb,rows,calls};
 }
-const mailDouble=(send,prior=async()=>null)=>corporateMail.mockReturnValue({runtime:async()=>({provider:'SMTP',connected:true,available_slots:100}),send:vi.fn(send),prior:vi.fn(prior)});
-beforeEach(()=>corporateMail.mockReset());
+function delivery(behavior=async()=>({id:'smtp:ok'}),ledger={}){
+ const sent=[];return {sent,ledger,runtime:async()=>({provider:'SMTP',connected:true,email:'fgutierrez@okaccesorios.com'}),lookup:vi.fn(async k=>ledger[k]||null),
+  deliver:vi.fn(async a=>{await a.beforeData?.();const r=await behavior(a);sent.push(a);ledger[a.key]={state:'ACCEPTED',id:r.id};return r;})};
+}
+const P=['aprobador@qa.invalid','comercial@qa.invalid'],C=['copia1@qa.invalid','copia2@qa.invalid','copia3@qa.invalid','copia4@qa.invalid','copia5@qa.invalid'];
+const header=(raw,h)=>(raw.split('\r\n\r\n')[0].match(new RegExp('^'+h+': ([\\s\\S]*?)\\r\\n(?=[A-Z])','m'))||[])[1]||'';
 
-describe('Correos de resoluciones · lote por ciclo',()=>{
- it('solicitante + 5 copias se envían en el MISMO ciclo (antes: uno por minuto)',async()=>{
-  const q=queue(['autor@qa.invalid','c1@qa.invalid','c2@qa.invalid','c3@qa.invalid','c4@qa.invalid','c5@qa.invalid']);
-  const m=mailDouble(async msg=>{await msg.beforeData();return {id:'smtp:'+msg.to};});
-  const out=await sendCommercialDecisionEmails(q.sb,{});
-  expect(out).toMatchObject({sent:6,claimed:6,stop:'EMPTY'});expect(q.rows.every(r=>r.state==='SENT')).toBe(true);
-  const sent=corporateMail.mock.results[0].value.send.mock.calls.map(c=>c[0]);
-  expect(sent.map(x=>x.to)).toEqual(q.rows.map(r=>r.recipient));                      // un correo por destinatario: nadie ve a los demás
-  expect(new Set(sent.map(x=>x.idempotencyKey)).size).toBe(6);                          // unicidad por evento y destinatario
-  expect(sent[0].idempotencyKey).toBe('evento:7:autor@qa.invalid:'+DECISION_MAIL_KEY_VERSION);
-  expect(new Set(sent.map(x=>x.html)).size).toBe(1);                                     // mismo detalle completo para todos
+describe('Avisos comerciales · Para + CC visibles, entrega por destinatario',()=>{
+ it('aprobador + solicitante + 5 copias en el MISMO ciclo, un mismo mensaje con Para/CC visibles para todos',async()=>{
+  const q=queue(P,C),d=delivery();const out=await sendCommercialDecisionEmails(q.sb,{delivery:d});
+  expect(out).toMatchObject({sent:7,claimed:7,stop:'EMPTY'});expect(q.rows.every(r=>r.state==='SENT')).toBe(true);
+  expect(d.sent.map(x=>x.envelopeTo)).toEqual([...P,...C]);
+  expect(new Set(d.sent.map(x=>x.raw)).size).toBe(1);   // MISMO mensaje para todos
+  const raw=d.sent[0].raw;expect(header(raw,'To')).toBe('<aprobador@qa.invalid>,\r\n <comercial@qa.invalid>');expect(header(raw,'Cc').split(',').length).toBe(5);expect(raw.split('\r\n\r\n')[0]).not.toMatch(/^Bcc:/mi);
+  expect(new Set(d.sent.map(x=>x.key)).size).toBe(7);expect(d.sent[0].key).toBe('evento:7:aprobador@qa.invalid');
  });
  it('sin cupo: los que exceden quedan PENDIENTES sin gastar intento',async()=>{
-  const q=queue(['a@qa.invalid','b@qa.invalid','c@qa.invalid'],{capacity:2});mailDouble(async msg=>({id:'x'}));
-  const out=await sendCommercialDecisionEmails(q.sb,{});
-  expect(out).toMatchObject({sent:2,stop:'NO_CAPACITY'});expect(q.rows.map(r=>r.state)).toEqual(['SENT','SENT','PENDING']);
+  const q=queue(P,C,{capacity:3});const out=await sendCommercialDecisionEmails(q.sb,{delivery:delivery()});
+  expect(out).toMatchObject({sent:3,stop:'NO_CAPACITY'});expect(q.rows.filter(r=>r.state==='PENDING').length).toBe(4);
  });
- it('el proveedor responde RATE_LIMIT (cupo diario/horario agotado entre la toma y el envío) → RELEASE, se corta el ciclo, sin ERROR',async()=>{
-  const q=queue(['a@qa.invalid','b@qa.invalid']);mailDouble(async()=>{throw Object.assign(new Error('SMTP_RATE_LIMIT'),{code:'SMTP_RATE_LIMIT',status:503,phase:'BEFORE_SEND'});});
-  const out=await sendCommercialDecisionEmails(q.sb,{});
-  expect(out).toMatchObject({released:1,stop:'SMTP_RATE_LIMIT',errors:0});expect(q.rows[0]).toMatchObject({state:'PENDING',released:'SMTP_RATE_LIMIT'});expect(q.rows[1].state).toBe('PENDING');
+ it('RATE_LIMIT del ledger entre la toma y el envío → vuelve a PENDIENTE, sin ERROR',async()=>{
+  const q=queue(P);const out=await sendCommercialDecisionEmails(q.sb,{delivery:delivery(async()=>{throw err('SMTP_RATE_LIMIT');})});
+  expect(out).toMatchObject({released:1,errors:0,stop:'SMTP_RATE_LIMIT'});expect(q.rows[0]).toMatchObject({state:'PENDING',released:'SMTP_RATE_LIMIT'});
  });
- it('fallo INDIVIDUAL (destinatario rechazado) no impide enviar a los demás',async()=>{
-  const q=queue(['malo@qa.invalid','b@qa.invalid','c@qa.invalid']);
-  mailDouble(async msg=>{if(msg.to==='malo@qa.invalid')throw Object.assign(new Error('SMTP_RECIPIENT_550'),{code:'SMTP_RECIPIENT_550',status:400,phase:'BEFORE_SEND'});return {id:'ok'};});
-  const out=await sendCommercialDecisionEmails(q.sb,{});
-  expect(out).toMatchObject({sent:2,errors:1});expect(q.rows.map(r=>r.state)).toEqual(['ERROR','SENT','SENT']);
+ it('fallo INDIVIDUAL (550) no impide entregar al resto',async()=>{
+  const q=queue(P,C);const out=await sendCommercialDecisionEmails(q.sb,{delivery:delivery(async a=>{if(a.envelopeTo==='copia2@qa.invalid')throw err('SMTP_RECIPIENT_550',{status:400});return {id:'ok'};})});
+  expect(out).toMatchObject({sent:6,errors:1});expect(q.rows.find(r=>r.recipient==='copia2@qa.invalid').state).toBe('ERROR');
  });
- it('resultado INCIERTO → HELD (nunca se reintenta solo) y se corta el ciclo',async()=>{
-  const q=queue(['a@qa.invalid','b@qa.invalid']);mailDouble(async()=>{throw Object.assign(new Error('SMTP_POR_VERIFICAR'),{code:'SMTP_POR_VERIFICAR',phase:'AFTER_SEND'});});
-  const out=await sendCommercialDecisionEmails(q.sb,{});
-  expect(out).toMatchObject({held:1,stop:'UNCERTAIN_RESULT'});expect(q.rows.map(r=>r.state)).toEqual(['HELD','PENDING']);
+ it('resultado INCIERTO de UN destinatario (respuesta perdida tras aceptar) → HELD sin reintento; los demás siguen',async()=>{
+  const q=queue(P);const out=await sendCommercialDecisionEmails(q.sb,{delivery:delivery(async a=>{if(a.envelopeTo===P[0])throw err('SMTP_POR_VERIFICAR',{phase:'AFTER_SEND'});return {id:'ok'};})});
+  expect(out).toMatchObject({held:1,sent:1});expect(q.rows.map(r=>r.state)).toEqual(['HELD','SENT']);
  });
- it('aceptado pero NO registrado → HELD y no se cuenta como enviado',async()=>{
-  const q=queue(['a@qa.invalid']);const orig=q.sb.rpc;
-  q.sb.rpc=async(n,a)=>n==='comm_decision_mail_finish'&&a.p_state==='SENT'?{error:{message:'db down'}}:orig(n,a);
-  mailDouble(async msg=>{await msg.beforeData();return {id:'smtp:aceptado'};});
-  const out=await sendCommercialDecisionEmails(q.sb,{});
-  expect(out).toMatchObject({sent:0,held:1});expect(q.rows[0].state).toBe('HELD');
+ it('aceptado pero la bandeja no registra el SENT → HELD (no se cuenta ni se reenvía)',async()=>{
+  const q=queue(['a@qa.invalid']);const o=q.sb.rpc;q.sb.rpc=async(n,a)=>n==='comm_decision_mail_finish'&&a.p_state==='SENT'?{error:{}}:o(n,a);
+  const out=await sendCommercialDecisionEmails(q.sb,{delivery:delivery()});expect(out).toMatchObject({sent:0,held:1});expect(q.rows[0].state).toBe('HELD');
  });
- it('destinatario descartado por el servidor (copia quitada / autor inactivo) → no se envía',async()=>{
-  const q=queue(['a@qa.invalid','b@qa.invalid']);const orig=q.sb.rpc;
-  q.sb.rpc=async(n,a)=>n==='comm_decision_mail_guard'&&a.p_id===1?{data:false}:orig(n,a);
-  const m=mailDouble(async msg=>{await msg.beforeData();return {id:'x'};});
-  const out=await sendCommercialDecisionEmails(q.sb,{});
-  expect(out).toMatchObject({skipped:1,sent:1});expect(corporateMail.mock.results[0].value.send).toHaveBeenCalledTimes(1);
+ it('idempotencia entre versiones: clave PUBLICADA ya aceptada → SENT sin reenviar',async()=>{
+  const q=queue(['a@qa.invalid']),d=delivery(undefined,{'evento:7:a@qa.invalid':{state:'ACCEPTED',id:'smtp:publicada'}});
+  await sendCommercialDecisionEmails(q.sb,{delivery:d});expect(d.deliver).not.toHaveBeenCalled();expect(q.rows[0]).toMatchObject({state:'SENT',ref:'smtp:publicada'});
  });
- it('verificación de destinatario no disponible → ERROR seguro (reintento en 5 min) y se corta',async()=>{
-  const q=queue(['a@qa.invalid','b@qa.invalid']);const orig=q.sb.rpc;
-  q.sb.rpc=async(n,a)=>n==='comm_decision_mail_guard'?{error:{message:'x'}}:orig(n,a);mailDouble(async()=>({id:'x'}));
-  const out=await sendCommercialDecisionEmails(q.sb,{});
-  expect(out).toMatchObject({errors:1,stop:'RECIPIENT_CHECK_UNAVAILABLE'});expect(corporateMail.mock.results[0].value.send).not.toHaveBeenCalled();
+ it('idempotencia entre versiones: clave V2 ya aceptada (reinstalación) → SENT sin reenviar',async()=>{
+  const q=queue(['a@qa.invalid']),d=delivery(undefined,{'evento:7:a@qa.invalid:v2':{state:'ACCEPTED',id:'smtp:v2'}});
+  await sendCommercialDecisionEmails(q.sb,{delivery:d});expect(d.deliver).not.toHaveBeenCalled();expect(q.rows[0].state).toBe('SENT');
  });
- it('configuración cambiada antes de DATA → vuelve a PENDIENTE sin gastar intento',async()=>{
-  const q=queue(['a@qa.invalid']);mailDouble(async()=>{throw Object.assign(new Error('MAIL_CONFIGURATION_CHANGED'),{code:'ABORTED'});});
-  const out=await sendCommercialDecisionEmails(q.sb,{});
-  expect(out).toMatchObject({released:1});expect(q.rows[0]).toMatchObject({state:'PENDING',released:'MAIL_CONFIGURATION_CHANGED'});
+ it('cualquier clave incierta → HELD sin enviar',async()=>{
+  const q=queue(['a@qa.invalid']),d=delivery(undefined,{'evento:7:a@qa.invalid':{state:'HELD'}});
+  await sendCommercialDecisionEmails(q.sb,{delivery:d});expect(d.deliver).not.toHaveBeenCalled();expect(q.rows[0].state).toBe('HELD');
  });
- it('ya ACEPTADO con la clave anterior (aviso breve) → se registra SENT sin reenviar',async()=>{
-  const q=queue(['a@qa.invalid']);mailDouble(async()=>({id:'nuevo'}),async key=>key==='evento:7:a@qa.invalid'?{id:'smtp:viejo'}:null);
-  await sendCommercialDecisionEmails(q.sb,{});
-  expect(q.rows[0].state).toBe('SENT');expect(corporateMail.mock.results[0].value.send).not.toHaveBeenCalled();
-  expect(q.calls.find(c=>c[0]==='comm_decision_mail_finish')[1]).toMatchObject({p_state:'SENT',p_reference:'smtp:viejo'});
+ it('clave publicada con OTRO contenido no entregado (CONFLICT) → se usa la clave V2, una sola entrega',async()=>{
+  const q=queue(['a@qa.invalid']);const d=delivery(async a=>{if(a.key==='evento:7:a@qa.invalid')throw err('SMTP_CONFLICT',{status:400});return {id:'smtp:v2'};});
+  await sendCommercialDecisionEmails(q.sb,{delivery:d});expect(d.sent.map(x=>x.key)).toEqual(['evento:7:a@qa.invalid:v2']);expect(q.rows[0].state).toBe('SENT');
  });
- it('clave anterior con resultado incierto → HELD, nunca se arriesga un duplicado',async()=>{
-  const q=queue(['a@qa.invalid']);mailDouble(async()=>({id:'nuevo'}),async()=>{throw Object.assign(new Error('SMTP_POR_VERIFICAR'),{code:'SMTP_POR_VERIFICAR',phase:'AFTER_SEND'});});
-  await sendCommercialDecisionEmails(q.sb,{});expect(q.rows[0].state).toBe('HELD');
+ it('destinatario descartado por el servidor (revocado / sin ratificar / inactivo) → no se entrega',async()=>{
+  const q=queue(P,['copia1@qa.invalid']);const o=q.sb.rpc;q.sb.rpc=async(n,a)=>n==='comm_decision_mail_guard'&&a.p_id===3?{data:false}:o(n,a);
+  const d=delivery();const out=await sendCommercialDecisionEmails(q.sb,{delivery:d});expect(out).toMatchObject({skipped:1,sent:2});expect(d.sent.map(x=>x.envelopeTo)).not.toContain('copia1@qa.invalid');
  });
- it('respeta el presupuesto de tiempo de la Edge Function y el máximo por ciclo',async()=>{
-  let t=0;const q=queue(Array.from({length:30},(_,i)=>'d'+i+'@qa.invalid'));mailDouble(async()=>{t+=10000;return {id:'x'};});
-  const out=await sendCommercialDecisionEmails(q.sb,{now:()=>t});
-  expect(out.sent).toBe(5);expect(out.stop).toBe('TIME_BUDGET');
-  t=0;const q2=queue(Array.from({length:30},(_,i)=>'e'+i+'@qa.invalid'));mailDouble(async()=>({id:'x'}));
-  expect((await sendCommercialDecisionEmails(q2.sb,{now:()=>0})).sent).toBe(20);
+ it('destinatario que NO figura en la distribución de la foto → ERROR, nunca se envía',async()=>{
+  const q=queue(['a@qa.invalid']);q.rows[0].recipient='intruso@qa.invalid';const d=delivery();
+  await sendCommercialDecisionEmails(q.sb,{delivery:d});expect(d.deliver).not.toHaveBeenCalled();expect(q.rows[0]).toMatchObject({state:'ERROR',err:'RECIPIENT_NOT_IN_DISTRIBUTION'});
  });
- it('SQL todavía no aplicado (toma nueva inexistente) → no envía y NO lanza (no bloquea los demás módulos)',async()=>{
-  const q=queue(['a@qa.invalid'],{claimError:true});mailDouble(async()=>({id:'x'}));
-  await expect(sendCommercialDecisionEmails(q.sb,{})).resolves.toMatchObject({sent:0,stop:'QUEUE_UNAVAILABLE'});
+ it('verificación de destinatario no disponible → ERROR seguro y se corta',async()=>{
+  const q=queue(P);const o=q.sb.rpc;q.sb.rpc=async(n,a)=>n==='comm_decision_mail_guard'?{error:{}}:o(n,a);const d=delivery();
+  const out=await sendCommercialDecisionEmails(q.sb,{delivery:d});expect(out).toMatchObject({errors:1,stop:'RECIPIENT_CHECK_UNAVAILABLE'});expect(d.deliver).not.toHaveBeenCalled();
  });
- it('proveedor no SMTP o desconectado → no toma nada',async()=>{
-  const q=queue(['a@qa.invalid']);corporateMail.mockReturnValue({runtime:async()=>({provider:'LEGACY',connected:true})});
-  expect(await sendCommercialDecisionEmails(q.sb,{})).toMatchObject({active:false});expect(q.calls.length).toBe(0);
+ it('presupuesto de tiempo y máximo por ciclo',async()=>{
+  let t=0;const q=queue(P,Array.from({length:18},(_,i)=>'c'+i+'@qa.invalid'));const out=await sendCommercialDecisionEmails(q.sb,{delivery:delivery(async()=>{t+=10000;return {id:'x'};}),now:()=>t});
+  expect(out).toMatchObject({sent:5,stop:'TIME_BUDGET'});
+  const q2=queue(P,Array.from({length:25},(_,i)=>'e'+i+'@qa.invalid'));expect((await sendCommercialDecisionEmails(q2.sb,{delivery:delivery(),now:()=>0})).sent).toBe(20);
  });
+ it('SQL V2 no aplicado o revertido → no envía y no lanza',async()=>{
+  const q=queue(P,[],{claimError:true});await expect(sendCommercialDecisionEmails(q.sb,{delivery:delivery()})).resolves.toMatchObject({sent:0,stop:'QUEUE_UNAVAILABLE'});
+ });
+ it('proveedor no SMTP → no toma nada',async()=>{
+  const q=queue(P);const out=await sendCommercialDecisionEmails(q.sb,{delivery:{...delivery(),runtime:async()=>({provider:'LEGACY',connected:true})}});expect(out).toMatchObject({active:false});expect(q.calls.length).toBe(0);
+ });
+ it('claves: publicada + alternativa V2',()=>{expect(deliveryKeys(9,'x@qa.invalid')).toEqual(['evento:9:x@qa.invalid','evento:9:x@qa.invalid:v2']);});
 });

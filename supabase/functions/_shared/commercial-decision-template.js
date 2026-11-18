@@ -10,6 +10,8 @@ const NAVY = '#102631', CYAN = '#56dce9', MUTED = '#536672', LINE = '#d9e3e8', S
 
 // Estados REALES del sistema (eventos de com_request_events que generan correo) → presentación.
 export const STATES = {
+  ENVIADA: { label: 'NUEVA SOLICITUD', banner: 'NUEVA SOLICITUD COMERCIAL', fg: '#925400', bg: '#fff2d9', box: '#925400', pending: true,
+    intro: 'Se ha registrado una nueva solicitud comercial que requiere evaluación y autorización.' },
   APROBADA: { label: 'APROBADA', banner: 'SOLICITUD APROBADA', fg: '#067647', bg: '#e3f6ea', box: '#0b4a2b',
     intro: 'Se informa que la siguiente solicitud comercial fue evaluada y aprobada.' },
   APROBADA_CON_MODIFICACIONES: { label: 'APROBADA CON CAMBIOS', banner: 'SOLICITUD APROBADA CON CAMBIOS', fg: '#175cd3', bg: '#e6efff', box: '#14306b',
@@ -22,7 +24,7 @@ export const STATES = {
     intro: 'Se informa que la siguiente solicitud comercial fue cancelada: el comercial la retiró sin aceptar las condiciones propuestas.' },
   CANCELADA: { label: 'CANCELADA', banner: 'SOLICITUD CANCELADA', fg: '#475467', bg: '#eceff2', box: '#344054',
     intro: 'Se informa que la siguiente solicitud comercial fue cancelada.' },
-  CAMBIOS_ACEPTADOS_REENVIADA: { label: 'REENVIADA', banner: 'CAMBIOS ACEPTADOS · REENVIADA A EVALUACIÓN', fg: '#0e7490', bg: '#e0f5f8', box: '#164e63',
+  CAMBIOS_ACEPTADOS_REENVIADA: { label: 'REENVIADA', banner: 'CAMBIOS ACEPTADOS · REENVIADA A EVALUACIÓN', fg: '#925400', bg: '#fff2d9', box: '#925400',
     intro: 'Se informa que el comercial aceptó las condiciones propuestas y la solicitud volvió a evaluación. Todavía no está aprobada.' },
 };
 const KIND = { FINANCIACION: 'Financiación propia', ECHEQ: 'Aceptación de e-cheq' };
@@ -101,7 +103,7 @@ function compareHtml(kind, cmp, st) {
 
 // ---------- modelo de contenido común (HTML y texto usan EXACTAMENTE los mismos datos) ----------
 export function buildModel(payload) {
-  if (!payload || payload.version !== 1 || !payload.event || !payload.request) throw Object.assign(new Error('PAYLOAD_INVALID'), { code: 'PAYLOAD_INVALID' });
+  if (!payload || ![1, 2].includes(payload.version) || !payload.event || !payload.request) throw Object.assign(new Error('PAYLOAD_INVALID'), { code: 'PAYLOAD_INVALID' });
   const e = payload.event, q = payload.request, st = STATES[e.kind];
   if (!st) throw Object.assign(new Error('EVENT_KIND_UNSUPPORTED'), { code: 'EVENT_KIND_UNSUPPORTED' });
   const kind = q.kind, orig = q.original_terms || {}, prev = payload.previous_proposal || null;
@@ -142,14 +144,15 @@ export function buildModel(payload) {
     APROBADA_CON_MODIFICACIONES: 'La operación quedó autorizada SOLO en las condiciones autorizadas.' }[e.kind];
   const rid = /^[0-9a-f-]{36}$/i.test(String(q.id || '')) ? String(q.id) : '';
   const url = APP_URL + '#/autorizaciones?v=historial' + (rid ? '&solicitud=' + encodeURIComponent(rid) : '');
-  const subject = oneLine('Solicitud comercial ' + st.label + ' | ' + oneLine(q.number) + ' | ' + client).slice(0, 200);
-  return { st, e, q, kind, orig, data, cmp, reasonTitle, reason: has(e.reason) ? String(e.reason) : null, resolution, closing, url, subject,
+  const subject = oneLine((e.kind === 'ENVIADA' ? 'NUEVA SOLICITUD COMERCIAL' : 'Solicitud comercial ' + st.label) + ' | ' + oneLine(q.number) + ' | ' + client).slice(0, 200);
+  const subtitle = e.kind === 'ENVIADA' ? 'Pendiente de aprobación · ' + oneLine(q.number) : oneLine(q.number) + ' · ' + (KIND[kind] || oneLine(kind));
+  return { st, e, q, kind, orig, data, cmp, subtitle, isNew: e.kind === 'ENVIADA', reasonTitle, reason: has(e.reason) ? String(e.reason) : null, resolution, closing, url, subject,
     showOrigCalendar: kind === 'FINANCIACION' && sched(orig).length > 0, notes: has(q.notes) ? String(q.notes) : null };
 }
 
 export function renderDecisionMail(payload, { sampleBanner = '' } = {}) {
   const m = buildModel(payload), st = m.st;
-  const pre = st.label + ' · ' + oneLine(m.q.number) + ' · ' + (KIND[m.kind] || '');
+  const pre = st.label + ' · ' + m.subtitle;
   const html = '<!doctype html><html lang="es-AR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>' + esc(m.subject) + '</title></head>' +
     '<body style="margin:0;padding:0;background:' + SOFT + ';font-family:Arial,Helvetica,sans-serif;color:' + NAVY + '">' +
     '<div style="display:none;max-height:0;overflow:hidden;mso-hide:all">' + esc(pre) + '</div>' +
@@ -159,15 +162,16 @@ export function renderDecisionMail(payload, { sampleBanner = '' } = {}) {
     (sampleBanner ? '<tr><td style="padding:16px 24px;font-size:12px;color:' + MUTED + ';border-bottom:1px solid #e4ebef">' + esc(sampleBanner) + '<br>Asunto: ' + esc(m.subject) + '</td></tr>' : '') +
     '<tr><td style="background:' + NAVY + ';padding:26px;color:#ffffff" bgcolor="' + NAVY + '"><div style="font-size:28px;font-weight:bold;letter-spacing:1px">OK DESPACHO</div><div style="color:' + CYAN + ';font-size:13px;margin-top:7px;font-weight:bold">AUTORIZACIONES COMERCIALES</div></td></tr>' +
     '<tr><td style="padding:24px">' +
-    '<div style="background:' + st.bg + ';border-radius:8px;padding:16px;color:' + st.fg + '"><b style="font-size:21px">' + esc(st.banner) + '</b><div style="margin-top:6px;font-size:13px">' + esc(oneLine(m.q.number) + ' · ' + (KIND[m.kind] || oneLine(m.kind))) + '</div></div>' +
+    '<div style="background:' + st.bg + ';border-radius:8px;padding:16px;color:' + st.fg + '"><b style="font-size:21px">' + esc(st.banner) + '</b><div style="margin-top:6px;font-size:13px">' + esc(m.subtitle) + '</div></div>' +
     '<p style="font-size:14px;line-height:1.6">' + esc(st.intro) + '</p>' +
-    H2('Datos de la solicitud original') + kv(m.data) +
+    H2(m.isNew ? 'Datos de la solicitud' : 'Datos de la solicitud original') + kv(m.data) +
     (m.showOrigCalendar ? calendarHtml('Calendario de pagos solicitado', m.orig) : '') +
     softBox('Observaciones del comercial', m.notes ? multi(m.notes) : 'Sin observaciones registradas.') +
     (m.cmp ? compareHtml(m.kind, m.cmp, st) : '') +
+    (m.isNew ? box('PENDIENTE DE APROBACIÓN', 'Esta solicitud todavía no se encuentra autorizada.', st) + '<div style="height:16px;line-height:16px">&nbsp;</div>' :
     '<h2 style="font-size:19px;margin-top:26px;border-bottom:1px solid ' + LINE + ';padding-bottom:10px">Resolución administrativa</h2>' + kv(m.resolution) +
     box(m.reasonTitle, m.reason ? multi(m.reason) : 'No se registraron observaciones.', st) +
-    '<p style="font-size:14px;line-height:1.6;font-weight:bold">' + esc(m.closing) + '</p>' +
+    '<p style="font-size:14px;line-height:1.6;font-weight:bold">' + esc(m.closing) + '</p>') +
     '<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" bgcolor="' + NAVY + '" style="border-radius:8px;padding:16px;background:' + NAVY + '"><a href="' + esc(m.url) + '" style="color:#ffffff;font-size:13px;font-weight:bold;text-decoration:none;display:inline-block">CONSULTAR SOLICITUD EN OK DESPACHO</a></td></tr></table>' +
     '<p style="font-size:11px;color:#60717c;line-height:1.5">Notificación automática del sistema de Autorizaciones Comerciales. El acceso a la aplicación requiere usuario y permisos vigentes. Este correo no otorga acceso ni permisos.</p>' +
     '</td></tr><tr><td align="center" style="background:' + SOFT + ';padding:18px;font-size:13px" bgcolor="' + SOFT + '"><b>OK ACCESORIOS</b><div style="font-size:11px;color:' + MUTED + ';margin-top:5px">Administración · Autorizaciones Comerciales</div></td></tr>' +
@@ -177,7 +181,7 @@ export function renderDecisionMail(payload, { sampleBanner = '' } = {}) {
 
 function renderText(m) {
   const L = [], line = (k, v) => L.push(k + ': ' + v), cal = (title, t) => { const s = sched(t); if (!s.length) return; L.push('', title.toUpperCase()); s.forEach((c, i) => L.push('  Cuota ' + (has(c.n) ? c.n : i + 1) + ' · ' + day(c.due) + ' · ' + (has(c.amount) ? money(c.amount) : NR))); L.push('  Total: ' + money(t.amount)); };
-  L.push('OK DESPACHO · AUTORIZACIONES COMERCIALES', '', m.st.banner, oneLine(m.q.number) + ' · ' + (KIND[m.kind] || oneLine(m.kind)), '', m.st.intro, '', 'DATOS DE LA SOLICITUD ORIGINAL');
+  L.push('OK DESPACHO · AUTORIZACIONES COMERCIALES', '', m.st.banner, m.subtitle, '', m.st.intro, '', m.isNew ? 'DATOS DE LA SOLICITUD' : 'DATOS DE LA SOLICITUD ORIGINAL');
   m.data.forEach(([k, v]) => line(k, v));
   if (m.showOrigCalendar) cal('Calendario de pagos solicitado', m.orig);
   L.push('', 'OBSERVACIONES DEL COMERCIAL', m.notes ? m.notes.replace(/\r\n?/g, '\n').trim() : 'Sin observaciones registradas.');
@@ -188,8 +192,10 @@ function renderText(m) {
     if (m.kind === 'FINANCIACION') { if (!m.cmp.leftIsOriginal) cal(m.cmp.leftLabel + ' · calendario', m.cmp.left); cal(m.cmp.rightLabel + ' · calendario', m.cmp.right); }
     if (m.cmp.note) L.push('', m.cmp.note);
   }
-  L.push('', 'RESOLUCIÓN ADMINISTRATIVA'); m.resolution.forEach(([k, v]) => line(k, v));
-  L.push('', m.reasonTitle, m.reason ? m.reason.replace(/\r\n?/g, '\n').trim() : 'No se registraron observaciones.', '', m.closing, '',
+  if (m.isNew) L.push('', 'PENDIENTE DE APROBACIÓN', 'Esta solicitud todavía no se encuentra autorizada.', '');
+  else { L.push('', 'RESOLUCIÓN ADMINISTRATIVA'); m.resolution.forEach(([k, v]) => line(k, v));
+    L.push('', m.reasonTitle, m.reason ? m.reason.replace(/\r\n?/g, '\n').trim() : 'No se registraron observaciones.', '', m.closing, ''); }
+  L.push(
     'CONSULTAR SOLICITUD EN OK DESPACHO: ' + m.url, 'El acceso a la aplicación requiere usuario y permisos vigentes. Este correo no otorga acceso ni permisos.', '',
     'OK ACCESORIOS', 'Administración · Autorizaciones Comerciales');
   return L.join('\n') + '\n';
