@@ -154,11 +154,26 @@ async def main():
                 res('CS-E13 [REAL] TRABAJO OFFLINE conservado: IndexedDB (bases y registro pendiente con firma y GPS), borradores y claves de la app (PIN, cola) INTACTOS; solo se retira la sesión',
                     despues['registro'] is not None and despues['borrador'] and not perdidas and set(antes['idb']) <= set(despues['idb']), {'claves_perdidas': perdidas, 'bases': despues['idb'], 'sw': despues['sw']})
                 # ===== CS-E15 · pie de MI CUENTA: los TRES botones visibles, al frente y sin desborde en 320/360/390/480, escritorio y zoom =====
+                # Los casos anteriores ya terminaron: liberar contextos, timers y workers de prueba.
+                for previous_context in list(b.contexts):
+                    await previous_context.close()
                 geos = {}
                 for name, vp, mobile in [('320', (320, 640), True), ('360', (360, 740), True), ('390', (390, 844), True), ('480', (480, 900), True),
                                          ('escritorio_1366', (1366, 900), False), ('zoom_200_1366', (683, 450), False), ('zoom_150_390', (260, 563), True), ('teclado_390x420', (390, 420), True)]:
                     ctx = dict(viewport={'width': vp[0], 'height': vp[1]}, is_mobile=mobile, has_touch=mobile, geolocation={'latitude': -32.89, 'longitude': -68.84}, permissions=['geolocation'])
-                    pg = await fresh('gabriel@okdespacho.demo', ctx); await physical_click(pg, '#drvPk'); await pg.wait_for_selector('#acLogout'); await pg.wait_for_timeout(300)
+                    print('CS-E15 viewport:', name, vp, flush=True)
+                    pg = await fresh('gabriel@okdespacho.demo', ctx)
+                    try:
+                        await physical_click(pg, '#drvPk')
+                        await pg.wait_for_selector('#acLogout')
+                        await pg.wait_for_timeout(300)
+                    except Exception as ex:
+                        diagnostic = await pg.evaluate('()=>({viewport:[innerWidth,innerHeight], account:!!document.getElementById("accountModal"), trigger:!!document.getElementById("drvPk"), logout:!!document.getElementById("acLogout"), modals:[...document.querySelectorAll(".umodal")].map(e=>e.id)})')
+                        print('CS-E15 FAIL', name, repr(ex), diagnostic, flush=True)
+                        geos[name] = {'apertura_mi_cuenta': False}
+                        await pg.screenshot(path=os.path.join(OUT, 'fallo_mi_cuenta_' + name + '.png'))
+                        await pg.context.close()
+                        continue
                     g = {}
                     for bid in ('acLogout', 'acClose', 'acSave'):
                         try:
