@@ -1575,7 +1575,7 @@ const Publisher = {
     const nocInfo = await this.nocDetect(rows); // estado REAL de cada NOC en el servidor (nunca solo el Excel)
     const blockMsg = this.blockFor({ carrier, names, external, resp }, bad);
     const title = external ? 'DESPACHAR E IMPRIMIR' : 'PUBLICAR HOJA';
-    m.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"><header><b>' + title + '</b></header><div class="body">' + '<div id="pubCom"></div>' +   // Autorizaciones comerciales: «CONSULTAR APROBACIÓN»
+    m.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"><header><b>' + title + '</b></header><div class="body">' +
       '<p>Transportista: <b>' + esc(carrier ? carrier.name : (names.join(', ') || '—')) + '</b> · ' + rows.length + ' entregas</p>' +
       (external ? '<p>Al confirmar, la hoja quedará registrada como <b>despachada al transporte tercerizado</b>, contará en Informes → Otros transportistas, se guardará el PDF y se abrirá la impresión.</p>' : '') +
       (!external && resp.length ? '<label>Responsable <select class="ed" id="pubResp">' + resp.map(u => '<option value="' + u.id + '">' + esc(u.full_name) + '</option>').join('') + '</select></label>' : '') +
@@ -1590,7 +1590,6 @@ const Publisher = {
       '<footer><button class="btn ghost" type="button" id="pubCancel">Cancelar</button>' + (this.tplErr || rows.some(r => FinancingPlans.blocked(rowKey(r))) ? '<button class="btn soft" type="button" id="pubRetry">REINTENTAR</button>' : '') +
       '<button class="btn go" type="button" id="pubGo"' + (blockMsg ? ' disabled' : '') + '>' + title + '</button></footer></div>';
     document.body.appendChild(m);
-    ComAlerts.fill(m, rows);   // Autorizaciones comerciales: «CONSULTAR APROBACIÓN» en segundo plano (no se espera; no bloquea)
     m.querySelector('#pubCancel').onclick = () => m.remove();
     const bulVals = () => [...m.querySelectorAll('[data-bul]')].map(x => x.value.trim());
     m.querySelectorAll('[data-bul]').forEach(inp => inp.oninput = () => { const v = bulVals(); m.querySelector('#pubSum').textContent = sheetSummary(rows.map((r, i) => ({ sale: true, bultos: v[i] }))); });
