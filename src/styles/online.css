@@ -1134,3 +1134,18 @@ body.vh-open{overflow:hidden}
 .vh-doc{margin:8px 0;padding:10px 12px;border:1px solid #f5c27a;border-radius:12px;background:#fffaf0}.vh-doc p{margin:6px 0;font-size:13.5px;overflow-wrap:anywhere}
 .vh-docfix{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px;margin-top:8px}.vh-docfix [data-dcr],.vh-docfix [data-dcok],.vh-docfix [data-dcmsg]{grid-column:1/-1}
 .drv-docrow{display:grid;grid-template-columns:96px minmax(0,1fr);gap:8px}
+
+/* MI CUENTA: en anchos efectivos muy reducidos (zoom móvil) evitar que el texto
+   intrínseco del acceso rápido ensanche el viewport y desplace el área táctil. */
+@media (max-width: 320px) {
+  #noPanel, #noPanel .top, #noPanel #drv { min-width: 0; max-width: 100%; box-sizing: border-box; }
+  #noPanel .top { padding-inline: 10px; gap: 6px; }
+  #noPanel .top .ttl, #noPanel #np-who { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  #noPanel .top .ttl b { font-size: 18px; }
+  #noPanel #drv .drv-pk { min-width: 0; max-width: 100%; box-sizing: border-box; }
+  #noPanel #drv #drvPk { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: center; line-height: 1.2; touch-action: manipulation; }
+  #noPanel #drv .drv-search { min-width: 0; max-width: 100%; box-sizing: border-box; }
+  #accountModal .ac-dialog, #accountModal .ac-dialog input { min-width: 0; max-width: 100%; box-sizing: border-box; }
+  #accountModal .ac-dialog .body, #accountModal .ac-foot { overflow-wrap: anywhere; }
+  #accountModal .ac-dialog .body .btn { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+}
