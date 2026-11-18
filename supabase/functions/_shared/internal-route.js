@@ -77,7 +77,7 @@ export function observedEmail({ route, note }) {
  */
 export async function sendQueuedEmails({ store, provider, appUrl, onlyIds }) {
   const out = [];
-  for (const j of await store.listJobs({ statuses: ['QUEUED', 'ERROR'], ids: onlyIds })) {
+  for (const j of (await store.listJobs({ statuses: ['QUEUED', 'ERROR'], ids: onlyIds })).slice(0,provider.batchLimit?await provider.batchLimit():Infinity)) {
     const route = await store.routeFor(j);
     const mail = j.kind === 'INTERNAL_ROUTE_OBSERVED' ? observedEmail({ route, note: route.review_note || '' }) : approvalEmail({ route, driverName: await store.driverName(route), appUrl });
     try {

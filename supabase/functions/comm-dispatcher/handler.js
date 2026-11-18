@@ -125,8 +125,8 @@ export async function dispatch(store, provider, opt = {}) {
       let res = null, sendErr = null;
       try {
         if (provider.post) {
-          let r = await provider.post(base64url(raw), await gate(false));
-          if (r.status === 401) r = await provider.post(base64url(raw), await gate(true));   // token vencido: Gmail NO lo procesó; el 2º intento pasa por su propia verificación
+          let r = await provider.post(base64url(raw), await gate(false), {idempotencyKey:'delivery:'+d.id,beforeData:async()=>{if(await store.check(d.id,d.token,now)!=='OK')throw Object.assign(new Error('ABORTED'),{code:'ABORTED'});}});
+          if (r.status === 401) r = await provider.post(base64url(raw), await gate(true), {idempotencyKey:'delivery:'+d.id});   // token vencido: Gmail NO lo procesó; el 2º intento pasa por su propia verificación
           res = provider.interpret(r);
         } else res = await provider.send(base64url(raw), { beforeHttp: () => gate(false) });   // proveedores simples (pruebas)
       } catch (e) { sendErr = e; }
@@ -148,7 +148,7 @@ export async function dispatch(store, provider, opt = {}) {
           break; }   // la base no responde: no se sigue enviando (los demás reservados se liberan si se puede)
       } else {
         const cls = classifyGmailError(sendErr);
-        await persistOther(store, d, { outcome: cls, error_code: sendErr.reason || sendErr.code || String(sendErr.status || ''), error: humanError(cls, sendErr) }, now, o, sleep);
+        await persistOther(store, d, { outcome: cls, error_code: sendErr.reason || sendErr.code || String(sendErr.status || ''), error: humanError(cls, sendErr).replaceAll('Gmail',provider.kind==='SMTP'?'el correo corporativo':'Gmail') }, now, o, sleep);
         if (cls === 'RETRYABLE') sum.retry++; else if (cls === 'AMBIGUOUS') sum.verify++; else sum.failed++;
         if (cls === 'AUTH') {   // no se repite: se marca que hay que reconectar y los demás quedan PENDIENTES (sin intento consumido)
           sum.auth = true; sum.status = 'REQUIERE_RECONEXION'; sum.note = 'Gmail rechazó la autorización: hay que reconectar la cuenta.';

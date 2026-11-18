@@ -1,3 +1,4 @@
+import { corporateMail } from '../_shared/corporate-mail.js';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
@@ -35,6 +36,7 @@ async function digest(value: string) {
 }
 const esc = (v: string) => v.replace(/[&<>"']/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch] as string));
 
+await admin.rpc('comm_mail_register',{p_component:'password-recovery'});
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { status: 200, headers: cors(req) });
   if (req.method !== 'POST') return ok(req);
@@ -44,7 +46,7 @@ Deno.serve(async (req) => {
 
   const email = String(body?.email || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return ok(req);
-  if (!supabaseUrl || !serviceKey || !resendKey || !authFrom) {
+  if (!supabaseUrl || !serviceKey) {
     console.error('[password-recovery] missing required server configuration');
     return ok(req);
   }
@@ -65,6 +67,15 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!profile || profile.status !== 'ACTIVO') return ok(req);
 
+    const smtp=corporateMail(admin,{connectTls:(o:Deno.ConnectTlsOptions)=>Deno.connectTls(o),scope:'recuperacion'});
+    const transport=await smtp.runtime();
+    if(transport.provider==='SMTP'){
+      // Auth nativo usa el MISMO remitente/SMTP corporativo, certificado antes de activar el selector.
+      const native=await admin.auth.resetPasswordForEmail(email,{redirectTo:appBase+'/?nueva-contrasena=1'});
+      if(native.error)console.error('[password-recovery] native SMTP delivery not confirmed');
+      else await Promise.resolve(admin.from('audit_log').insert({actor_id:null,action:'PASSWORD_RECOVERY_EMAIL_REQUESTED',target_type:'user',target_id:profile.id,after:{channel:'AUTH_CORPORATE_SMTP'}})).catch(()=>null);
+      return ok(req);
+    }
     const generated = await admin.auth.admin.generateLink({
       type: 'recovery',
       email,
@@ -103,13 +114,13 @@ Deno.serve(async (req) => {
       return ok(req);
     }
 
-    await admin.from('audit_log').insert({
+    await Promise.resolve(admin.from('audit_log').insert({
       actor_id: null,
       action: 'PASSWORD_RECOVERY_EMAIL_SENT',
       target_type: 'user',
       target_id: profile.id,
-      after: { channel: 'RESEND' }
-    }).catch(() => null);
+      after: { channel: transport.provider==='SMTP'?'SMTP':'RESEND' }
+    })).catch(() => null);
   } catch (e) {
     console.error('[password-recovery] unexpected', String((e as Error)?.message || e));
   }

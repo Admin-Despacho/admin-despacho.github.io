@@ -52,14 +52,15 @@ export function createReportService({ store, pdfMaker, provider, now = () => Dat
   async function send(report, { recipients, resend = false, requirePdf = true } = {}) {
     const settings = await store.getSettings();
     const to = recipients || settings.recipients || [];
-    const out = [];
+    const out = [];let processed=0;const batchMax=provider.batchLimit?await provider.batchLimit():Infinity;
     for (const r of to) {
       const n = resend ? (await store.countResends(report.id, r)) + 1 : 0;
       const key = emailKey(report.report_type, report.period_start, report.period_end, r, report.version, n);
       let mail = await store.findEmail(key);
       if (mail && mail.status === 'SENT') { out.push({ ...mail, skipped: true }); continue; } // ya enviado: no duplicar
       if (!mail) mail = await store.saveEmail({ report_id: report.id, recipient: r, idempotency_key: key, status: 'QUEUED', queued_at: new Date(now()).toISOString(), retry_count: 0, is_resend: !!resend });
-      else await store.updateEmail(mail.id, { retry_count: (mail.retry_count || 0) + 1 });
+      if(processed>=batchMax){out.push({...mail,deferred:true});continue;}processed++;
+      if(mail.status!=='QUEUED')await store.updateEmail(mail.id, { retry_count: (mail.retry_count || 0) + 1 });
       if (report.pdf_status !== 'OK' && (settings.require_pdf ?? requirePdf)) {
         await store.updateEmail(mail.id, { status: 'PDF_ERROR', error: 'El PDF no se generó: no se envía un informe incompleto. Reintentar desde Administración.' });
         out.push({ ...mail, status: 'PDF_ERROR' }); continue;
@@ -96,5 +97,16 @@ export function createReportService({ store, pdfMaker, provider, now = () => Dat
     return done;
   }
 
-  return { generate, send, retry, runScheduled, makePdf };
+  async function drainQueued(){
+    const limit=provider.batchLimit?await provider.batchLimit():0,out=[];
+    if(!limit||!store.listPendingMail)return out;
+    for(const mail of await store.listPendingMail(Math.min(2,limit))){
+      const report=await store.getReport(mail.report_id);
+      if(!report||report.pdf_status!=='OK')continue;
+      try{const name=fileName(report.snapshot);const sent=await provider.send({idempotencyKey:mail.idempotency_key,to:mail.recipient,subject:emailSubject(report.snapshot),html:emailHtml(report.snapshot,name),text:emailText(report.snapshot,name),attachments:[{filename:name,content:await store.loadPdf(report.id)}]});
+        await store.updateEmail(mail.id,{status:'SENT',sent_at:new Date(now()).toISOString(),provider_id:sent.id,error:null});out.push({id:mail.id,status:'SENT'});
+      }catch(e){await store.updateEmail(mail.id,{status:'ERROR',error:String(e.message||e),retry_count:(mail.retry_count||0)+1});out.push({id:mail.id,status:'ERROR'});}
+    }return out;
+  }
+  return { generate, send, retry, runScheduled, makePdf, drainQueued };
 }

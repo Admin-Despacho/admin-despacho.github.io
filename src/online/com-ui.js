@@ -74,6 +74,7 @@ function requestList(arr, sel, meId) {
 function details(r, opts = {}) {
   const ok = ['APROBADA', 'APROBADA_MOD'].includes(r.status), t = r.final_terms || r.current_terms, o = r.original_terms || r.current_terms;
   return '<div class="sectionhead"><div><span class="eyebrow">' + esc(r.number) + ' · ' + esc(TYPE[r.kind]) + '</span><h2 style="margin:5px 0">' + esc(r.client.razon_social) + '</h2></div>' + pill(r.status) + '</div>' +
+    (opts.urgent ? '<div class="urgentslot" id="rUrgent" data-rid="' + esc(r.id) + '"></div>' : '') +   // alarma urgente desde la solicitud (junto al estado)
     '<div class="grid two" style="gap:9px;margin:12px 0"><div class="metric"><small>Importe solicitado</small><b>' + money(o && o.amount) + '</b></div><div class="metric tint"><small>' + (ok ? 'Importe autorizado' : 'Responsable') + '</small><b style="font-size:18px">' + (ok ? money(t.amount) : esc(String(r.assigned_approver || '—').split(' — ')[0])) + '</b></div></div>' +
     '<div class="fg" style="margin:12px 0"><div><span class="label">Pedido</span><div><b>' + esc(r.order_ref || '—') + '</b></div></div><div><span class="label">Origen</span><div><b>' + esc(origin(r)) + '</b></div></div>' +
     '<div><span class="label">CUIT / Documento</span><div><b>' + esc(r.client.cuit || ((r.client.doc_type || '') + ' ' + (r.client.doc_number || '—'))) + '</b></div></div><div><span class="label">Comercial</span><div><b>' + esc(String(r.requested_by || '').split(' — ')[0]) + '</b></div></div>' +
@@ -117,6 +118,8 @@ async function mount(api, me, host) {
   const HKEY = 'okd_com_hist_v1:' + me.id, H0 = { scope: scopes.length ? scopes[0][0] : 'MIS', f: {} };
   let saved = {}; try { saved = JSON.parse(sessionStorage.getItem(HKEY) || '{}'); } catch (e) { }
   st.hist = { scope: scopes.some(x => x[0] === saved.scope) ? saved.scope : H0.scope, f: saved.f || {}, items: [], cursor: null, has_more: false, loaded: false, detail: null, scroll: 0, err: null };
+  const mailRequest=new URLSearchParams(location.hash.split('?')[1]||'').get('solicitud');
+  if(st.tab==='historial'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(mailRequest||''))st.hist.detail={id:mailRequest};
   const saveHist = () => { try { sessionStorage.setItem(HKEY, JSON.stringify({ scope: st.hist.scope, f: st.hist.f })); } catch (e) { } };
   const toast = (msg, bad) => { const t = document.createElement('div'); t.className = 'toast' + (bad ? ' danger' : ''); t.textContent = msg; $('#comToast').appendChild(t); setTimeout(() => t.remove(), 4200); };
   const nav = () => { $('#comNav').innerHTML = tabs.map(([k, l]) => '<button type="button" class="tab ' + (st.tab === k ? 'active' : '') + '" data-tab="' + k + '">' + l + '</button>').join('') +
@@ -140,6 +143,8 @@ async function mount(api, me, host) {
     if(disposed)return;
     const m = $('#comMain');
     try {
+      const alarmaSol = new URLSearchParams(location.hash.split('?')[1] || '').get('alarma_sol');   // autorización abierta DESDE una alarma
+      if (alarmaSol && /^[A-Za-z0-9-]{3,64}$/.test(alarmaSol)) return await vAlarmaSol(m, alarmaSol);
       if (st.tab === 'comercial') return await vComercial(m);
       if (st.tab === 'historial') return await vHistorial(m);
       if (st.tab === 'gerencia') return await vGerencia(m);
@@ -323,10 +328,74 @@ async function mount(api, me, host) {
       '<div class="card" style="margin-bottom:14px"><div class="fg"><label class="field"><span>BUSCAR</span><input class="input" id="tSearch" placeholder="Cliente, pedido, CUIT o AUT-..." value="' + esc(st.search) + '"></label>' +
       '<label class="field"><span>ESTADO</span><select id="tFilter"><option value="0"' + (st.open ? '' : ' selected') + '>Todas las autorizaciones</option><option value="1"' + (st.open ? ' selected' : '') + '>Aprobaciones en curso</option></select></label></div></div>' +
       '<div class="grid two"><section class="card"><div class="sectionhead"><h2>Resultados (' + L.length + ')</h2><span class="micro">Actualización automática</span></div><div class="requests">' + requestList(L, r && r.id) + '</div></section>' +
-      '<section class="card">' + (r ? details(r, {}) : '<p class="micro">Sin resultados.</p>') + '</section></div>';
+      '<section class="card">' + (r ? details(r, { urgent: true }) : '<p class="micro">Sin resultados.</p>') + '</section></div>';
+    if (r) wireUrgent(r);
     let tmr; $('#tSearch').oninput = e => { st.search = e.target.value; clearTimeout(tmr); tmr = setTimeout(() => { st.sel = null; render().then(() => { const i = $('#tSearch'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }); }, 350); };
     $('#tFilter').onchange = e => { st.open = e.target.value === '1'; st.sel = null; render(); };
     host.querySelectorAll('[data-select]').forEach(b => b.onclick = () => { st.sel = b.dataset.select; render(); });
+  }
+  // ---------- ALARMA URGENTE DESDE LA SOLICITUD ----------
+  const URG_KEY = id => 'okd_com_urgent:' + id;
+  const urgIntent = id => { try { return JSON.parse(sessionStorage.getItem(URG_KEY(id)) || 'null'); } catch (e) { return null; } };
+  const urgSave = (id, v) => { try { v ? sessionStorage.setItem(URG_KEY(id), JSON.stringify(v)) : sessionStorage.removeItem(URG_KEY(id)); } catch (e) { } };
+  const hm = s => s ? new Date(s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  function urgStatusHtml(al) {
+    if (!al) return '';
+    if (al.status === 'PENDIENTE_ATENCION') return '<div class="note warn" data-urg-estado="PENDIENTE"><b>Alarma enviada · Pendiente de atención</b> · ' + esc(al.number) + ' · pedida por ' + esc(al.raised_by || '') + ' el ' + hm(al.raised_at) +
+      (al.escalated_at ? ' · <b>ESCALADA</b> el ' + hm(al.escalated_at) : '') + '</div>';
+    if (al.status === 'ATENDIDA') return '<div class="note ok" data-urg-estado="ATENDIDA"><b>Alarma atendida</b> · ' + esc(al.number) + ' · por <b>' + esc(al.attended_by || '') + '</b> el ' + hm(al.attended_at) + '</div>';
+    return '<div class="note" data-urg-estado="' + esc(al.status) + '">Alarma ' + esc(al.number) + ' · ' + esc(al.status) + '</div>';
+  }
+  async function wireUrgent(r) {
+    const slot = $('#rUrgent'); if (!slot || !api.comRequestAlarm || !(cfg.can_track || cfg.is_admin)) return;
+    let al = null; try { al = await api.comRequestAlarm(r.id); } catch (e) { slot.innerHTML = '<p class="micro">No se pudo consultar la alarma: ' + esc(errMsg(e)) + '</p>'; return; }
+    if (disposed || !document.body.contains(slot)) return;
+    const puede = r.status === 'PENDIENTE' && !(al && al.status === 'PENDIENTE_ATENCION');
+    slot.innerHTML = urgStatusHtml(al) + (puede ? '<button class="btn danger wfull" type="button" id="rUrgentBtn" style="min-height:48px">⚠ Solicitar aprobación urgente</button>' : '');
+    if (puede) $('#rUrgentBtn').onclick = () => openUrgent(r);
+  }
+  function openUrgent(r) {
+    // abrir NO envía nada: el motivo se confirma; la operación tiene un identificador ESTABLE que se conserva en los reintentos
+    const it = urgIntent(r.id) || { reason: '', op: 'sol-' + r.id.slice(0, 8) + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) };
+    $('#comModal').innerHTML = '<div class="modalbg"><div class="modal" role="dialog" aria-modal="true" data-urg-modal><div class="sectionhead"><h2>Solicitar aprobación urgente</h2></div>' +
+      '<p class="micro">Autorización <b>' + esc(r.number) + '</b> · ' + esc(r.client.razon_social) + '</p><p class="micro">Se avisa al responsable configurado; si nadie la atiende en 3 minutos, se escala.</p>' +
+      '<label class="field"><span>MOTIVO (obligatorio)</span><textarea class="input" id="uReason" rows="3" maxlength="400" placeholder="Ej.: el cliente está esperando para cargar">' + esc(it.reason) + '</textarea></label>' +
+      '<div class="note" id="uMsg" hidden></div>' +
+      '<button class="btn primary wfull" type="button" id="uGo" style="min-height:48px;margin-top:10px">Confirmar y enviar alarma</button>' +
+      '<button class="btn outline wfull" type="button" id="uCancel" style="min-height:48px;margin-top:8px">Cancelar</button></div></div>';
+    const card = $('#comModal [data-urg-modal]'), ta = $('#uReason'), msg = (t, cls) => { const e = $('#uMsg'); e.hidden = !t; e.className = 'note ' + (cls || 'warn'); e.innerHTML = t || ''; };
+    const mark = () => { if (ta.value.trim()) card.setAttribute('data-okd-unsaved', '1'); else card.removeAttribute('data-okd-unsaved'); };
+    ta.oninput = mark; mark(); ta.focus();
+    $('#uCancel').onclick = () => { if (!it.sent) urgSave(r.id, null); $('#comModal').innerHTML = ''; };   // cancelar no genera avisos
+    let busy = false;
+    $('#uGo').onclick = async () => {
+      if (busy) return; const reason = ta.value.trim();
+      if (reason.length < 10) { msg('Indicá el motivo (al menos 10 caracteres).'); ta.focus(); return; }
+      busy = true; $('#uGo').disabled = true; it.reason = reason; urgSave(r.id, it); msg('Enviando…', '');
+      try {
+        const res = await api.comAlarmRaiseRequest(r.id, reason, it.op);
+        if (res && res.ok) {   // SOLO con el registro del servidor se confirma
+          urgSave(r.id, null); $('#comModal').innerHTML = '';
+          toast(res.existing ? 'Ya había una alarma activa para esta autorización · Pendiente de atención' : 'Alarma enviada · Pendiente de atención');
+          await render(); return;
+        }
+        if (res && res.code === 'NOT_PENDING') { urgSave(r.id, null); msg(esc(res.message) + ' <button class="btn outline" type="button" id="uSee">Ver estado actual</button>');
+          $('#uGo').hidden = true; $('#uSee').onclick = async () => { $('#comModal').innerHTML = ''; await render(); }; busy = false; return; }
+        if (res && res.code === 'OP_ID_CONFLICT') it.op = 'sol-' + r.id.slice(0, 8) + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        urgSave(r.id, it); msg('NO SE ENVIÓ: ' + esc((res && res.message) || 'respuesta inesperada') + '. Tu motivo quedó guardado; podés reintentar.');
+      } catch (e) {
+        it.sent = true; urgSave(r.id, it);   // sin respuesta: el reintento usa la MISMA operación (nunca duplica)
+        msg('SIN RESPUESTA DEL SERVIDOR (' + esc(errMsg(e)) + '). Tu motivo quedó guardado: tocá «Confirmar» para reintentar; no se va a duplicar.');
+      }
+      busy = false; $('#uGo').disabled = false;
+    };
+  }
+  async function vAlarmaSol(m, alarmId) {
+    let d; try { d = await api.comAlarmRequestDetail(alarmId); } catch (e) { m.innerHTML = '<div class="note warn">' + esc(errMsg(e)) + '</div><button class="btn outline" type="button" id="aBack">Volver</button>'; $('#aBack').onclick = () => { location.hash = '#/autorizaciones'; }; return; }
+    const a = d.alarm, r = d.request;
+    m.innerHTML = head('DESDE LA ALARMA URGENTE', 'Autorización ' + esc(r.number), 'Abierta desde la alarma ' + esc(a.number) + '. Atender la alarma no aprueba ni rechaza: la decisión comercial se toma aparte.', '<button class="btn outline" type="button" id="aBack">← Volver</button>') +
+      '<section class="card" data-alarma-sol="' + esc(r.id) + '">' + urgStatusHtml({ ...a, raised_by: a.raised_by, attended_by: a.attended_by }) + details(r, {}) + '</section>';
+    $('#aBack').onclick = () => { location.hash = '#/autorizaciones'; };
   }
   async function vGeneral(m) {
     const [c, src, ap, al, ps] = await Promise.all([api.comConfig(), api.comSourcesStatus(), api.comApprovers(), api.comAlarmSettings ? api.comAlarmSettings().catch(() => null) : null, api.comAlarmPushStatus ? api.comAlarmPushStatus().catch(() => null) : null]), s = c.settings; cfg = c;
@@ -369,11 +438,11 @@ async function mount(api, me, host) {
       '<p class="micro" id="alPush">Push con la app cerrada (dispositivos registrados): ' + (Array.isArray(ps) && ps.length ? ps.map(x => '<b>' + esc(String(x.usuario || '').split(' — ')[0]) + '</b> ' +
         (x.dispositivos_activos > 0 ? x.dispositivos_activos + ' activo(s)' : '<span style="color:#b42318">ninguno</span>')).join(' · ') : '—') + '. El sonido de la app no reemplaza la suscripción push.</p>' +
       '<button class="btn outline" type="button" id="alSave">Guardar destinatarios</button> <span class="micro" id="alRes"></span></section>' +
-      '<section class="card" id="comMailSettings" style="margin-top:14px"><h2>Correos de autorizaciones comerciales</h2><p class="micro">Podés guardar las copias ahora. Cuando se active el correo corporativo, el creador de la solicitud y estas direcciones recibirán los avisos de decisión.</p>' +
+      '<section class="card" id="comMailSettings" style="margin-top:14px"><h2>Correos de autorizaciones comerciales</h2><p class="micro">El usuario que cargó la solicitud recibe el aviso de aprobación, aprobación con cambios, rechazo, devolución o cancelación. Las copias reciben un resumen; el detalle requiere ingresar con permisos vigentes. Los avisos se envían cuando se active el correo corporativo (hoy pendiente de activación).</p>' +
       '<label class="field"><span>Copias adicionales (separadas por coma o por línea)</span><textarea class="input" rows="3" id="comMailCopies"'+(!mailSettings?' disabled':'')+'>'+esc((mailSettings&&mailSettings.copies||[]).join(', '))+'</textarea></label><button class="btn outline" id="comMailSave" type="button"'+(!mailSettings?' disabled':'')+'>Guardar correos adicionales</button><p class="micro" id="comMailResult">'+(!mailSettings?'Configuración de correos todavía no disponible en el servidor.':'El destinatario autor no se elimina al modificar las copias.')+'</p><div class="micro">'+(mailSettings&&mailSettings.history||[]).map(x=>esc(x.request_number+' · '+x.event_kind+' · '+x.recipient+' · '+x.state)).join('<br>')+'</div></section>' +
       '<section class="card" style="margin-top:14px"><div class="sectionhead"><h2>Padrón de clientes</h2><span class="micro">listado_clientes.xlsx · sin duplicar, con historial</span></div><input type="file" id="pFile" accept=".xlsx,.xls"><div id="pRes" class="micro"></div></section>' +
       '<section class="card" style="margin-top:14px"><div class="sectionhead"><h2>Score externo · futuro</h2></div><p class="micro">XFact / Veraz: integración preparada para el futuro. No se consulta ningún servicio externo ni se simula una consulta oficial.</p></section>';
-    $('#comMailSave').onclick=async()=>{const b=$('#comMailSave');b.disabled=true;try{await api.comSetMailCopies($('#comMailCopies').value.split(/[,;\n]+/));$('#comMailResult').textContent='Destinatarios guardados. Se aplicarán cuando se active el envío.';}catch(e){$('#comMailResult').textContent=String(e.message||e).includes('INVALID_EMAIL')?'Revisá las direcciones: hay un correo inválido o demasiados destinatarios.':errMsg(e);}finally{b.disabled=false;}};
+    $('#comMailSave').onclick=async()=>{const b=$('#comMailSave');b.disabled=true;try{await api.comSetMailCopies($('#comMailCopies').value.split(/[,;\n]+/));$('#comMailResult').textContent='Destinatarios guardados. El autor sigue recibiendo su aviso. Se aplicarán cuando se active el envío corporativo.';}catch(e){$('#comMailResult').textContent=String(e.message||e).includes('INVALID_EMAIL')?'Revisá las direcciones: hay un correo inválido o demasiados destinatarios.':errMsg(e);}finally{b.disabled=false;}};
     $('#sSave').onclick = async () => { try { cfg.settings = await api.comSetSettings({ kpi_months: Number($('#sMonths').value), floor_pct: Number($('#sFloor').value), ceiling_pct: Number($('#sCeil').value), kpi_partial_rule: $('#sRule').value, kpi_source_verified: $('#sVerified').checked }); toast('Parámetros guardados.'); } catch (e) { toast(errMsg(e), true); } };
     host.querySelectorAll('[data-route]').forEach(sel => sel.onchange = async () => { try { await api.comSetRouting(sel.dataset.route, sel.value || null); toast('Aprobador actualizado.'); } catch (e) { toast(errMsg(e), true); render(); } });
     host.querySelectorAll('[data-asg]').forEach(b => b.onclick = async () => { const tr = b.closest('tr'); try { await api.comSetAssignment(tr.dataset.u, tr.querySelector('[data-ch]').value, tr.querySelector('[data-br]').value, tr.querySelector('[data-ca]').value); toast('Asignación guardada.'); } catch (e) { toast(errMsg(e), true); } });

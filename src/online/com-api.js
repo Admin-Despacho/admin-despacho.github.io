@@ -9,6 +9,10 @@ export const SupabaseCom = {
   comOrderAlerts(orders, cuits) { return this._rpc('com_order_alerts', { p_orders: orders, p_cuits: cuits }); },   // «CONSULTAR APROBACIÓN» (solo lectura)
   // ALARMA URGENTE (servidor: emisión, escalamiento a 3 min por pg_cron, atender, historial inmutable)
   comAlarmRaise(order, sheet, client, cuit, reason, opId) { return this._rpc('com_alarm_raise', { p_order_ref: order, p_sheet_key: sheet, p_client_name: client, p_client_cuit: cuit, p_reason: reason, p_op_id: opId }); },
+  // alarma urgente DESDE LA SOLICITUD (001300): identificador real de la autorización; el servidor obtiene sus datos
+  comAlarmRaiseRequest(requestId, reason, opId) { return this._rpc('com_alarm_raise_request', { p_request: requestId, p_reason: reason, p_op_id: opId }); },
+  comRequestAlarm(requestId) { return this._rpc('com_request_alarm', { p_request: requestId }); },
+  comAlarmRequestDetail(alarmId) { return this._rpc('com_alarm_request_detail', { p_alarm: alarmId }); },
   comAlarmAttend(id, version) { return this._rpc('com_alarm_attend', { p_id: id, p_version: version }); },
   comMyAlarms() { return this._rpc('com_my_alarms', {}); },
   comAlarmHistory(from, to) { return this._rpc('com_alarm_history', { p_from: from, p_to: to }); },
@@ -74,6 +78,7 @@ const arDay = iso => new Date(Date.parse(iso) - 3 * 3600e3).toISOString().slice(
 export const DemoCom = {
   async comMailSettings() { const me=await this._comMe();if(!this._comAdmin(me))throw E('FORBIDDEN');return {copies:(this._com().mailCopies||[]).slice(),author_always:true,history:[],simulated:true}; },
   async comSetMailCopies(copies) { const me=await this._comMe();if(!this._comAdmin(me))throw E('FORBIDDEN');const list=[...new Set((copies||[]).map(x=>String(x).trim().toLowerCase()).filter(Boolean))];if(list.length>20||list.some(x=>!/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(x)))throw E('INVALID_EMAIL_LIST');this._com().mailCopies=list;this._save();return this.comMailSettings(); },
+
   _com() {
     this._refresh();
     const c = this.db.com = this.db.com || {};
@@ -345,9 +350,9 @@ export const DemoCom = {
       a.escalated_at = new Date().toISOString(); a.escalated_to = this._alarmEscalation().filter(x => x !== a.initial_user); a.version++;
       if (!a.escalated_to.length) {   // sin ampliación: error registrado, aviso a Wilfredo y a quien la pidió; la alarma SIGUE pendiente
         this._alarmEvent(a, 'ESCALAMIENTO_SIN_DESTINATARIOS', null, { motivo: 'ningún destinatario de escalamiento configurado está ACTIVO' });
-        [a.initial_user, a.raised_by].forEach(u => this._alarmNotify(a, u, 'COM_ALARMA_ESCALADA', 'ALARMA COMERCIAL SIN ESCALAMIENTO', 'Pedido ' + a.order_ref + ' · no hay destinatarios de escalamiento activos', null)); n++; return; }
+        [a.initial_user, a.raised_by].forEach(u => this._alarmNotify(a, u, 'COM_ALARMA_ESCALADA', 'ALARMA COMERCIAL SIN ESCALAMIENTO', (a.sheet_key === 'AUTORIZACION' ? 'Autorización ' : 'Pedido ') + a.order_ref + ' · no hay destinatarios de escalamiento activos', null)); n++; return; }
       this._alarmEvent(a, 'ESCALADA', null, { destinatarios: a.escalated_to });
-      a.escalated_to.forEach(u => this._alarmNotify(a, u, 'COM_ALARMA_ESCALADA', 'APROBACIÓN COMERCIAL URGENTE · ESCALADA', 'Pedido ' + a.order_ref + ' · sin atender en 3 minutos · tocá para ATENDER', null)); n++; });
+      a.escalated_to.forEach(u => this._alarmNotify(a, u, 'COM_ALARMA_ESCALADA', 'APROBACIÓN COMERCIAL URGENTE · ESCALADA', (a.sheet_key === 'AUTORIZACION' ? 'Autorización ' : 'Pedido ') + a.order_ref + ' · sin atender en 3 minutos · tocá para ATENDER', null)); n++; });
     return n; },
   _alarmView(a, me) { const lab = id => this._comName(id); return { id: a.id, number: a.number, order_ref: a.order_ref, sheet_key: a.sheet_key, client: a.client_name, cuit: a.client_cuit, client_source: a.client_source,
     branch: a.branch, reason: a.reason, raised_by: lab(a.raised_by), raised_at: a.raised_at, initial_user: lab(a.initial_user), escalate_at: a.escalate_at, escalated_at: a.escalated_at,
@@ -355,6 +360,56 @@ export const DemoCom = {
     request: a.request_id ? (() => { const q = this.db.com.requests.find(x => x.id === a.request_id); return q ? { id: q.id, number: q.number, status: q.status } : null; })() : null,
     ring: a.status === 'PENDIENTE_ATENCION' && (me.id === a.initial_user || (a.escalated_to || []).includes(me.id)) && hasPerm(me, 'com.approve'),
     can_attend: a.status === 'PENDIENTE_ATENCION' && !!this._alarmRole(a, me) && this._alarmRole(a, me) !== 'SOLICITANTE' }; },
+  // ALARMA URGENTE DESDE LA SOLICITUD (= servidor 001300): sesión/rol → idempotencia → solicitud → PENDIENTE → motivo → UNA activa por solicitud → alta
+  async comAlarmRaiseRequest(requestId, reason, opId) {
+    this._net && this._net(); const me = await this._comMe(), c = this._com();
+    if (!(hasPerm(me, 'com.track') || this._comAdmin(me)) || !requestId) throw E('FORBIDDEN');
+    if (!opId || String(opId).trim().length < 6) throw E('BAD_OP', 'falta el identificador de la operación');
+    c.alarms = c.alarms || []; c.alarmOps = c.alarmOps || {}; const key = 'SOL:' + requestId, prev = c.alarmOps[opId];
+    if (prev) {
+      if (prev.user === me.id && prev.ref === key && prev.sheet === 'AUTORIZACION') return { ...prev.result, repeated: true };
+      return { ok: false, code: 'OP_ID_CONFLICT', message: 'Ese identificador de operación ya se usó para otra operación. Reintentá desde la pantalla.' };
+    }
+    const q = c.requests.find(x => x.id === requestId); if (!q) throw E('FORBIDDEN');
+    if (q.status !== 'PENDIENTE') {
+      const result = { ok: false, code: 'NOT_PENDING', status: q.status, number: q.number, message: 'La autorización ' + q.number + ' ya no está pendiente de aprobación (' + q.status + '). No se envió la alarma.' };
+      c.alarmOps[opId] = { user: me.id, ref: key, sheet: 'AUTORIZACION', alarm_id: null, result }; this._save(); return { ...result, repeated: false };
+    }
+    if (String(reason || '').trim().length < 10) throw E('REASON_REQUIRED', 'indicá el motivo (al menos 10 caracteres)');
+    // una alarma ACTIVA por AUTORIZACIÓN, identificada SOLO por su request_id (= servidor): otra autorización con el mismo pedido tiene la suya
+    const act = c.alarms.find(a => a.status === 'PENDIENTE_ATENCION' && a.request_id === q.id);
+    if (act) {
+      const result = { ok: true, existing: true, id: act.id, number: act.number, status: act.status, raised_at: act.raised_at, raised_by: this._comName(act.raised_by), escalated_at: act.escalated_at };
+      c.alarmOps[opId] = { user: me.id, ref: key, sheet: 'AUTORIZACION', alarm_id: act.id, result };
+      this._alarmEvent(act, 'DUPLICADA_EXISTENTE', me.id, { origen: 'SOLICITUD', op_id: opId }); this._save(); return { ...result, repeated: false };
+    }
+    const ini = this._alarmInitial(); if (!ini) throw E('ALARM_NOT_CONFIGURED', 'falta configurar (o no está activo) el destinatario inicial de la alarma. Avisá al Administrador General.');
+    if (!this._alarmEscalation().length) throw E('ALARM_NOT_CONFIGURED', 'faltan destinatarios de escalamiento activos configurados. Avisá al Administrador General.');
+    const now = new Date(), a = { id: 'alr-' + (c.alarms.length + 1), number: 'ALR-' + String(c.alarms.length + 1).padStart(6, '0'), order_ref: q.number, sheet_key: 'AUTORIZACION', request_id: q.id,
+      branch: q.branch || q.cartera_label, client_name: q.client.razon_social, client_cuit: q.client.cuit, client_source: 'SOLICITUD_COMERCIAL', reason: String(reason).trim(), raised_by: me.id,
+      raised_at: now.toISOString(), initial_user: ini, escalate_at: new Date(now.getTime() + 180000).toISOString(), escalated_at: null, escalated_to: [], status: 'PENDIENTE_ATENCION', attended_by: null, attended_at: null, op_id: opId, version: 1 };
+    c.alarms.push(a); this._alarmEvent(a, 'CREADA', me.id, { origen: 'SOLICITUD', solicitud: q.number, motivo: a.reason });
+    const result = { ok: true, existing: false, id: a.id, number: a.number, status: 'PENDIENTE_ATENCION', escalate_at: a.escalate_at, raised_at: a.raised_at, raised_by: this._comName(me.id) };
+    c.alarmOps[opId] = { user: me.id, ref: key, sheet: 'AUTORIZACION', alarm_id: a.id, result };
+    this._alarmNotify(a, ini, 'COM_ALARMA', 'APROBACIÓN COMERCIAL URGENTE', 'Autorización ' + q.number + (a.client_name ? ' · ' + a.client_name : '') + ' · solicitada por ' + me.full_name + ' · tocá para ATENDER', me.id);
+    this._save(); return { ...result, repeated: false };
+  },
+  async comRequestAlarm(requestId) {
+    const me = await this._comMe(), c = this._com(), q = c.requests.find(x => x.id === requestId);
+    if (!q || !(hasPerm(me, 'com.track') || this._comAdmin(me) || (q.requested_by === me.id && hasPerm(me, 'com.request')) || (q.assigned_approver_id === me.id && hasPerm(me, 'com.approve')))) throw E('FORBIDDEN');
+    if (this._alarmEscalateDue && this._alarmEscalateDue()) this._save();
+    const L = (c.alarms || []).filter(a => a.request_id === q.id)   // SOLO las de ESTA autorización
+      .sort((x, y) => (y.status === 'PENDIENTE_ATENCION') - (x.status === 'PENDIENTE_ATENCION') || y.raised_at.localeCompare(x.raised_at)), a = L[0];
+    if (!a) return null;
+    return { id: a.id, number: a.number, status: a.status, origen: a.sheet_key === 'AUTORIZACION' ? 'SOLICITUD' : 'REVISAR', raised_by: this._comName(a.raised_by), raised_at: a.raised_at,
+      initial_user: this._comName(a.initial_user), escalated_at: a.escalated_at, attended_by: a.attended_by ? this._comName(a.attended_by) : null, attended_at: a.attended_at, request_status: q.status };
+  },
+  async comAlarmRequestDetail(alarmId) {
+    const me = await this._comMe(), c = this._com(), a = (c.alarms || []).find(x => x.id === alarmId);
+    if (!a || !this._alarmRole(a, me)) throw E('FORBIDDEN');
+    const q = c.requests.find(x => x.id === a.request_id); if (!q) throw E('NOT_LINKED', 'la alarma no está vinculada a una autorización');
+    return { alarm: this._alarmView(a, me), request: this._comView(q, this._comAdmin(me) || q.requested_by === me.id || q.assigned_approver_id === me.id) };
+  },
   async comAlarmRaise(order, sheet, client, cuit, reason, opId) {
     this._net && this._net(); const me = await this._comMe(), c = this._com();
     if (!(hasPerm(me, 'com.track') || this._comAdmin(me))) throw E('FORBIDDEN');
@@ -373,7 +428,10 @@ export const DemoCom = {
       (this.db.auditLog = this.db.auditLog || []).push({ actor_id: me.id, action: 'COM_ALARM_OP_ID_REUSE', target_id: prev.alarm_id, at: new Date().toISOString() }); this._save();
       return { ok: false, code: 'OP_ID_CONFLICT', message: 'Ese identificador de operación ya se usó para otra operación. Reintentá desde la pantalla.' };
     }
-    const act = c.alarms.find(a => a.status === 'PENDIENTE_ATENCION' && a.order_ref.trim().toUpperCase() === ref);
+    const qref = c.requests.filter(x => x.status !== 'CANCELADA' && String(x.order_ref || '').trim().toUpperCase() === ref).sort((x, y) => y.created_at.localeCompare(x.created_at) || y.number.localeCompare(x.number))[0];
+    // (= servidor, corrección Work 2) con autorización: SOLO su alarma (request_id) o, si no tiene, una de PEDIDO sin autorización; sin autorización: solo de pedido
+    const delPedido = () => c.alarms.find(a => a.status === 'PENDIENTE_ATENCION' && !a.request_id && a.order_ref.trim().toUpperCase() === ref);
+    const act = qref ? (c.alarms.find(a => a.status === 'PENDIENTE_ATENCION' && a.request_id === qref.id) || delPedido()) : delPedido();
     if (act) {
       // alcance: quien NO puede ver esa alarma recibe una respuesta MÍNIMA (sin id ni número)
       const ve = !!this._alarmRole(act, me);
@@ -383,7 +441,7 @@ export const DemoCom = {
     }
     const ini = this._alarmInitial(); if (!ini) throw E('ALARM_NOT_CONFIGURED', 'falta configurar (o no está activo) el destinatario inicial de la alarma. Avisá al Administrador General.');
     if (!this._alarmEscalation().length) throw E('ALARM_NOT_CONFIGURED', 'faltan destinatarios de escalamiento activos configurados. Avisá al Administrador General.');
-    const q = c.requests.filter(x => x.status !== 'CANCELADA' && String(x.order_ref || '').trim().toUpperCase() === ref).sort((x, y) => y.created_at.localeCompare(x.created_at) || y.number.localeCompare(x.number))[0];
+    const q = qref;   // la autorización se resolvió UNA vez arriba; el vínculo usa la MISMA
     const now = new Date(), a = { id: 'alr-' + (c.alarms.length + 1), number: 'ALR-' + String(c.alarms.length + 1).padStart(6, '0'), order_ref: String(order).trim(), sheet_key: sheet, request_id: q ? q.id : null,
       branch: q ? (q.branch || q.cartera_label) : null, client_name: q ? q.client.razon_social : String(client || '').slice(0, 160), client_cuit: q ? q.client.cuit : (digits(cuit) || null),
       client_source: q ? 'SOLICITUD_COMERCIAL' : 'DECLARADO_POR_DESPACHO', reason: String(reason).trim(), raised_by: me.id, raised_at: now.toISOString(), initial_user: ini,
@@ -401,7 +459,7 @@ export const DemoCom = {
     if (a.status !== 'PENDIENTE_ATENCION') { this._save(); throw E('CONFLICT', 'la alarma ya fue atendida por ' + (this._comName(a.attended_by) || '—')); }   // O-AL-05: solo si ya fue atendida
     Object.assign(a, { status: 'ATENDIDA', attended_by: me.id, attended_at: new Date().toISOString(), attended_as: como, seconds_to_attend: Math.round((Date.now() - Date.parse(a.raised_at)) / 1000), version: a.version + 1 });
     this._alarmEvent(a, 'ATENDIDA', me.id, { como, segundos: a.seconds_to_attend, escalada: !!a.escalated_at });
-    [a.raised_by, a.initial_user, ...(a.escalated_to || [])].filter((u, i, L) => u && u !== me.id && L.indexOf(u) === i).forEach(u => this._alarmNotify(a, u, 'COM_ALARMA_ATENDIDA', 'Alarma comercial ATENDIDA', 'Pedido ' + a.order_ref + ' · atendida por ' + me.full_name, me.id));
+    [a.raised_by, a.initial_user, ...(a.escalated_to || [])].filter((u, i, L) => u && u !== me.id && L.indexOf(u) === i).forEach(u => this._alarmNotify(a, u, 'COM_ALARMA_ATENDIDA', 'Alarma comercial ATENDIDA', (a.sheet_key === 'AUTORIZACION' ? 'Autorización ' : 'Pedido ') + a.order_ref + ' · atendida por ' + me.full_name, me.id));
     this._save(); return { ok: true, id: a.id, number: a.number, status: a.status, attended_as: como, seconds_to_attend: a.seconds_to_attend, request_id: a.request_id };
   },
   async comMyAlarms() {

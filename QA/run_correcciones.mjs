@@ -9,7 +9,7 @@ const vars={};
 const pre=s=>s.split('\n').map(l=>{if(l.startsWith('\\set ')){const m=l.match(/^\\set\s+(\w+)\s+(.+)$/);if(m)vars[m[1]]=m[2].trim().replace(/^'|'$/g,'');return ''}if(l.startsWith('\\'))throw Error('Metacomando '+l);return l}).join('\n').replace(/:'([A-Za-z0-9_]+)'/g,(_,k)=>"'"+vars[k].replaceAll("'","''")+"'");
 let c;const out={};try{
  await server.initialise();await server.start();c=new pg.Client({host:'127.0.0.1',port:55449,user:'postgres',password:'local-commercial-qa',database:'postgres'});await c.connect();
- for(const f of ['QA/base_setup.sql','QA/storage_stub.sql','propuestas/comercial/20261201000100_comercial_autorizaciones.sql','propuestas/comercial/20261201000200_comercial_cuotas_respaldo.sql','propuestas/comercial/20261201000300_comercial_consultar_aprobacion.sql','propuestas/comercial/20261201000400_comercial_alarma_urgente.sql','propuestas/comercial/20261201000500_comercial_admin_sesion_vigente.sql','propuestas/comercial/20261201000600_comercial_modulo_historial.sql','propuestas/comercial/20261201000700_comercial_sesion_vigente_total.sql','propuestas/comercial/20261201000800_comercial_v4_alarma_escala_push.sql','propuestas/comercial/20261201000900_comercial_v5_permisos_kpi_fechas.sql','propuestas/comercial/20261201001000_comercial_v6_push_instalacion.sql','propuestas/comercial/20261201001100_comercial_kpi_facturacion.sql','propuestas/comercial/20261201001200_comercial_cuotas_calendario.sql'])await c.query(pre(readFileSync(f,'utf8')));
+ for(const f of ['QA/base_setup.sql','QA/storage_stub.sql','propuestas/comercial/20261201000100_comercial_autorizaciones.sql','propuestas/comercial/20261201000200_comercial_cuotas_respaldo.sql','propuestas/comercial/20261201000300_comercial_consultar_aprobacion.sql','propuestas/comercial/20261201000400_comercial_alarma_urgente.sql','propuestas/comercial/20261201000500_comercial_admin_sesion_vigente.sql','propuestas/comercial/20261201000600_comercial_modulo_historial.sql','propuestas/comercial/20261201000700_comercial_sesion_vigente_total.sql','propuestas/comercial/20261201000800_comercial_v4_alarma_escala_push.sql','propuestas/comercial/20261201000900_comercial_v5_permisos_kpi_fechas.sql','propuestas/comercial/20261201001000_comercial_v6_push_instalacion.sql','propuestas/comercial/20261201001100_comercial_kpi_facturacion.sql','propuestas/comercial/20261201001200_comercial_cuotas_calendario.sql','propuestas/comercial/20261201001300_comercial_alarma_solicitud.sql'])await c.query(pre(readFileSync(f,'utf8')));
  // N-V4-03: el modo del KPI que deja la INSTALACIÓN (se verifica en V5-K01). Después, activación EXPLÍCITA de PROVISORIO solo para probar el CÁLCULO del KPI
  out.kpi_tras_instalar=(await c.query("select kpi_mode from public.com_settings where id='DEFAULT'")).rows[0].kpi_mode; console.log('KPI tras instalar:', out.kpi_tras_instalar);
  await c.query({text:'create temp table v5_kpi_instalacion(modo text); insert into v5_kpi_instalacion values ($1)', values:[out.kpi_tras_instalar]}).catch(async()=>{ await c.query('create temp table v5_kpi_instalacion(modo text)'); await c.query({text:'insert into v5_kpi_instalacion values ($1)', values:[out.kpi_tras_instalar]}); });
@@ -81,6 +81,72 @@ let c;const out={};try{
    const ok=md5r==='cd4e5a9e0a39ac7bcdd712ef57b25bef' && nreq>0 && nreq2===nreq && /NADA_QUE_REVERTIR/.test(again) && /YA_APLICADA/.test(twice);
    out.cuotas.push({name:'CU-21 REVERSIÓN exacta (huella original) que CONSERVA las solicitudes con calendario; segunda reversión y doble aplicación se detienen; reaplicable',ok,detail:`md5=${md5r} · solicitudes=${nreq}→${nreq2} · 2.ª reversión=${again.slice(0,30)} · doble=${twice.slice(0,20)}`});
    console.log((ok?'PASS':'FAIL')+' | CU-21 reversión exacta | '+out.cuotas.at(-1).detail); }
+ await c.query(pre(readFileSync('QA/extra_alarma_solicitud.sql','utf8')));out.alsol=(await c.query('select * from as_checks order by name')).rows;
+ // AS-03 · DOS OPERARIOS A LA VEZ: dos conexiones REALES, la misma autorización, operaciones distintas → UNA sola alarma
+ { const reqId=(await c.query("select id from public.com_requests where op_id='as-sol-4b'")).rows[0].id;
+   await c.query("update public.com_alarms set status='ATENDIDA', attended_at=now() where request_id=$1 and status='PENDIENTE_ATENCION'",[reqId]).catch(()=>{});
+   const reqC=(await c.query("select pg_temp.as_new('as-sol-3','106') id")).rows[0].id;
+   const mk=async()=>{ const x=new pg.Client({host:'127.0.0.1',port:55449,user:'postgres',password:'local-commercial-qa',database:'postgres'}); await x.connect(); return x; };
+   const c1=await mk(), c2=await mk();
+   const call=(cl,u,op)=>cl.query(`select tst.u('${u}'); set role authenticated; select public.com_alarm_raise_request('${reqC}','Dos operarios a la vez sobre la misma autorización','${op}')::text r`).then(r=>{ const rows=r.at?r.at(-1).rows:r.rows; return rows[0].r; }).catch(e=>'ERR '+e.message);
+   const [r1,r2]=await Promise.all([call(c1,'e0000000-0000-0000-0000-000000000006','as-op-3a'), call(c2,'e0000000-0000-0000-0000-000000000005','as-op-3b')]);
+   await c1.end(); await c2.end();
+   const n=(await c.query("select count(*)::int n from public.com_alarms where request_id=$1",[reqC])).rows[0].n;
+   const j=[r1,r2].map(x=>{try{return JSON.parse(x)}catch(e){return {raw:x}}});
+   const ok=n===1 && j.every(x=>x.ok===true || x.code==='RETRY') && j.some(x=>x.existing===false) && (j.some(x=>x.existing===true) || j.some(x=>x.code==='RETRY'));
+   out.alsol.push({name:'AS-03 DOS OPERARIOS A LA VEZ (dos conexiones reales, misma autorización): UNA sola alarma; el otro ve la existente (o reintenta)',ok,detail:`alarmas=${n} · ${JSON.stringify(j.map(x=>({ok:x.ok,existing:x.existing,code:x.code})))}`}); }
+ // AS-17 · REVISAR (operario O) y Seguimiento (operario S) A LA VEZ sobre la MISMA autorización: dos conexiones reales → UNA sola alarma
+ { await c.query("select pg_temp.as_u('e0000000-0000-0000-0000-000000000006', $q$select public.reserve_orders('V5-1', array['27508'])::text$q$)");
+   const reqH=(await c.query("select pg_temp.as_new('as-sol-17','106') id")).rows[0].id;
+   await c.query("update public.com_requests set order_ref='27508' where id=$1",[reqH]);
+   const mk=async()=>{ const x=new pg.Client({host:'127.0.0.1',port:55449,user:'postgres',password:'local-commercial-qa',database:'postgres'}); await x.connect(); return x; };
+   const k1=await mk(), k2=await mk();
+   const run=(cl,u,sql)=>cl.query(`select tst.u('${u}'); set role authenticated; select (${sql})::text r`).then(r=>{ const rows=r.at?r.at(-1).rows:r.rows; return rows[0].r; }).catch(e=>'ERR '+e.message);
+   const [rv,sg]=await Promise.all([
+     run(k1,'e0000000-0000-0000-0000-000000000006',"public.com_alarm_raise('27508','V5-1','x','','REVISAR y Seguimiento a la vez sobre la misma autorización','as-op-17r')"),
+     run(k2,'e0000000-0000-0000-0000-000000000005',`public.com_alarm_raise_request('${reqH}','REVISAR y Seguimiento a la vez sobre la misma autorización','as-op-17s')`)]);
+   await k1.end(); await k2.end();
+   const n=(await c.query("select count(*)::int n from public.com_alarms where status='PENDIENTE_ATENCION' and request_id=$1",[reqH])).rows[0].n;
+   const j=[rv,sg].map(x=>{try{return JSON.parse(x)}catch(e){return {raw:String(x).slice(0,80)}}});
+   const ok=n===1 && j.every(x=>x.ok===true || x.code==='RETRY') && (j.filter(x=>x.existing===false).length===1 || j.some(x=>x.code==='RETRY'));
+   out.alsol.push({name:'AS-17 REVISAR y Seguimiento A LA VEZ sobre la MISMA autorización (dos operarios, dos conexiones reales): UNA sola alarma activa; el otro recupera la misma (o reintenta)',ok,detail:`activas=${n} · ${JSON.stringify(j.map(x=>({ok:x.ok,existing:x.existing,code:x.code,raw:x.raw})))}`}); }
+ // EVIDENCIA del caso A/B (Work): pedido compartido, los dos request_id, las dos alarmas, el aviso de cada una y la autorización que ABRE ese aviso
+ { const ev=(await c.query(`with x as (select 'A' quien, a rid, (rev->>'id')::uuid alarma from as13 union all select 'B', b, (sol->>'id')::uuid from as13)
+     select x.quien, q.number autorizacion, x.rid::text request_id, q.order_ref pedido, (q.client_snapshot->>'razon_social') cliente, al.number alarma_numero, x.alarma::text alarma_id,
+       case when al.sheet_key='AUTORIZACION' then 'Seguimiento' else 'REVISAR (hoja '||al.sheet_key||')' end origen, n.id::text aviso_id, n.body aviso_texto,
+       (select count(*) from public.push_jobs j where j.notification_id = n.id)::int push_encolado,
+       ((pg_temp.as_j(pg_temp.as_u('c0000000-0000-0000-0000-0000000000a1', format('select public.com_alarm_by_notification(%L)::text', n.id)))->'request'->>'id')) abre_request_id,
+       ((pg_temp.as_j(pg_temp.as_u('c0000000-0000-0000-0000-0000000000a1', format('select public.com_alarm_by_notification(%L)::text', n.id)))->'request'->>'number')) abre_autorizacion,
+       al.status estado_alarma, q.status estado_comercial
+     from x join public.com_requests q on q.id = x.rid join public.com_alarms al on al.id = x.alarma
+     join public.com_alarm_events e on e.alarm_id = al.id and e.kind = 'NOTIFICADO' and e.recipient_id = 'c0000000-0000-0000-0000-0000000000a1'
+     join public.notifications n on n.id = e.notification_id order by x.quien`)).rows;
+   writeFileSync('QA/results/evidencia_caso_AB.json', JSON.stringify(ev, null, 2)); out.evidenciaAB=ev;
+   for (const r of ev) console.log('EVIDENCIA', r.quien, r.autorizacion, r.request_id, '· pedido', r.pedido, '·', r.alarma_numero, r.alarma_id, '·', r.origen, '· push encolado', r.push_encolado, '· el aviso abre', r.abre_autorizacion, r.abre_request_id, '·', r.estado_alarma, '/', r.estado_comercial); }
+ console.log('ALARMA SOLICITUD',out.alsol.filter(x=>x.ok).length,'/',out.alsol.length);
+ for(const x of out.alsol)console.log((x.ok?'PASS':'FAIL')+' | '+x.name+' | '+String(x.detail||'').slice(0,260));
+ // reversión EXACTA de 001300: conserva alarmas e historial; segunda reversión y doble aplicación detenidas; reaplicable
+ { const n0=(await c.query("select (select count(*) from public.com_alarms)::int a, (select count(*) from public.com_alarm_events)::int e, (select count(*) from public.com_alarm_ops)::int o")).rows[0];
+   // con dos alarmas activas del MISMO pedido (AS-18b) la reversión se BLOQUEA sin tocar datos
+   let bloq; try{ await c.query(readFileSync('propuestas/comercial/REVERSION_ALARMA_SOLICITUD.sql','utf8')); bloq='SIN ERROR'; }catch(e){ await c.query('rollback').catch(()=>{}); bloq=e.message; }
+   const nB=(await c.query("select (select count(*) from public.com_alarms)::int a, (select count(*) from public.com_alarm_events)::int e, (select count(*) from public.com_alarm_ops)::int o")).rows[0];
+   // se atiende una de ellas con la función REAL (destinatario W) y recién ahí se revierte
+   const dup=(await c.query("select id, version from public.com_alarms where status='PENDIENTE_ATENCION' and upper(order_ref) in (select upper(order_ref) from public.com_alarms where status='PENDIENTE_ATENCION' group by 1 having count(*)>1) order by raised_at desc")).rows;
+   for (const x of dup.slice(0, dup.length-1)) await c.query(`select pg_temp.as_u('c0000000-0000-0000-0000-0000000000a1', format('select public.com_alarm_attend(%L, %s)::text', '${x.id}', ${x.version}))`);
+   const n0b=(await c.query("select (select count(*) from public.com_alarms)::int a, (select count(*) from public.com_alarm_events)::int e, (select count(*) from public.com_alarm_ops)::int o")).rows[0];
+   await c.query(readFileSync('propuestas/comercial/REVERSION_ALARMA_SOLICITUD.sql','utf8'));
+   const n1=(await c.query("select (select count(*) from public.com_alarms)::int a, (select count(*) from public.com_alarm_events)::int e, (select count(*) from public.com_alarm_ops)::int o")).rows[0];
+   const gone=(await c.query("select to_regprocedure('public.com_alarm_raise_request(uuid,text,text)') is null and to_regclass('public.com_alarms_one_active_request') is null g")).rows[0].g;   // también el ÍNDICE
+   const md=(await c.query("select md5(pg_get_functiondef('public.com_alarm_raise(text,text,text,text,text,text)'::regprocedure)) m")).rows[0].m;
+   let again; try{ await c.query(readFileSync('propuestas/comercial/REVERSION_ALARMA_SOLICITUD.sql','utf8')); again='SIN ERROR'; }catch(e){ await c.query('rollback').catch(()=>{}); again=e.message; }
+   await c.query(readFileSync('propuestas/comercial/20261201001300_comercial_alarma_solicitud.sql','utf8'));
+   let twice; try{ await c.query(readFileSync('propuestas/comercial/20261201001300_comercial_alarma_solicitud.sql','utf8')); twice='SIN ERROR'; }catch(e){ await c.query('rollback').catch(()=>{}); twice=e.message; }
+   const back=(await c.query("select to_regclass('public.com_alarms_one_active_request') is not null b")).rows[0].b;   // reaplicada: el índice vuelve
+   const idxPub=(await c.query("select pg_get_indexdef('public.com_alarms_one_active'::regclass) d")).rows[0].d;   // tras reaplicar: el acotado (sin autorización)
+   const ok=/REVERSION_BLOQUEADA/.test(bloq) && JSON.stringify(n0)===JSON.stringify(nB) && dup.length>1 && gone && back && md==='28e609cc5878f2ebb00e1716462d5437'
+     && n0b.a===n1.a && n1.a===n0.a && n1.e>=n0.e && /request_id IS NULL/.test(idxPub) && n0.a>0 && /NADA_QUE_REVERTIR/.test(again) && /YA_APLICADA/.test(twice);
+   out.alsol.push({name:'AS-12 REVERSIÓN: con dos alarmas activas del MISMO pedido se BLOQUEA sin tocar datos; atendida una, quita las funciones nuevas y el índice, restaura el índice por pedido y REVISAR con su huella y CONSERVA alarmas, eventos y operaciones; segunda reversión y doble aplicación detenidas; reaplicable',ok,detail:`bloqueo=${bloq.slice(0,40)} · alarmas/eventos/ops ${JSON.stringify(n0)}→${JSON.stringify(n1)} (sin borrar; eventos de atención agregados) · md5=${md} · 2.ª=${again.slice(0,22)} · doble=${twice.slice(0,14)}`});
+   console.log((ok?'PASS':'FAIL')+' | AS-12 reversión | '+out.alsol.at(-1).detail); }
  // REVERSIÓN del módulo: AL FINAL, sobre la base con los datos de todas las pruebas
  const REV=readFileSync('propuestas/comercial/REVERSION_MODULO_COMERCIAL.sql','utf8');
  await c.query(pre(readFileSync('QA/extra_reversion_pre.sql','utf8')));
@@ -94,5 +160,5 @@ let c;const out={};try{
  const k02=out.work.find(x=>/WORK-K02/.test(x.name));
  console.log('PENDIENTE DE ARCHIVO REAL | '+(k02?k02.name+' → '+(k02.ok?'pasa':'sigue fallando (bloqueo abierto, NO se altera)')+' · '+k02.detail:'no encontrado'));
  writeFileSync('QA/results/correcciones.json',JSON.stringify(out,null,2));
- if(out.paquete.some(x=>!x.ok)||out.correcciones.some(x=>!x.ok)||out.consultar.some(x=>!x.ok)||out.alarma.some(x=>!x.ok)||(out.concurrencia||[]).some(x=>!x.ok)||(out.historial||[]).some(x=>!x.ok)||(out.reversion||[]).some(x=>!x.ok)||(out.v5||[]).some(x=>!x.ok)||(out.v6||[]).some(x=>!x.ok)||(out.kpi||[]).some(x=>!x.ok)||(out.cuotas||[]).some(x=>!x.ok)||(out.cron||[]).some(x=>!x.ok)||(out.v4||[]).some(x=>!x.ok)||out.work.some(x=>!x.ok&&!/WORK-K02/.test(x.name)))process.exitCode=1;
+ if(out.paquete.some(x=>!x.ok)||out.correcciones.some(x=>!x.ok)||out.consultar.some(x=>!x.ok)||out.alarma.some(x=>!x.ok)||(out.concurrencia||[]).some(x=>!x.ok)||(out.historial||[]).some(x=>!x.ok)||(out.reversion||[]).some(x=>!x.ok)||(out.v5||[]).some(x=>!x.ok)||(out.v6||[]).some(x=>!x.ok)||(out.kpi||[]).some(x=>!x.ok)||(out.cuotas||[]).some(x=>!x.ok)||(out.alsol||[]).some(x=>!x.ok)||(out.cron||[]).some(x=>!x.ok)||(out.v4||[]).some(x=>!x.ok)||out.work.some(x=>!x.ok&&!/WORK-K02/.test(x.name)))process.exitCode=1;
 }finally{await c?.end();await server.stop();}

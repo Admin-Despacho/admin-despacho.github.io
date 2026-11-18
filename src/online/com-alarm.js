@@ -107,14 +107,15 @@ function createComAlarm(api, me) {
     '</style>';
   function card(a) {
     const largo = String(a.reason || '').length > 160;
-    return '<div class="al-card"><div><b>' + esc(a.number) + '</b> · pedido <b>' + esc(a.order_ref) + '</b> · ' + esc(a.client || 'cliente sin identificar') +
+    return '<div class="al-card"><div><b>' + esc(a.number) + '</b> · ' + (a.sheet_key === 'AUTORIZACION' ? 'autorización' : 'pedido') + ' <b>' + esc(a.order_ref) + '</b> · ' + esc(a.client || 'cliente sin identificar') +
       (a.branch ? ' · ' + esc(a.branch === 'SAN_JUAN' ? 'San Juan' : a.branch === 'MONTECASEROS' ? 'Montecaseros' : a.branch) : '') + '</div>' +
       '<div>Solicita: <b>' + esc(nm(a.raised_by)) + '</b> a las ' + hhmm(a.raised_at) + (a.escalated_at ? ' · <b>ESCALADA</b> a las ' + hhmm(a.escalated_at) + ' a ' + esc((a.escalated_to || []).map(nm).join(' y ')) + ' (sin atender en 3 minutos)' : '') + '</div>' +
       // el botón va ANTES del motivo: siempre queda a la vista aunque el motivo sea largo
       '<div class="al-foot"><button type="button" class="al-btn al-main" data-al-attend="' + esc(a.id) + '" data-al-v="' + a.version + '">ATENDER SOLICITUD</button>' +
       '<small>Atender no es aprobar: la decisión se toma en Autorizaciones.</small></div>' +
       '<div class="al-reason">Motivo: ' + esc(a.reason) + '</div>' + (largo ? '<details><summary>Ver motivo completo</summary>' + esc(a.reason) + '</details>' : '') +
-      (a.request ? '<div>Solicitud comercial ' + esc(a.request.number) + ' · ' + esc(a.request.status) + '</div>' : '') + '</div>';
+      (a.request ? '<div class="al-req">Autorización <b>' + esc(a.request.number) + '</b> · ' + esc(a.request.status) +
+        ' <button type="button" class="al-btn" data-al-open-req="' + esc(a.id) + '" style="background:transparent;color:#fff;border:2px solid #fff;font-weight:800;opacity:1">ABRIR AUTORIZACIÓN</button></div>' : '') + '</div>';
   }
 
   function linkId() { const src = [window.__okdBootHash, location.hash].map(x => String(x || '')).find(h => /[?&]alarma_n=/.test(h)); const m = src && src.match(/[?&]alarma_n=([0-9a-zA-Z-]+)/); return m ? m[1] : null; }
@@ -130,7 +131,7 @@ function createComAlarm(api, me) {
     return '<div role="dialog" aria-label="Alarma comercial" data-al-focus style="' + (inline ? 'margin-top:10px;' : 'position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 70px);z-index:2147482995;box-shadow:0 10px 30px #0004;width:min(94vw,560px);max-height:70vh;overflow:auto;') +
       'background:#fff;color:#0b2a37;border:2px solid #b42318;border-radius:14px;padding:12px 14px;overflow-wrap:anywhere">' +
       (a.missing ? '<b>No se encontró la alarma de este aviso</b> (o no sos su destinatario).' :
-        '<b>ALARMA ' + esc(a.number) + '</b> · pedido <b>' + esc(a.order_ref) + '</b> · ' + esc(a.client || '') + '<br>Solicita ' + esc(nm(a.raised_by)) + ' a las ' + hhmm(a.raised_at) + ' · Motivo: ' + esc(a.reason) +
+        '<b>ALARMA ' + esc(a.number) + '</b> · ' + (a.sheet_key === 'AUTORIZACION' ? 'autorización' : 'pedido') + ' <b>' + esc(a.order_ref) + '</b> · ' + esc(a.client || '') + '<br>Solicita ' + esc(nm(a.raised_by)) + ' a las ' + hhmm(a.raised_at) + ' · Motivo: ' + esc(a.reason) +
         '<br><b>' + esc(ST[a.status] || a.status) + '</b>' + (a.status === 'ATENDIDA' ? ' por ' + esc(nm(a.attended_by)) + ' a las ' + hhmm(a.attended_at) : '') +
         (a.can_attend ? '<div style="margin-top:8px"><button type="button" data-al-attend="' + esc(a.id) + '" data-al-v="' + a.version + '" style="min-height:44px;border:0;border-radius:12px;background:#b42318;color:#fff;font-weight:900;padding:8px 16px">ATENDER SOLICITUD</button></div>' : '')) +
       ' <button type="button" data-al-close style="float:right;border:0;background:transparent;font-weight:800;min-height:36px;color:inherit">CERRAR</button></div>';
@@ -163,13 +164,15 @@ function createComAlarm(api, me) {
     if (!ring.length || S.suppressed !== 'CRITICO') {
       if (!ring.length) h += focusHtml(ring, false);
       if (mine.length) h += '<div role="status" data-al-mine style="position:fixed;left:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:2147482990;background:#fff8ec;color:#5a3a00;border:1px solid #e3b56a;border-radius:12px;padding:8px 12px;max-width:min(92vw,460px);font-size:13px;overflow-wrap:anywhere">' +
-        mine.slice(0, 3).map(a => '<div><b>' + esc(a.number) + '</b> · pedido ' + esc(a.order_ref) + ' · <b>' + esc(ST[a.status] || a.status) + '</b>' +
+        mine.slice(0, 3).map(a => '<div><b>' + esc(a.number) + '</b> · ' + (a.sheet_key === 'AUTORIZACION' ? 'autorización ' : 'pedido ') + esc(a.order_ref) + ' · <b>' + esc(ST[a.status] || a.status) + '</b>' +
           (a.status === 'ATENDIDA' ? ' por ' + esc(nm(a.attended_by)) + ' a las ' + hhmm(a.attended_at) : a.escalated_at ? ' · ESCALADA a las ' + hhmm(a.escalated_at) : '') + '</div>').join('') + '</div>';
     }
     host.innerHTML = h;
     const cb = host.querySelector('[data-al-close]'); if (cb) cb.onclick = () => { S.focus = null; render(); };
     host.querySelectorAll('[data-al-attend]').forEach(b => b.onclick = () => attend(b.dataset.alAttend, Number(b.dataset.alV), b));
     const mb = host.querySelector('[data-al-min]'); if (mb) mb.onclick = () => { S.minimized = true; render(); };
+    // abrir la autorización vinculada DESDE la alarma (no registra atención; el aviso queda minimizado y pendiente)
+    host.querySelectorAll('[data-al-open-req]').forEach(b => b.onclick = () => { S.minimized = true; location.hash = '#/autorizaciones?alarma_sol=' + encodeURIComponent(b.dataset.alOpenReq); render(); });
     const xb = host.querySelector('[data-al-expand]'); if (xb) xb.onclick = () => { S.minimized = false; render(); };
     const sb = host.querySelector('[data-al-sound]'); if (sb) sb.onclick = () => { unlock(); beep(); later(render, 0); };
     const pb = host.querySelector('[data-al-push]'); if (pb) pb.onclick = async () => {
