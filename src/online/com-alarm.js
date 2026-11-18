@@ -110,6 +110,8 @@ function createComAlarm(api, me) {
     '#comAlarm .al-pill{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 4px);z-index:2147482990;pointer-events:none;background:#b42318e6;color:#fff;border-radius:999px;padding:4px 12px;font-weight:800;font-size:.8em;box-shadow:0 2px 8px #0004;max-width:min(92vw,360px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
     // pila inferior (alarmas PROPIAS pendientes + confirmaciones): no captura toques fuera de sus tarjetas, sin desborde horizontal
     '#comAlarm .al-stack{position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:2147482990;display:flex;flex-direction:column;gap:8px;width:min(calc(100vw - 24px),440px);pointer-events:none}' +
+    // escritorio: a la DERECHA (no tapa el menú lateral ni sus opciones); teléfono: ancho completo abajo
+    '@media (min-width:700px){#comAlarm .al-stack{left:auto;right:16px}}' +
     '#comAlarm .al-stack.al-up{bottom:calc(env(safe-area-inset-bottom,0px) + 78px)}#comAlarm .al-stack>*{pointer-events:auto;box-sizing:border-box;max-width:100%}' +
     '#comAlarm .al-mine{background:#fff8ec;color:#5a3a00;border:1px solid #e3b56a;border-radius:12px;padding:8px 12px;font-size:13px;overflow-wrap:anywhere}' +
     '#comAlarm .al-toast{background:#fff;color:#0b2a37;border:1px solid #cfe0e5;border-left:5px solid #067647;border-radius:12px;padding:6px 6px 6px 12px;display:flex;gap:6px;align-items:flex-start;box-shadow:0 6px 18px #0b2a3726;font-size:13px;overflow-wrap:anywhere}' +
@@ -169,16 +171,15 @@ function createComAlarm(api, me) {
         '<div class="al-list" data-al-list tabindex="-1">' + ring.map(card).join('') + (more ? '<div class="al-card"><b>… y ' + more + ' alarma(s) más pendiente(s)</b>: se muestran al atender estas.</div>' : '') + '</div>' +
         '<div class="al-foot">' + (S.soundBlocked ? '<button type="button" class="al-btn al-main" data-al-sound>🔊 ACTIVAR SONIDO</button><small>El navegador bloquea el sonido hasta que toques la pantalla.</small>' : '') +
         pushHelp() + (msg ? '<b>' + esc(msg) + '</b>' : '') + '</div>' + focusHtml(ring, true) + '</div></div>';
-    } else if (msg) {
-      h += '<div role="status" style="position:fixed;right:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:2147483000;background:#0b2a37;color:#fff;border-radius:12px;padding:10px 14px;max-width:min(92vw,420px)">' + esc(msg) + '</div>';
     }
+    const msgHtml = !ring.length && msg ? '<div role="status" data-al-msg style="background:#0b2a37;color:#fff;border-radius:12px;padding:10px 14px">' + esc(msg) + '</div>' : '';   // dentro de la pila: nunca se superpone
     if (!ring.length || S.suppressed !== 'CRITICO') {
       if (!ring.length) h += focusHtml(ring, false);
     }
     // pila inferior: nunca con PIN, firma ni formularios críticos abiertos (no tapa operaciones de transportistas)
     const tl = toasts.list();
-    if (!S.suppressed && (mine.length || tl.length)) {
-      h += '<div class="al-stack' + (ring.length && S.minimized ? ' al-up' : '') + '" data-al-stack>' +
+    if (!S.suppressed && (mine.length || tl.length || msgHtml)) {
+      h += '<div class="al-stack' + (ring.length && S.minimized ? ' al-up' : '') + '" data-al-stack>' + msgHtml +
         (mine.length ? '<div role="status" class="al-mine" data-al-mine>' + mine.slice(0, 3).map(a => '<div><b>' + esc(a.number) + '</b> · ' + (a.sheet_key === 'AUTORIZACION' ? 'autorización ' : 'pedido ') + esc(a.order_ref) + ' · <b>' + esc(ST[a.status] || a.status) + '</b>' +
           (a.escalated_at ? ' · ESCALADA a las ' + hhmm(a.escalated_at) : '') + '</div>').join('') + '</div>' : '') +
         tl.map(a => '<div role="status" aria-live="polite" class="al-toast' + (a.status === 'ATENDIDA' ? '' : ' al-cancel') + '" data-al-toast="' + esc(a.id) + '"><div>✓ <b>' + esc(a.number) + '</b> · ' +
