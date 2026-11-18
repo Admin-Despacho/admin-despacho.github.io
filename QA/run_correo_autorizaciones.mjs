@@ -137,12 +137,13 @@ try {
   let e11b = await tryErr(() => asUser('G', 'select public.com_mail_copy_authorize($1,$2,$3)', [['x@qa.invalid'], 'OTRO_ALCANCE', true]));
   let e11c = await tryErr(() => asUser('C', 'select public.com_mail_copy_authorize($1,$2,$3)', [['x@qa.invalid'], SCOPE, true]));
   await asUser('G', 'select public.com_mail_settings_set($1)', [[...COPIES, 'intruso@qa.invalid']]);
-  const e11d = await tryErr(() => asUserOn(c0, 'G', "insert into public.com_mail_copy_authorizations(address,status,scope,visible_cc,authorized_by,authorized_at) values ('y@qa.invalid','AUTORIZADA','x',true,auth.uid(),now())".replace('insert', 'set local role authenticated; insert')));
+  const e11d = await tryErr(async () => { await c0.query('begin'); try { await c0.query('set local role authenticated'); await c0.query("insert into public.com_mail_copy_authorizations(address,status,scope,visible_cc,authorized_by,authorized_at) values ('y@qa.invalid','AUTORIZADA','x',true,$1,now())", [U.G]); } finally { await c0.query('rollback'); } });
+  const e11e = await tryErr(async () => { await c0.query('begin'); try { await c0.query('set local role anon'); await c0.query("select public.com_mail_copy_authorize(array['y@qa.invalid'],$1,true)", [SCOPE]); } finally { await c0.query('rollback'); } });
   ok('P11-01 sin confirmación → AUTHORIZATION_CONFIRMATION_REQUIRED', /AUTHORIZATION_CONFIRMATION_REQUIRED/.test(e11), e11);
   ok('P11-02 alcance distinto → rechazado', /AUTHORIZATION_CONFIRMATION_REQUIRED/.test(e11b), e11b);
   ok('P11-03 un Comercial no puede autorizar → FORBIDDEN', /FORBIDDEN/.test(e11c), e11c);
   ok('P11-04 la función publicada de guardado solo deja PENDIENTE (no autoriza)', (await q1("select status from public.com_mail_copy_authorizations where address='intruso@qa.invalid'")) === 'PENDIENTE_RATIFICACION');
-  ok('P11-05 escritura directa a la tabla de autorizaciones como usuario → sin permiso', /permission denied|cannot execute|multiple commands/i.test(e11d), e11d);
+  ok('P11-05 escritura directa a la tabla de autorizaciones como usuario → permission denied; anon no puede ejecutar la RPC', /permission denied for table/.test(e11d) && /permission denied for function/.test(e11e), e11d + ' | ' + e11e);
   await asUser('G', 'select public.com_mail_settings_set($1)', [COPIES]);
   ok('P11-06 quitar por la función publicada → REVOCADA y registrado', (await q1("select status from public.com_mail_copy_authorizations where address='intruso@qa.invalid'")) === 'REVOCADA');
 
@@ -242,8 +243,8 @@ try {
   await runAll();
   const by = k => smtp.delivered.filter(d => decodeSubject(d.raw).includes(k) && decodeSubject(d.raw).includes(r3.number));
   const hDev = decodeHtml(by('DEVUELTA')[0].raw), hRe = by('REENVIADA'), hNew = decodeHtml(by('NUEVA')[0].raw);
-  ok('P03-02 devuelta: naranja, solicitadas vs propuestas, «no constituye aprobación definitiva»', hDev.includes('#b54708') && hDev.includes('Condiciones solicitadas y condiciones propuestas') && hDev.includes('NO constituyen una aprobación definitiva'));
-  ok('P05-03 reenviada (cambios aceptados): Para = aprobador + solicitante', hRe.length === 7 && JSON.stringify(addrs(hdr(hRe[0].raw, 'To'))) === '["aprobador@qa.invalid","comercial@qa.invalid"]');
+  ok('P-DV devuelta: naranja, solicitadas vs propuestas, «no constituye aprobación definitiva»', hDev.includes('#b54708') && hDev.includes('Condiciones solicitadas y condiciones propuestas') && hDev.includes('NO constituyen una aprobación definitiva'));
+  ok('P-RE reenviada (cambios aceptados): Para = aprobador + solicitante', hRe.length === 7 && JSON.stringify(addrs(hdr(hRe[0].raw, 'To'))) === '["aprobador@qa.invalid","comercial@qa.invalid"]');
   ok('P17-02 modificaciones posteriores (nombre del aprobador, observaciones) NO alteran lo notificado', hNew.includes('Primera observación') && !hNew.includes('NOTAS MODIFICADAS') && !hNew.includes('RENOMBRADA'));
   await c0.query("update public.profiles set full_name='Tesorería QA' where id=$1", [U.A]);
   smtp = smtpServer();
