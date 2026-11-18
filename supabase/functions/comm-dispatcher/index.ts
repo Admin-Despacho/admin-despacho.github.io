@@ -22,7 +22,8 @@ Deno.serve(async (req: Request) => {
   store=channel.store; const provider=channel.provider;
   const currentMail=await corporateMail(sb,{connectTls}).runtime();
   if(req.headers.get('x-mail-smtp-only')==='1'&&currentMail.provider!=='SMTP')return new Response(JSON.stringify({skipped:true}));
-  const commercial=await sendCommercialDecisionEmails(sb,{connectTls});
+  // Autorizaciones comerciales: lote acotado por cupo y tiempo; un fallo acá nunca bloquea el resto de los envíos programados.
+  const commercial=await sendCommercialDecisionEmails(sb,{connectTls}).catch(()=>({stop:'COMMERCIAL_MAIL_FAILED'}));
   const sum = await dispatch(store, provider, { limit: currentMail.provider==='SMTP'?Math.min(2,currentMail.available_slots||0):Number(Deno.env.get('COMM_BATCH') ?? 25), dailyCap: Number(Deno.env.get('COMM_DAILY_CAP') ?? 400),
     sendWindowHours: Number(Deno.env.get('COMM_SEND_WINDOW_HOURS') ?? 6),
     // cuota de Gmail API aplicable al proyecto (proyectos desde 1/5/2026: 6.000 unidades/min por usuario); control COMPARTIDO en la base
