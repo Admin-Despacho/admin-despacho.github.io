@@ -99,7 +99,8 @@ export function customerEmail({ kind, stop }) {
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff;border:1px solid #d8e1e5;border-radius:14px;">' +
     '<tr><td style="background:#07151b;border-bottom:4px solid #16d6e5;padding:18px;border-radius:14px 14px 0 0;' + F + 'font-size:20px;font-weight:bold;color:#fff;">OK ACCESORIOS</td></tr>' +
     '<tr><td style="' + F + 'padding:18px;font-size:14px;color:#111;line-height:1.6;">Hola ' + esc(stop.client_name) + ',<br>' + body + '</td></tr></table></td></tr></table></body></html>';
-  return { subject, html, text: subject + '\n' + body.replace(/<[^>]+>/g, '') };
+  const reviewDeparture = kind === 'ON_THE_WAY' && ['CT-ALR', 'CT-ESTE'].includes(stop.routes?.carrier_id);
+  return { customerReceiptReview: reviewDeparture, subject, html, text: subject + '\n' + body.replace(/<[^>]+>/g, '') };
 }
 /** store: { listJobs(q), stopFor(job), updateJob(id, patch) } — idempotente por job; una falla no revierte la entrega */
 export async function sendCustomerEmails({ store, provider, onlyIds, inlineLogo }) {

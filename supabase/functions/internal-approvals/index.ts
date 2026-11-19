@@ -21,7 +21,7 @@ const store = {
 };
 const customerStore = {
   async listJobs(f: any) { let q = admin.from('customer_email_jobs').select('*').in('status', f.statuses); if (f.ids) q = q.in('id', f.ids); return must(await q) as any[]; },
-  async stopFor(j: any) { return must(await admin.from('route_stops').select('client_name, order_numbers').eq('id', j.stop_id).single()); },
+  async stopFor(j: any) { return must(await admin.from('route_stops').select('client_name, order_numbers, routes!route_id(carrier_id)').eq('id', j.stop_id).single()); },
   // RC4.1: el Recibido Conforme se arma SIEMPRE desde el comprobante guardado (nunca se regenera ni se duplica)
   async receiptFor(j: any) { return must(await admin.from('delivery_receipts').select('receipt_number, snapshot').eq('stop_id', j.stop_id).single()); },
   async updateJob(id: string, patch: any) { must(await admin.from('customer_email_jobs').update(patch).eq('id', id)); }

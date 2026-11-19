@@ -21,3 +21,14 @@ test('copia oculta exclusivamente durante el 19 de noviembre en Argentina', () =
     expect(resendBody(message, 'sender')).not.toHaveProperty('bcc');
   } finally { vi.useRealTimers(); }
 });
+
+import { customerEmail } from '../../supabase/functions/_shared/customer-email.js';
+
+test('solo las salidas de Cristian reciben la copia adicional', () => {
+  for (const carrier of ['CT-ALR', 'CT-ESTE', 'OTRO', null]) {
+    for (const kind of ['ON_THE_WAY', 'PARTIAL', 'DELIVERED']) {
+      const mail = customerEmail({kind, stop:{routes:{carrier_id:carrier}}});
+      expect(mail.customerReceiptReview).toBe(kind === 'ON_THE_WAY' && ['CT-ALR', 'CT-ESTE'].includes(carrier));
+    }
+  }
+});
