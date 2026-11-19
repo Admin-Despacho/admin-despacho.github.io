@@ -1,5 +1,6 @@
 import { corporateMail, mailChannel } from '../_shared/corporate-mail.js';
 import { sendCommercialDecisionEmails } from '../_shared/commercial-decision-mail.js';
+import { sendDailyDispatch } from '../_shared/daily-dispatch-worker.js';
 // Comunicaciones · despachador. Lo invoca el programador del servidor (pg_cron + pg_net) con el encabezado x-comm-cron.
 // Secretos (Supabase → Edge Functions → Secrets): COMM_CRON_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET. Nunca se registran.
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
@@ -24,11 +25,14 @@ Deno.serve(async (req: Request) => {
   if(req.headers.get('x-mail-smtp-only')==='1'&&currentMail.provider!=='SMTP')return new Response(JSON.stringify({skipped:true}));
   // Autorizaciones comerciales: lote acotado por cupo y tiempo; un fallo acá nunca bloquea el resto de los envíos programados.
   const commercial=await sendCommercialDecisionEmails(sb,{connectTls}).catch(()=>({stop:'COMMERCIAL_MAIL_FAILED'}));
+  // Informe diario: sólo activo con corte y tamaño confirmados en SQL. No interrumpe otros correos.
+  const dailyDispatch=await sendDailyDispatch(sb).catch(()=>({stop:'DAILY_DISPATCH_FAILED'}));
   const sum = await dispatch(store, provider, { limit: currentMail.provider==='SMTP'?Math.min(2,currentMail.available_slots||0):Number(Deno.env.get('COMM_BATCH') ?? 25), dailyCap: Number(Deno.env.get('COMM_DAILY_CAP') ?? 400),
     sendWindowHours: Number(Deno.env.get('COMM_SEND_WINDOW_HOURS') ?? 6),
     // cuota de Gmail API aplicable al proyecto (proyectos desde 1/5/2026: 6.000 unidades/min por usuario); control COMPARTIDO en la base
     unitsPerMinute: Number(Deno.env.get('COMM_GMAIL_UNITS_PER_MIN') ?? 6000), unitsPerSecond: Number(Deno.env.get('COMM_GMAIL_UNITS_PER_SEC') ?? 200) });
   (sum as any).commercial=commercial;
+  (sum as any).dailyDispatch=dailyDispatch;
   if (sum.auth) await store.markGmail(true, sum.note).catch(() => {});
   return new Response(JSON.stringify(sum), { status: 200, headers: { 'Content-Type': 'application/json' } });
 });

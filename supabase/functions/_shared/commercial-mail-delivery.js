@@ -38,13 +38,14 @@ export async function buildCommercialMime({ from, to, cc, subject, html, text, e
   return { raw, to: d.to, cc: d.cc, messageId: mid, fingerprint: await digest(raw) };
 }
 
-/** @param {any} sb @param {{connect?:any,startTls?:any,transport?:any}} [o] */
-export function commercialDelivery(sb, { connect, startTls, transport } = {}) {
+/** @param {any} sb @param {{connect?:any,startTls?:any,transport?:any,namespace?:string}} [o] */
+export function commercialDelivery(sb, { connect, startTls, transport, namespace = 'decisiones' } = {}) {
   if (!transport) { const io = denoSmtpIO(), cn = connect || io.connect, st = startTls || io.startTls;
     transport = (cn && st) ? smtpTransport({ connect: cn, startTls: st }) : { send: async () => { throw new SmtpError('SMTP_STARTTLS_REQUIRED', { status: 503 }); } }; }
   const rpc = async (name, args = {}) => { const { data, error } = await sb.rpc(name, args); if (error) throw new SmtpError('SMTP_STATE_UNAVAILABLE'); return data; };
   const runtime = () => rpc('comm_mail_runtime');
-  const scope = k => 'decisiones:' + k;
+  if (!['decisiones','informe-diario'].includes(namespace)) throw Error('SMTP_NAMESPACE_INVALID');
+  const scope = k => namespace + ':' + k;
   return {
     runtime,
     // Estado de una clave en el ledger: ACCEPTED · HELD (incluye PROCESSING) · REJECTED · RETRYABLE · AUTH_ERROR · null
