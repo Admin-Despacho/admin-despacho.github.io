@@ -68,6 +68,19 @@ async function loadLegacy() {
         if (/(^|[^_])RULES_OUTDATED/.test(e.message || '')) { const f = await api.financialRules(); window.OKD_APPLY_RULES && window.OKD_APPLY_RULES(f); throw new Error('Las reglas financieras cambiaron (v' + f.version + '). Se recalculó la hoja: revisá los montos y publicá de nuevo.'); }
         throw e; } }, status: id => api.routeStatus(id), subscribe: cb => api.subscribe(cb) }
   };
+  window.OKD_SYNC_RECEIPT_ITEMS = async records => {
+    if (api.mode !== 'online' || !records?.length) return;
+    const { orders } = await api._rpc('sync_pending_receipt_items', {});
+    if (!orders?.length) return;
+    const wanted = new Set(orders);
+    const rows = {};
+    for (const o of records) {
+      if (wanted.has(String(o.id)) && !o.isShipping && o.merchandiseLines?.length) {
+        rows[o.id] = { client: o.cliente, lines: o.merchandiseLines.map(line => ({ ...line, order: String(o.id) })) };
+      }
+    }
+    if (Object.keys(rows).length) await api._rpc('sync_pending_receipt_items', { p_rows: rows });
+  };
   const [xlsx, worker] = await Promise.all([loadText('/legacy/xlsx.full.min.js'), loadText('/legacy/worker.js')]);
   $('#src-xlsx').textContent = xlsx; $('#src-worker').textContent = worker;
   for (const f of ['exceljs.min.js', 'jspdf.umd.min.js', 'jspdf.plugin.autotable.min.js', 'financing.js', 'despacho-v15.js']) await loadScript('/legacy/' + f);

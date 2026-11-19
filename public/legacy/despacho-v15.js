@@ -2322,6 +2322,7 @@ const UI = {
       RouteStore.data[res.kind] = payload;
       await DB.set('ds:' + res.kind, payload);
       this.applyData(res.kind);
+      if (res.kind === 'pedidos') window.OKD_SYNC_RECEIPT_ITEMS?.(res.records).catch(e => console.warn('Vinculación de comprobantes:', e.message));
       try { if ((res.kind === 'sc' || res.kind === 'cc') && typeof window.OKD_COM_INGEST === 'function') await window.OKD_COM_INGEST(res.kind, payload, f); } catch (e) { alert('La carga operativa se conservó, pero no se confirmó el respaldo Comercial. Conservá el archivo y avisá a Administración.'); }   // Autorizaciones Comerciales: historial en segundo plano (nunca bloquea la carga)
       toast(this.kindLabel(res.kind) + ' cargado: ' + res.count + ' registros.', 2600);
     }
@@ -3670,6 +3671,7 @@ const PdfExporter = {
   OrderIndex.build(RouteStore.data.pedidos ? RouteStore.data.pedidos.records : []);
   FinancialIndex.buildSC(RouteStore.data.sc ? RouteStore.data.sc.records : [], RouteStore.data.sc && RouteStore.data.sc.meta.v, RouteStore.data.sc ? RouteStore.data.sc.meta.fileName + '@' + RouteStore.data.sc.meta.loadedAt : '');
   FinancialIndex.buildCC(RouteStore.data.cc ? RouteStore.data.cc.records : []);
+  window.OKD_SYNC_RECEIPT_ITEMS?.(RouteStore.data.pedidos?.records).catch(e => console.warn('Vinculación de comprobantes:', e.message));
   const sheet = await SheetTabs.boot();
   SheetTabs.apply(sheet);
   if (!RouteStore.sheetDate) RouteStore.sheetDate = RouteStore.rows.length ? (RouteStore.rows[0].fecha || todayISO()) : todayISO();
