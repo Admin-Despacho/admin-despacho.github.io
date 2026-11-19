@@ -90,16 +90,17 @@ export function receiptEmail({ receipt, stop, inlineLogo }) {
 }
 export function customerEmail({ kind, stop }) {
   const orders = (stop.order_numbers || []).filter(Boolean).join(' + ');
-  const subject = kind === 'ON_THE_WAY' ? 'OK Accesorios · Tu pedido está en camino' : kind === 'PARTIAL' ? 'OK Accesorios · Entregamos parte de tu pedido' : 'OK Accesorios · Tu pedido fue entregado';
+  const reviewDeparture = kind === 'ON_THE_WAY' && ['CT-ALR', 'CT-ESTE'].includes(stop.routes?.carrier_id);
+  const subject = reviewDeparture ? 'OK Accesorios · Tu pedido está programado para reparto' : kind === 'ON_THE_WAY' ? 'OK Accesorios · Tu pedido está en camino' : kind === 'PARTIAL' ? 'OK Accesorios · Entregamos parte de tu pedido' : 'OK Accesorios · Tu pedido fue entregado';
   // V4.26: se envía al confirmarse la SALIDA REAL del reparto (y como máximo una vez por cliente/parada y hoja, con todos sus pedidos): no promete ser la próxima entrega
-  const body = kind === 'ON_THE_WAY' ? 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' ya salió de nuestro depósito y está en camino. Lo vas a recibir en el transcurso de la jornada de reparto.'
+  const body = reviewDeparture ? 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' ya está incluido en la hoja de reparto de Cristian Torres.'
+    : kind === 'ON_THE_WAY' ? 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' ya salió de nuestro depósito y está en camino. Lo vas a recibir en el transcurso de la jornada de reparto.'
     : kind === 'PARTIAL' ? 'Entregamos <b>parte</b> de tu pedido' + (orders ? ' ' + esc(orders) : '') + '. Nos vamos a comunicar para coordinar el resto.'
     : 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' fue entregado. ¡Gracias por tu compra!';
   const html = '<!doctype html><html lang="es"><body style="margin:0;background:#eef2f4;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:20px 8px;">' +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff;border:1px solid #d8e1e5;border-radius:14px;">' +
     '<tr><td style="background:#07151b;border-bottom:4px solid #16d6e5;padding:18px;border-radius:14px 14px 0 0;' + F + 'font-size:20px;font-weight:bold;color:#fff;">OK ACCESORIOS</td></tr>' +
     '<tr><td style="' + F + 'padding:18px;font-size:14px;color:#111;line-height:1.6;">Hola ' + esc(stop.client_name) + ',<br>' + body + '</td></tr></table></td></tr></table></body></html>';
-  const reviewDeparture = kind === 'ON_THE_WAY' && ['CT-ALR', 'CT-ESTE'].includes(stop.routes?.carrier_id);
   return { customerReceiptReview: reviewDeparture, subject, html, text: subject + '\n' + body.replace(/<[^>]+>/g, '') };
 }
 /** store: { listJobs(q), stopFor(job), updateJob(id, patch) } — idempotente por job; una falla no revierte la entrega */
