@@ -33,7 +33,7 @@ async def main():
             b = await p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or None)
             try:
                 nb = await b.new_context(viewport={'width': 1366, 'height': 1000}); pg = await nb.new_page(); pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
-                await pg.goto(f'http://127.0.0.1:{dp.PORT}/'); await pg.evaluate('()=>localStorage.clear()')
+                # El contexto es nuevo. login realiza la primera navegación y espera a que termine.
                 an = await b.new_context(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True); q = await an.new_page()
                 # ---- CO-01 Comercial (Android): buscar → elegir → CUIT y KPI automáticos → enviar ----
                 # V5 (N-V4-03): el KPI arranca DESHABILITADO; este circuito verifica el CÁLCULO, así que el Administrador lo ACTIVA por el camino real y auditado
@@ -47,7 +47,7 @@ async def main():
                 await q.locator('#cSugg button', has_text='TECNOLOGIA DEL NORTE').first.click(); await q.wait_for_timeout(900)
                 cuit = await q.input_value('#cCuit'); kpi = await q.evaluate('()=>document.getElementById("cKpi").innerText.replace(/\\s+/g," ")')
                 await q.fill('#cOrder', '26764'); await q.fill('#cAmount', '2750000'); await q.select_option('#cInst', '4'); await q.select_option('#cFreq', 'SEMANAL'); await q.fill('#cFirst', await q.evaluate(AR_PLUS, 7)); await q.wait_for_timeout(300)
-                sched = await q.locator('#cSched .scheditem').count(); ov1 = await q.evaluate(OV)   # financiación con calendario: 4 semanales desde hoy+7 (las mismas fechas que antes)
+                sched = await q.locator('#cSched [data-cal-row]').count(); ov1 = await q.evaluate(OV)   # financiación con calendario: 4 semanales desde hoy+7 (las mismas fechas que antes)
                 await q.screenshot(path=os.path.join(OUT, '01_comercial_nueva_solicitud_android.png'), full_page=True)
                 await q.click('#cSend'); await q.wait_for_timeout(1500)
                 mine = await q.evaluate('()=>[...document.querySelectorAll(".requests [data-select]")].map(b=>b.innerText.replace(/\\s+/g," "))')

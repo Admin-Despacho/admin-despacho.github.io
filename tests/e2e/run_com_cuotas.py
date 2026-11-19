@@ -15,7 +15,7 @@ def res(n, ok, d=''): R.append((n, 'PASS' if ok else 'FAIL', str(d)[:420])); pri
 AR = cc.AR_PLUS
 DMY = lambda iso: '/'.join(reversed(iso.split('-')))
 LABELS = '()=>[...document.querySelectorAll("#comMain .fg .field > span")].map(e=>e.closest(".field").hidden?null:e.textContent.trim()).filter(Boolean)'
-PREVIEW = '''()=>({limite:(document.querySelector("#cSched [data-cal-limit]")||{}).innerText||"", items:[...document.querySelectorAll("#cSched .scheditem small")].map(e=>e.innerText),
+PREVIEW = '''()=>({limite:(document.querySelector("#cSched [data-cal-limit]")||{}).innerText||"", items:[...document.querySelectorAll("#cSched [data-cal-due]")].map(e=>e.innerText),
   error:(document.querySelector("#cSched [data-cal-error]")||{}).innerText||"", excede:!!document.querySelector("#cSched [data-cal-excede]"),
   enviar:!document.getElementById("cSend").disabled, freq_visible:!document.getElementById("cFreqW").hidden, etiqueta:document.getElementById("cFirstL").textContent})'''
 async def main():
@@ -58,7 +58,7 @@ async def main():
                 await cc.relog(pg, 'wilfredo@okdespacho.demo'); await pg.evaluate('()=>{location.hash="#/autorizaciones?v=gerencia"}'); await pg.wait_for_timeout(1800)
                 await pg.evaluate('(id)=>{const b=document.querySelector(`[data-select="${id}"]`); if(b) b.click()}', guardada['id']); await pg.wait_for_timeout(900)
                 await pg.click('[data-dec="DEVOLVER"]'); await pg.wait_for_timeout(500)
-                modal = await pg.evaluate('()=>({solicitado:[...((document.querySelector("#comModal .spanall:not(#dSched)")||document).querySelectorAll(".scheditem small"))].map(e=>e.innerText), cuotas:document.getElementById("dInst").value, frecuencia:document.getElementById("dFreq").value, primero:document.getElementById("dFirst").value})')
+                modal = await pg.evaluate('()=>({solicitado:[...((document.querySelector("#comModal .spanall:not(#dSched)")||document).querySelectorAll("[data-cal-due]"))].map(e=>e.innerText), cuotas:document.getElementById("dInst").value, frecuencia:document.getElementById("dFreq").value, primero:document.getElementById("dFirst").value})')
                 await pg.select_option('#dInst', '3'); await pg.select_option('#dFreq', 'SEMANAL'); await pg.fill('#dFirst', d[20]); await pg.wait_for_timeout(300)
                 bloqueado = await pg.evaluate('()=>({go:document.getElementById("dGo").disabled, error:(document.querySelector("#dSched [data-cal-error]")||{}).innerText||""})')
                 await pg.fill('#dFirst', d[7]); await pg.wait_for_timeout(300); await pg.fill('#dReason', 'Propongo 3 semanales')
@@ -71,7 +71,7 @@ async def main():
                 # ===== CU-E05 · el COMERCIAL ve el calendario ORIGINAL y el PROPUESTO antes de aceptar; acepta =====
                 await cc.relog(pg, 'comercial.montecaseros@okdespacho.demo'); await pg.wait_for_timeout(800)
                 await pg.evaluate('(id)=>{const b=document.querySelector(`[data-select="${id}"]`); if(b) b.click()}', guardada['id']); await pg.wait_for_timeout(900)
-                cmp = await pg.evaluate('()=>{const c=document.querySelector("[data-cal-detalle]"); return c?[...c.children].map(x=>({titulo:(x.querySelector(".label")||{}).innerText, fechas:[...x.querySelectorAll(".scheditem small")].map(e=>e.innerText)})):null}')
+                cmp = await pg.evaluate('()=>{const c=document.querySelector("[data-cal-detalle]"); return c?[...c.children].map(x=>({titulo:(x.querySelector(".label")||{}).innerText, fechas:[...x.querySelectorAll("[data-cal-due]")].map(e=>e.innerText)})):null}')
                 await pg.screenshot(path=os.path.join(OUT, '4_comercial_original_y_propuesto_movil.png'), full_page=True)
                 await pg.click('#rAccept'); await pg.wait_for_timeout(1200)
                 res('CU-E05 [móvil] el COMERCIAL ve el calendario SOLICITADO y el PROPUESTO lado a lado ANTES de aceptar o retirar; acepta',
@@ -93,7 +93,7 @@ async def main():
                   d.com.requests.push(q); localStorage.setItem("okd_online_demo_v2", JSON.stringify(d));}''')
                 await pg.reload(); await pg.evaluate('()=>{location.hash="#/autorizaciones?v=gerencia"}'); await pg.wait_for_timeout(1800)
                 await pg.evaluate('()=>{const b=document.querySelector(`[data-select="hist-vieja"]`); if(b) b.click()}'); await pg.wait_for_timeout(800)
-                vieja = await pg.evaluate('()=>[...document.querySelectorAll("[data-cal-detalle] .scheditem small")].map(e=>e.innerText)')
+                vieja = await pg.evaluate('()=>[...document.querySelectorAll("[data-cal-detalle] [data-cal-due]")].map(e=>e.innerText)')
                 await cc.relog(pg, 'comercial.montecaseros@okdespacho.demo')
                 manip = await pg.evaluate('''async(f)=>{const A=window.OKD_ONLINE.api, cl=(await A.comSearchClients("TECNO")).find(c=>c.selectable);
                   try{ await A.comCreate("FINANCIACION", cl.id, "MANIP", {amount:100000, installments:1, first_due:f, schedule:[{n:1,due:"2026-11-20",amount:1}]}, null, "op-manip"); return "ACEPTADA"; }catch(e){ return e.code+" "+e.message }}''', d[31])

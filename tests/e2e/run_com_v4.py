@@ -46,43 +46,53 @@ async def main():
                 await base.login(op, 'operario@okdespacho.demo'); await base.builder(op)
                 await op.fill('#ids', '72001 72002 72003 72004'); await op.click('#btnSearch'); await op.wait_for_timeout(2500)
                 await base.type_amount(op, '72001', '1500'); await base.type_amount(op, '72002', '2000'); await op.evaluate('async()=>{ await RouteStore.flush(); }')
+                # ===== E01 · B-W06 sobre el camino VIGENTE (hotfix 9c3240c: PUBLICAR HOJA ya no muestra autorizaciones ni el formulario de alarma) =====
+                await op.evaluate('()=>{const B=window.OKD_BRIDGE&&window.OKD_BRIDGE.com; window.__brCalls={bridge:!!(B&&B.alerts&&B.alarm), n:0}; if(B){for(const k of ["alerts","alarm"]){const o=B[k]; B[k]=async(...a)=>{window.__brCalls.n++; return o(...a)}}}}')
                 await base.open_publish(op); await op.wait_for_timeout(2500)
-                # ===== E01 · B-W06 =====
-                await op.evaluate('''()=>{const B=window.OKD_BRIDGE.com, orig=B.alarm; window.__alCalls=0; window.__alLose=0; window.__alOps=[];
-                  B.alarm=async(...a)=>{window.__alCalls++; window.__alOps.push(a[5]); const r=await orig(...a); if(window.__alLose>0){window.__alLose--; throw new Error("Failed to fetch");} return r;};}''')
-                async def pick(order):
-                    k = await op.evaluate('(o)=>[...document.querySelectorAll("[data-al-order] option")].findIndex(x=>x.textContent.startsWith(o))', order); await op.select_option('[data-al-order]', str(k))
-                RES = '()=>document.querySelector("[data-al-res]").innerText'
+                hot = await op.evaluate('''()=>({pubCom:!!document.getElementById("pubCom"), form:!!document.querySelector("[data-al-order],[data-al-go],.comalarmform"), llamadas:window.__brCalls})''')
+                await op.evaluate('()=>{const b=document.getElementById("pubCancel"); if(b) b.click()}')
+                # el Comercial crea 5 solicitudes PENDIENTES (misma base de la demo = servidor común)
+                cm = await op.context.new_page(); await base.login(cm, 'comercial.sanjuan@okdespacho.demo'); await cm.wait_for_timeout(1200)
+                reqs = await cm.evaluate('''async()=>{const A=window.OKD_ONLINE.api, out=[]; for(const [i,ref] of ["U-A","U-B","U-C","U-D","U-E"].entries()){ out.push(await A.comCreate("ECHEQ","cli-101",ref,{amount:100000+i, due_date:new Date(Date.now()+10*864e5).toISOString().slice(0,10), issuer_name:"", issuer_cuit:""},null,"u-op-"+ref)); } return out.map(x=>x.id)}''')
+                await cm.close()
+                await op.evaluate('()=>{location.hash="#/autorizaciones?v=despacho"}'); await op.wait_for_selector('#comMain .az', timeout=20000); await op.wait_for_timeout(600)
+                await op.evaluate('''()=>{const A=window.OKD_ONLINE.api, orig=A.comAlarmRaiseRequest.bind(A); window.__alCalls=0; window.__alLose=0; window.__alOps=[];
+                  A.comAlarmRaiseRequest=async(...a)=>{window.__alCalls++; window.__alOps.push(a[2]); const r=await orig(...a); if(window.__alLose>0){window.__alLose--; throw new Error("Failed to fetch");} return r;};}''')
+                MSG = '()=>{const e=document.getElementById("uMsg"); return e&&!e.hidden?e.innerText:""}'
+                TOASTS = '()=>[...document.querySelectorAll("#comToast .toast")].map(t=>t.textContent).join(" | ")'
+                async def open_req(rid):
+                    await op.evaluate('()=>{const m=document.getElementById("comModal"); if(m) m.innerHTML=""; const t=document.getElementById("comToast"); if(t) t.innerHTML=""}')   # cada paso lee SOLO sus avisos
+                    await op.evaluate('(id)=>document.querySelector(`#comMain [data-select="${id}"]`).click()', rid); await op.wait_for_timeout(700)
+                    await op.wait_for_selector('#rUrgentBtn', timeout=8000); await op.click('#rUrgentBtn'); await op.wait_for_selector('#uReason', timeout=5000)
+                n_alarms = lambda rid: op.evaluate('(id)=>(JSON.parse(localStorage.getItem("%s")).com.alarms||[]).filter(a=>a.request_id===id).length' % K, rid)
                 # (a) doble clic → UNA llamada
-                await pick('72003'); await op.fill('[data-al-reason]', 'Cliente pide financiación antes de cargar'); await op.evaluate('()=>{const g=document.querySelector("[data-al-go]"); g.click(); g.click();}')
-                await op.wait_for_timeout(1500); a_calls = await op.evaluate('()=>window.__alCalls'); a_res = await op.evaluate(RES)
-                # (b) respuesta PERDIDA → reintento con el MISMO op_id, sin duplicar
-                await op.click('[data-al-new]'); await pick('72001'); await op.fill('[data-al-reason]', 'Segundo pedido urgente con respuesta perdida'); await op.evaluate('()=>{window.__alLose=1}')
-                await op.click('[data-al-go]'); await op.wait_for_timeout(1200); b1 = await op.evaluate(RES)
-                await op.click('[data-al-go]'); await op.wait_for_timeout(1200); b2 = await op.evaluate(RES); ops_b = await op.evaluate('()=>window.__alOps.slice(-2)')
-                n_b = await op.evaluate('()=>JSON.parse(localStorage.getItem("%s")).com.alarms.filter(a=>a.order_ref==="72001").length' % K)
+                await open_req(reqs[0]); await op.fill('#uReason', 'Cliente pide financiación antes de cargar'); await op.evaluate('()=>{const g=document.getElementById("uGo"); g.click(); g.click();}')
+                await op.wait_for_timeout(1500); a_calls = await op.evaluate('()=>window.__alCalls'); a_res = await op.evaluate(TOASTS); a_n = await n_alarms(reqs[0])
+                # (b) respuesta PERDIDA → «sin respuesta» y reintento con el MISMO op_id, sin duplicar
+                await open_req(reqs[1]); await op.fill('#uReason', 'Segundo pedido urgente con respuesta perdida'); await op.evaluate('()=>{window.__alLose=1}')
+                await op.click('#uGo'); await op.wait_for_timeout(1200); b1 = await op.evaluate(MSG)
+                await op.click('#uGo'); await op.wait_for_timeout(1500); b2 = await op.evaluate(TOASTS); ops_b = await op.evaluate('()=>window.__alOps.slice(-2)'); n_b = await n_alarms(reqs[1])
                 # (c) ATENCIÓN entre intentos: perdida → se atiende → reintento: mismo resultado, NO crea otra alarma
-                await op.click('[data-al-new]'); await pick('72002'); await op.fill('[data-al-reason]', 'Tercer pedido urgente atendido entre intentos'); await op.evaluate('()=>{window.__alLose=1}')
-                await op.click('[data-al-go]'); await op.wait_for_timeout(1200); c1 = await op.evaluate(RES)
-                await op.evaluate(mutate('d.com.alarms.filter(a=>a.order_ref==="72002").forEach(a=>{a.status="ATENDIDA"; a.attended_by="u-wilfredo"; a.attended_at=new Date().toISOString(); a.version++;})'))
-                await op.click('[data-al-go]'); await op.wait_for_timeout(1200); c2 = await op.evaluate(RES)
-                n_c = await op.evaluate('()=>JSON.parse(localStorage.getItem("%s")).com.alarms.filter(a=>a.order_ref==="72002").length' % K)
-                # (d) CONFLICTO: la intención guardada reutiliza un op_id de OTRA operación → «NO SE ENVIÓ», nunca «ENVIADA», sin registro local de activación
-                logs0 = await op.evaluate('()=>(RouteStore.data.log||RouteStore.log.items||[]).length||0')
-                await op.click('[data-al-new]'); await pick('72004')
-                await op.evaluate('(op)=>{sessionStorage.setItem("okd_alarm_intent:"+RouteStore.sheetId, JSON.stringify({order:"72004", reason:"Intento con identificador reutilizado", op, state:"PENDING"}));}', ops_b[0])
-                await op.fill('[data-al-reason]', 'Intento con identificador reutilizado'); await op.click('[data-al-go]'); await op.wait_for_timeout(1200); d1 = await op.evaluate(RES)
-                logs1 = await op.evaluate('()=>(RouteStore.data.log||RouteStore.log.items||[]).length||0')
-                # (e) DESCONEXIÓN: sin conexión → «sin respuesta»; al volver, reintento con el mismo op_id → ENVIADA
-                await op.click('[data-al-new]'); await pick('72004'); await op.fill('[data-al-reason]', 'Cuarto pedido urgente sin conexión'); await op.evaluate('()=>{window.OKD_NET={offline:true}}')
-                await op.click('[data-al-go]'); await op.wait_for_timeout(1000); e1 = await op.evaluate(RES); op_e1 = await op.evaluate('()=>JSON.parse(sessionStorage.getItem("okd_alarm_intent:"+RouteStore.sheetId)).op')
-                await op.evaluate('()=>{window.OKD_NET={offline:false}}'); await op.click('[data-al-go]'); await op.wait_for_timeout(1200); e2 = await op.evaluate(RES)
-                op_e2 = await op.evaluate('()=>JSON.parse(sessionStorage.getItem("okd_alarm_intent:"+RouteStore.sheetId)).op')
-                await op.locator('.comalarmform').scroll_into_view_if_needed(); await op.screenshot(path=os.path.join(OUT, '1_revisar_intencion_estable.png'))
-                res('E01 (B-W06) REVISAR: doble clic = UNA llamada · respuesta PERDIDA → «sin respuesta» y el reintento usa el MISMO op_id (una sola alarma) · ATENCIÓN entre intentos: el reintento devuelve el mismo resultado sin crear otra · CONFLICTO → «NO SE ENVIÓ» (nunca «ENVIADA», sin registro) · DESCONEXIÓN → reintento con el mismo op_id',
-                    a_calls == 1 and 'ENVIADA' in a_res and 'SIN RESPUESTA' in b1 and 'ENVIADA' in b2 and ops_b[0] == ops_b[1] and n_b == 1 and 'SIN RESPUESTA' in c1 and 'ENVIADA' in c2 and n_c == 1
-                    and 'NO SE ENVIÓ' in d1 and 'ENVIADA' not in d1 and logs1 == logs0 and 'SIN RESPUESTA' in e1 and 'ENVIADA' in e2 and op_e1 == op_e2,
-                    {'llamadas_doble_clic': a_calls, 'perdida': [b1[:40], b2[:40]], 'atendida_entre': [c1[:30], c2[:40]], 'conflicto': d1[:90], 'desconexion': [e1[:30], e2[:40]]})
+                await open_req(reqs[2]); await op.fill('#uReason', 'Tercer pedido urgente atendido entre intentos'); await op.evaluate('()=>{window.__alLose=1}')
+                await op.click('#uGo'); await op.wait_for_timeout(1200); c1 = await op.evaluate(MSG)
+                await op.evaluate(mutate('d.com.alarms.filter(a=>a.request_id===%s).forEach(a=>{a.status="ATENDIDA"; a.attended_by="u-wilfredo"; a.attended_at=new Date().toISOString(); a.version++;})' % json.dumps(reqs[2])))
+                await op.click('#uGo'); await op.wait_for_timeout(1500); c2 = await op.evaluate(TOASTS); n_c = await n_alarms(reqs[2])
+                # (d) CONFLICTO: la intención guardada reutiliza el op_id de OTRA operación → «NO SE ENVIÓ», nunca «enviada», sin alarma
+                await op.evaluate('([id,o])=>sessionStorage.setItem("okd_com_urgent:"+id, JSON.stringify({reason:"Intento con identificador reutilizado", op:o}))', [reqs[3], ops_b[0]])
+                await open_req(reqs[3]); calls_d0 = await op.evaluate('()=>window.__alCalls'); await op.click('#uGo'); await op.wait_for_timeout(1200)
+                d1 = await op.evaluate(MSG); d_toast = await op.evaluate(TOASTS); n_d = await n_alarms(reqs[3])
+                # (e) DESCONEXIÓN: sin conexión → «sin respuesta»; al volver, reintento con el MISMO op_id → enviada
+                await open_req(reqs[4]); await op.fill('#uReason', 'Quinto pedido urgente sin conexión'); await op.evaluate('()=>{window.OKD_NET={offline:true}}')
+                await op.click('#uGo'); await op.wait_for_timeout(1000); e1 = await op.evaluate(MSG); op_e1 = await op.evaluate('(id)=>JSON.parse(sessionStorage.getItem("okd_com_urgent:"+id)).op', reqs[4])
+                await op.evaluate('()=>{window.OKD_NET={offline:false}}'); await op.click('#uGo'); await op.wait_for_timeout(1500); e2 = await op.evaluate(TOASTS)
+                ops_e = await op.evaluate('()=>window.__alOps.slice(-2)'); n_e = await n_alarms(reqs[4])
+                await op.screenshot(path=os.path.join(OUT, '1_alarma_desde_solicitud_intencion_estable.png'))
+                res('E01 (B-W06) HOTFIX: PUBLICAR HOJA sin autorizaciones ni formulario de alarma (y sin consultarlas) · en «Solicitar aprobación urgente»: doble clic = UNA llamada · respuesta PERDIDA → «sin respuesta» y el reintento usa el MISMO op_id (una sola alarma) · ATENCIÓN entre intentos: el reintento devuelve el mismo resultado sin crear otra · CONFLICTO → «NO SE ENVIÓ» (nunca enviada, sin alarma) · DESCONEXIÓN → reintento con el mismo op_id',
+                    not hot['pubCom'] and not hot['form'] and hot['llamadas']['bridge'] and hot['llamadas']['n'] == 0
+                    and a_calls == 1 and 'Alarma enviada' in a_res and a_n == 1 and 'SIN RESPUESTA' in b1 and 'Alarma enviada' in b2 and ops_b[0] == ops_b[1] and n_b == 1
+                    and 'SIN RESPUESTA' in c1 and n_c == 1 and 'NO SE ENVIÓ' in d1 and d_toast == '' and n_d == 0
+                    and 'SIN RESPUESTA' in e1 and ops_e[0] == ops_e[1] == op_e1 and n_e == 1 and 'Alarma enviada' in e2,
+                    {'ventana': hot, 'llamadas_doble_clic': a_calls, 'perdida': [b1[:40], ops_b], 'atendida_entre': [c1[:30], n_c], 'conflicto': d1[:90], 'desconexion': [e1[:30], ops_e, n_e]})
                 # ===== E02-E04 · B-W07 · alarmas múltiples para Wilfredo =====
                 wi = await (await mk()).new_page(); await wi.goto(f'http://127.0.0.1:{dp.PORT}/'); await sync(op, wi); await enter(wi, 'wilfredo@okdespacho.demo')
                 await wi.evaluate(mutate('d.com.alarms.forEach(a=>{if(a.status==="PENDIENTE_ATENCION"){a.status="ATENDIDA"; a.attended_by="u-wilfredo"; a.attended_at=new Date().toISOString();}})'))
