@@ -1,0 +1,14 @@
+name: Circuito comercial completo
+on:
+  push:
+    branches: [qa/autorizaciones-visual-circuito]
+permissions:
+  contents: read
+jobs:
+  circuito:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm run build
+      - run: pip install playwright openpyxl
+      - run: CHROMIUM_PATH=$(which google-chrome) python tests/e2e/run_com_circuito.py dist

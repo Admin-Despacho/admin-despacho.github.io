@@ -33,7 +33,7 @@ async def main():
             b = await p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or None)
             try:
                 nb = await b.new_context(viewport={'width': 1366, 'height': 1000}); pg = await nb.new_page(); pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
-                await pg.goto(f'http://127.0.0.1:{dp.PORT}/'); await pg.evaluate('()=>localStorage.clear()')
+                # El contexto es nuevo. login realiza la primera navegación y espera a que termine.
                 an = await b.new_context(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True); q = await an.new_page()
                 # ---- CO-01 Comercial (Android): buscar → elegir → CUIT y KPI automáticos → enviar ----
                 # V5 (N-V4-03): el KPI arranca DESHABILITADO; este circuito verifica el CÁLCULO, así que el Administrador lo ACTIVA por el camino real y auditado
