@@ -13,6 +13,8 @@ var ExcelImporterCore = (function () {
       cliente: ['cliente', 'razonsocial'],
       zona: ['zona'],
       producto: ['producto', 'articulo'],
+      cantidad: ['cant', 'cantidad', 'unidades'],
+      sku: ['sku', 'codigoarticulo', 'codigoproducto'],
       subtotalPesos: ['subtotalpesos'],
       subtotal: ['subtotal', 'total', 'importe'],
       obs: ['observaciones', 'observacion', 'obs'],
@@ -148,7 +150,7 @@ var ExcelImporterCore = (function () {
         var o = orders[id];
         if (!o) {
           o = orders[id] = { id: id, fecha: '', estado: '', zona: '', vendedor: '', cliente: '', fantasia: '', obs: '', obsPedido: '',
-            facturas: [], domicilio: '', localidad: '', provincia: '', estadoFactura: '', total: 0, lines: 0, shipLines: 0, shipCode: '', products: [] };
+            facturas: [], domicilio: '', localidad: '', provincia: '', estadoFactura: '', total: 0, lines: 0, shipLines: 0, shipCode: '', products: [], merchandiseLines: [] };
           order.push(id);
         }
         o.lines++;
@@ -164,6 +166,12 @@ var ExcelImporterCore = (function () {
         var prod = str(g(row, 'producto'));
         var pm = prod.match(/^\s*\[\s*ENV[IÍ]O\s*-\s*([^\]]+)\]/i);
         if (pm) { o.shipLines++; o.shipCode = pm[1].trim().toUpperCase(); }
+        if (prod && !pm) {
+          var code = prod.match(/^\s*\[([^\]]+)\]\s*(.+)$/);
+          var quantity = str(g(row, 'cantidad'));
+          o.merchandiseLines.push({ code: str(g(row, 'sku')) || (code ? code[1].trim() : ''),
+            description: code ? code[2].trim() : prod, quantity: quantity });
+        }
         if (o.products.length < 40) o.products.push(prod);
         if (r % 3000 === 0) progress(40 + Math.round(50 * r / total), 'Procesando pedidos…');
       }

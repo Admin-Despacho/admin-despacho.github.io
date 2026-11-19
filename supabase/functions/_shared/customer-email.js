@@ -7,7 +7,33 @@ const F = 'font-family:Arial,Helvetica,sans-serif;';
 // Logo: ícono oficial ya publicado (<APP_URL>/icons/icon-192.png), sin modificar. Si el cliente bloquea imágenes queda el texto "OK ACCESORIOS".
 // Privacidad: nunca incluye DNI, CUIL, firma, GPS, foto de DNI ni notas internas.
 export const SITE_URL = 'https://www.okaccesorios.com.ar';
+function unifiedReceipt({ receipt, stop, inlineLogo }) {
+  const s = receipt.snapshot;
+  const orders = (s.merchandise_orders || s.order_numbers || []).join(' + ');
+  const subject = 'OK Accesorios · Pedido ' + orders + ' entregado · Comprobante ' + s.receipt_number;
+  const when = new Date(s.delivered_at).toLocaleString('es-AR', { timeZone: 'America/Argentina/Mendoza', dateStyle: 'short', timeStyle: 'short' });
+  const items = Array.isArray(s.merchandise) ? s.merchandise : [];
+  const heading = 'style="font-size:18px;margin:22px 0 7px"';
+  const cell = 'style="padding:10px;border-bottom:1px solid #d9e4e9"';
+  const table = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">';
+  const rows = items.map(i => '<tr><td '+cell+'><strong>'+esc(i.description)+'</strong><br><small>'+esc(i.code || '')+'</small></td><td align="right" '+cell+'>'+esc(i.quantity || '—')+'</td></tr>').join('');
+  const quantities = items.map(i => /^\d+(?:[.,]\d+)?$/.test(String(i.quantity)) ? Number(String(i.quantity).replace(',', '.')) : NaN);
+  const total = quantities.length && quantities.every(Number.isFinite) ? quantities.reduce((a,b) => a+b,0).toLocaleString('es-AR') : null;
+  const details = [['Fecha y hora',when],['Recibió',s.receiver_name],['Transportista',s.driver_name],['Bultos entregados',s.bultos]];
+  const detailRows = details.filter(([,v])=>v != null && v !== '').map(([k,v])=>'<tr><td '+cell+'>'+k+'</td><td align="right" '+cell+'><strong>'+esc(v)+'</strong></td></tr>').join('');
+  const brand = inlineLogo?.content && inlineLogo?.content_id ? '<img width="204" alt="OK Accesorios" src="cid:'+esc(inlineLogo.content_id)+'" style="display:block;max-width:100%;height:auto">' : '<strong>OK ACCESORIOS</strong>';
+  const html = '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(subject)+'</title></head><body style="margin:0;background:#eef3f5;color:#152e40;'+F+'font-size:15px;line-height:1.5">'+
+    '<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:16px 10px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#ffffff" style="max-width:620px;border:1px solid #d4e1e6;border-radius:12px">'+
+    '<tr><td style="padding:24px;border-bottom:4px solid #17bed2">'+brand+'</td></tr><tr><td bgcolor="#102c3d" style="padding:22px 24px;color:white">Pedido N.º '+esc(orders)+'<h1 style="font-size:27px;margin:4px 0">Entrega confirmada</h1>Recibido conforme · '+esc(s.receipt_number)+'</td></tr>'+
+    '<tr><td style="padding:8px 24px 20px"><p>Hola, <strong>'+esc(s.client_name || stop.client_name)+'</strong>:</p><p>Registramos la entrega de tu pedido. Te enviamos el comprobante de recepción.</p><h2 '+heading+'>Mercadería entregada</h2>'+
+    (rows ? table+'<tr bgcolor="#edf5f7"><th align="left" '+cell+'>Artículo y código</th><th align="right" '+cell+'>Unidades</th></tr>'+rows+(total===null?'':'<tr><td '+cell+'><strong>Total de unidades</strong></td><td align="right" '+cell+'><strong>'+esc(total)+'</strong></td></tr>')+'</table>' : '<p>Detalle de artículos no disponible para este pedido.</p>')+
+    '<h2 '+heading+'>Datos de recepción</h2>'+table+detailRows+'</table><p style="font-size:13px;color:#526471">Si necesitás consultar por esta entrega, indicá el número de pedido o de comprobante.</p></td></tr>'+
+    '<tr><td bgcolor="#102c3d" style="padding:15px 24px;color:white"><strong>OK Accesorios</strong> · Equipo de Despacho</td></tr></table></td></tr></table></body></html>';
+  const text = [subject, 'Entrega confirmada', s.client_name, ...items.map(i=>[i.code,i.description,i.quantity].filter(Boolean).join(' · ')), ...details.filter(([,v])=>v!=null).map(([k,v])=>k+': '+v)].join('\n');
+  return { subject, html, text, ...(inlineLogo?.content ? {attachments:[inlineLogo]} : {}) };
+}
 export function receiptEmail({ receipt, stop, inlineLogo }) {
+  if (receipt.snapshot?.customer_receipt_version === 1) return unifiedReceipt({ receipt, stop, inlineLogo });
   const s = receipt.snapshot || {}, orders = (s.order_numbers || stop.order_numbers || []).filter(Boolean).join(' + ');
   const client = s.client_name || stop.client_name || '';
   const when = s.delivered_at ? new Date(s.delivered_at).toLocaleString('es-AR', { timeZone: 'America/Argentina/Mendoza', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';

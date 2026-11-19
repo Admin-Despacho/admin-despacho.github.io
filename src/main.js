@@ -50,7 +50,19 @@ async function loadLegacy() {
     locations: { internal: () => api.listInternalLocations() },
     drafts: { touch: (k, n, c, cnt, o, content) => api.touchDraft(k, n, c, cnt, o, content), content: k => api.draftContent(k), remove: k => api.deleteDraft(k), list: () => api.listDrafts() },
     routes: { routing: () => api.routingRules(), rules: () => api.financialRules(), template: id => api.currentTemplate(id), pdf: { settings: () => api.dispatchSettings(), save: (id, v, n, b) => api.saveRoutePdf(id, v, n, b), error: (id, v, m) => api.routePdfError(id, v, m), snapshot: id => api.routePdfSnapshot(id), download: (id, v) => api.downloadRoutePdf(id, v) },
-      vehicles: () => api.listVehicles(), carriers: () => api.listCarriers(), responsables: id => api.responsables(id), dispatchExternal: p => api.dispatchExternalRoute(p), publish: async p => { try { return await (p && p.revision_route_id ? api.publishRouteRevision(p) : api.publishRoute(p)); } catch (e) {
+      vehicles: () => api.listVehicles(), carriers: () => api.listCarriers(), responsables: id => api.responsables(id), dispatchExternal: p => api.dispatchExternalRoute(p), publish: async p => { try {
+        if (['CT-ESTE', 'CT-ALR'].includes(p.carrier_id)) {
+          p.customer_receipt_version = 1;
+          for (const stop of p.stops) {
+            if (stop.stop_type !== 'PEDIDO') continue;
+            stop.merchandise = (stop.order_numbers || []).filter(id => String(id) !== String(stop.ship_order)).flatMap(id => {
+              const order = window.OKD?.OrderIndex.get(String(id));
+              if (!order || order.isShipping) return [];
+              return (order.merchandiseLines || []).map(line => ({ ...line, order: String(id) }));
+            });
+          }
+        }
+        return await (p && p.revision_route_id ? api.publishRouteRevision(p) : api.publishRoute(p)); } catch (e) {
         // Reglas financieras cambiadas: se recalcula con la versión vigente y se pide revisar antes de publicar
         if (/ROUTING_RULES_OUTDATED/.test(e.message || '')) { const g = await api.routingRules(); window.OKD_APPLY_ROUTING && window.OKD_APPLY_ROUTING(g); throw new Error('Las reglas de asignación cambiaron (v' + g.version + '). Se recalcularon solo las asignaciones automáticas (las reasignaciones manuales se conservan): revisá la hoja y publicá de nuevo.'); }
         if (/(^|[^_])RULES_OUTDATED/.test(e.message || '')) { const f = await api.financialRules(); window.OKD_APPLY_RULES && window.OKD_APPLY_RULES(f); throw new Error('Las reglas financieras cambiaron (v' + f.version + '). Se recalculó la hoja: revisá los montos y publicá de nuevo.'); }
