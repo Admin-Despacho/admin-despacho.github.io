@@ -8,7 +8,7 @@ import asyncio, os, sys, json, re, time, traceback
 sys.path.insert(0, os.path.dirname(__file__))
 import run_driver_perfiles as dp
 from playwright.async_api import async_playwright
-dp.PORT = 4533; R = []; EXPECTED = 19
+dp.PORT = 4533; R = []; EXPECTED = 20
 if len(sys.argv) > 1: dp.DIST = sys.argv[1]
 OUT = sys.argv[2] if len(sys.argv) > 2 else '/tmp/okd_com_v2'
 K = 'okd_online_demo_v2'
@@ -165,6 +165,22 @@ async def main():
                 res('V2-C2 SESIONES SIMULTÁNEAS: con la ventana de decisión ABIERTA, la aprobación de OTRA sesión no la cierra ni borra lo escrito; avisa y BLOQUEA confirmar; al cerrarla, la bandeja muestra «Aprobada» (resolvió Gabriela) sin recargar ni navegar, sin botones de decisión',
                     c2['modal'] and 'cambió en el servidor' in c2['aviso'] and 'Aprobada' in c2['aviso'] and c2['go'] and c2['texto'] == 'Motivo que estaba escribiendo Wilfredo'
                     and c2b['az'].get('azId') == ids['X'] and c2b['az'].get('azStatus') == 'APROBADA' and c2b['lost'] and 'Gabriela' in c2b['txt'] and c2b['botones'] == 0, {'ventana': c2, 'despues': {k: c2b[k] for k in ('az', 'lost', 'botones')}})
+                await select(W, NEW['id'])
+                await W.click('[data-dec="APROBAR_CON_CAMBIOS"]')
+                await W.select_option('#dInst', '2')
+                await W.select_option('#dFreq', 'SEMANAL')
+                await W.fill('#dReason', 'Cambio de cuotas en revisión')
+                valid_before = await W.locator('#dGo').is_enabled()
+                version = (await api(G, 'comRequestDetail', NEW['id']))['version']
+                await api(G, 'comDecide', NEW['id'], version, 'APROBAR', None, None)
+                await nudge(W)
+                await W.wait_for_selector('[data-dec-stale]')
+                await W.select_option('#dInst', '3')
+                await W.fill('#dAmount', '275000')
+                res('V3 calendario válido editado después de una decisión remota mantiene Confirmar bloqueado',
+                    valid_before and await W.locator('#dGo').is_disabled()
+                    and await W.input_value('#dReason') == 'Cambio de cuotas en revisión')
+                await W.click('#comModal [data-close]')
                 # C3 RECHAZO desde otra sesión: Despacho y Comercial (dos pantallas abiertas) lo ven con el temporizador REAL de 20 s
                 await D.bring_to_front(); await go(D, '#/autorizaciones?v=despacho'); await select(D, ids['Y'])
                 await C.bring_to_front(); await go(C, '#/autorizaciones?v=comercial'); await C.evaluate('(id)=>{const b=document.querySelector(`#cRecent [data-select="${id}"]`); if(b) b.click()}', ids['Y']); await C.wait_for_timeout(500)
