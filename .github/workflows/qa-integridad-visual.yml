@@ -25,3 +25,21 @@ jobs:
           node scripts/verify_production_carrier_flow.mjs
           node scripts/verify_production_carrier_flow.mjs --dist
           node scripts/verify_production_build.mjs dist "$VITE_SUPABASE_URL"
+  actualizacion:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: nueva
+      - uses: actions/checkout@v4
+        with:
+          ref: 50866a7cc863cfdb2fe35ad45e24195cb3d95529
+          path: anterior
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: (cd anterior && npm ci && npm run build) && (cd nueva && npm ci && npm run build)
+      - run: pip install playwright && python -m playwright install --with-deps chromium
+      - run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          python nueva/tests/e2e/run_v427_pwa_upgrade.py anterior/dist nueva/dist /tmp/pwa
