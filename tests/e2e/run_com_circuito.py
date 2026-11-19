@@ -47,7 +47,7 @@ async def main():
                 await q.locator('#cSugg button', has_text='TECNOLOGIA DEL NORTE').first.click(); await q.wait_for_timeout(900)
                 cuit = await q.input_value('#cCuit'); kpi = await q.evaluate('()=>document.getElementById("cKpi").innerText.replace(/\\s+/g," ")')
                 await q.fill('#cOrder', '26764'); await q.fill('#cAmount', '2750000'); await q.select_option('#cInst', '4'); await q.select_option('#cFreq', 'SEMANAL'); await q.fill('#cFirst', await q.evaluate(AR_PLUS, 7)); await q.wait_for_timeout(300)
-                sched = await q.locator('#cSched .scheditem').count(); ov1 = await q.evaluate(OV)   # financiación con calendario: 4 semanales desde hoy+7 (las mismas fechas que antes)
+                sched = await q.locator('#cSched [data-cal-row]').count(); ov1 = await q.evaluate(OV)   # financiación con calendario: 4 semanales desde hoy+7 (las mismas fechas que antes)
                 await q.screenshot(path=os.path.join(OUT, '01_comercial_nueva_solicitud_android.png'), full_page=True)
                 await q.click('#cSend'); await q.wait_for_timeout(1500)
                 mine = await q.evaluate('()=>[...document.querySelectorAll(".requests [data-select]")].map(b=>b.innerText.replace(/\\s+/g," "))')

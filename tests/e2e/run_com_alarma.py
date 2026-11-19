@@ -35,18 +35,26 @@ async def main():
                 await base.login(op, 'operario@okdespacho.demo'); await base.builder(op)
                 await op.fill('#ids', '72001 72002 72003 72004'); await op.click('#btnSearch'); await op.wait_for_timeout(2500)
                 await base.type_amount(op, '72001', '1500'); await base.type_amount(op, '72002', '2000'); await op.evaluate('async()=>{ await RouteStore.flush(); await window.OKD_ONLINE.api.comConfig(); }')
+                # HOTFIX 9c3240c (publicado): la ventana PUBLICAR HOJA ya NO muestra autorizaciones comerciales ni el formulario de alarma.
+                # Se verifica eso y la alarma por pedido se emite por la MISMA operación del servidor (com_alarm_raise), con las mismas exigencias.
+                await op.evaluate('()=>{const B=window.OKD_BRIDGE&&window.OKD_BRIDGE.com; window.__alCalls={alerts:0, alarm:0, bridge:!!(B&&B.alerts&&B.alarm)}; if(B){for(const k of ["alerts","alarm"]){const o=B[k]; if(o) B[k]=async(...a)=>{window.__alCalls[k]++; return o(...a)}}}}')
                 await base.open_publish(op); await op.wait_for_timeout(2500)
-                idx = await op.evaluate('()=>[...document.querySelectorAll("[data-al-order] option")].findIndex(o=>o.textContent.startsWith("72003"))')
-                await op.select_option('[data-al-order]', str(idx)); await op.fill('[data-al-reason]', 'Cliente pide financiación antes de cargar el pedido')
-                await op.click('[data-al-go]'); await op.wait_for_timeout(1200); r1 = await op.evaluate('()=>document.querySelector("[data-al-res]").innerText')
-                await op.click('[data-al-go]'); await op.wait_for_timeout(1200); r1b = await op.evaluate('()=>document.querySelector("[data-al-res]").innerText')   # misma intención: muestra el resultado, no reenvía
-                await op.click('[data-al-new]'); await op.fill('[data-al-reason]', 'Cliente pide financiación antes de cargar el pedido'); await op.click('[data-al-go]'); await op.wait_for_timeout(1200)
-                r2 = await op.evaluate('()=>document.querySelector("[data-al-res]").innerText')   # NUEVA operación para el mismo pedido activo → la existente
+                dlg = await op.evaluate('''()=>{const m=document.getElementById("publishModal"), t=m?m.innerText:""; return {pubCom:!!document.getElementById("pubCom"), form:!!document.querySelector("[data-al-order],[data-al-go],.comalarmform"),
+                  texto_com:/AUTORIZACI[OÓ]N|APROBACI[OÓ]N URGENTE|CONSULTAR APROBACI/i.test(t), llamadas:window.__alCalls, sheet:RouteStore.sheetId,
+                  cli:(RouteStore.rows.find(r=>String(r.mainOrder)==="72003")||{}).cliente||"", cuit:((RouteStore.rows.find(r=>String(r.mainOrder)==="72003")||{}).calc||{}).cuit||""}}''')
+                await op.screenshot(path=os.path.join(OUT, '1_publicar_sin_autorizaciones_hotfix.png'))
+                await op.evaluate('()=>{const b=document.getElementById("pubCancel"); if(b) b.click()}'); await op.wait_for_timeout(400)
+                RAISE = '''async([o,s,c,cu,re,op])=>{try{return await window.OKD_ONLINE.api.comAlarmRaise(o,s,c,cu,re,op)}catch(e){return {error:e.code||e.message}}}'''
+                motivo = 'Cliente pide financiación antes de cargar el pedido'
+                r1 = await op.evaluate(RAISE, ['72003', dlg['sheet'], dlg['cli'], dlg['cuit'], motivo, 'al-e01-op-1'])
+                r1b = await op.evaluate(RAISE, ['72003', dlg['sheet'], dlg['cli'], dlg['cuit'], motivo, 'al-e01-op-1'])   # misma intención (mismo op_id): mismo resultado, no reenvía
+                r2 = await op.evaluate(RAISE, ['72003', dlg['sheet'], dlg['cli'], dlg['cuit'], motivo, 'al-e01-op-2'])    # NUEVA operación para el mismo pedido activo → la existente
                 al = await op.evaluate(ALM)
-                await op.locator('.comalarmform').scroll_into_view_if_needed(); await op.screenshot(path=os.path.join(OUT, '1_revisar_solicitar_aprobacion_urgente.png'))
-                res('AL-E01 REVISAR: «SOLICITAR APROBACIÓN URGENTE» por pedido (explícito) → ALARMA ENVIADA · PENDIENTE DE ATENCIÓN, vinculada a pedido, hoja y solicitante; repetir la MISMA intención muestra el resultado y una NUEVA operación recibe la existente: NO duplica',
-                    'ENVIADA' in r1 and 'PENDIENTE DE ATENCIÓN' in r1 and r1b == r1 and 'Ya hay una alarma ACTIVA' in r2 and len(al) == 1 and al[0]['order_ref'] == '72003' and al[0]['status'] == 'PENDIENTE_ATENCION'
-                    and al[0]['sheet_key'] == await op.evaluate('()=>RouteStore.sheetId'), {'r1': r1, 'r1b': r1b, 'r2': r2})
+                res('AL-E01 HOTFIX: PUBLICAR HOJA no muestra autorizaciones comerciales ni el formulario de alarma y no las consulta; la alarma por pedido (operación del servidor) queda PENDIENTE DE ATENCIÓN vinculada a pedido, hoja y solicitante; repetir la MISMA operación devuelve el mismo resultado y una NUEVA recibe la existente: NO duplica',
+                    not dlg['pubCom'] and not dlg['form'] and not dlg['texto_com'] and dlg['llamadas']['bridge'] and dlg['llamadas']['alerts'] == 0 and dlg['llamadas']['alarm'] == 0
+                    and r1.get('number') and r1.get('status') == 'PENDIENTE_ATENCION' and not r1.get('existing') and r1b.get('id') == r1.get('id') and r1b.get('repeated')
+                    and r2.get('existing') and r2.get('id') == r1.get('id') and len(al) == 1 and al[0]['order_ref'] == '72003' and al[0]['status'] == 'PENDIENTE_ATENCION'
+                    and al[0]['sheet_key'] == dlg['sheet'] and al[0].get('raised_by') == 'u-operario', {'ventana': {k: dlg[k] for k in ('pubCom', 'form', 'texto_com', 'llamadas')}, 'r1': r1, 'r1b': r1b, 'r2': r2})
                 # Wilfredo en OTRA pantalla (no el módulo Comercial): Dashboard/Despacho
                 wi = await (await mk()).new_page(); await wi.goto(f'http://127.0.0.1:{dp.PORT}/'); await sync(op, wi); await enter(wi, 'wilfredo@okdespacho.demo')
                 await poll(wi); ov = await wi.evaluate(OV); st0 = await wi.evaluate(ST)

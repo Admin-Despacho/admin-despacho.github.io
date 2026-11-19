@@ -1,0 +1,19 @@
+name: Certificar autorizaciones V3
+on:
+  push:
+    branches: [qa/autorizaciones-visual-v3]
+permissions:
+  contents: read
+jobs:
+  navegador:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci && npm test && npm run build
+      - run: pip install playwright openpyxl && python -m playwright install --with-deps chromium
+      - run: python tests/e2e/run_com_seguimiento_v2.py dist
+      - if: always()
+        run: python tests/e2e/run_com_seguimiento_visual.py dist
