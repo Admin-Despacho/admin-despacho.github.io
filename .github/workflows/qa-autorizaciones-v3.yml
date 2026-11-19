@@ -6,12 +6,13 @@ permissions:
   contents: read
 jobs:
   navegador:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: npm ci && npm test && npm run build
       - run: pip install playwright openpyxl && python -m playwright install --with-deps chromium
       - run: python tests/e2e/run_com_seguimiento_v2.py dist
