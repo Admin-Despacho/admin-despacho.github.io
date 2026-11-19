@@ -1,0 +1,27 @@
+name: Verificar artefacto y respuestas tardías
+on:
+  push:
+    branches: [qa/autorizaciones-visual-integridad]
+permissions:
+  contents: read
+jobs:
+  verificar:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci && npm run build && mv dist dist-demo
+      - run: pip install playwright && python -m playwright install --with-deps chromium
+      - run: python tests/e2e/run_com_tardia.py dist-demo
+      - run: npm install --no-save --package-lock=false playwright@1.51.1 && npx playwright install chromium
+      - name: Validar build efectivo sin acceder a Supabase
+        run: |
+          export VITE_SUPABASE_URL=https://uqwilzzeyfuatlmwzxna.supabase.co
+          export VITE_SUPABASE_ANON_KEY=$(awk '/VITE_SUPABASE_ANON_KEY: sb_publishable/{print $2;exit}' .github/workflows/deploy-pages.yml)
+          npm run build
+          node scripts/write_build_info.mjs "$GITHUB_SHA"
+          node scripts/verify_production_carrier_flow.mjs
+          node scripts/verify_production_carrier_flow.mjs --dist
+          node scripts/verify_production_build.mjs dist "$VITE_SUPABASE_URL"
