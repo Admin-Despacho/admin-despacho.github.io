@@ -1,0 +1,18 @@
+name: Regresiones en Chrome
+on:
+  push:
+    branches: [qa/autorizaciones-visual-chrome]
+permissions:
+  contents: read
+jobs:
+  suite:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [run_com_cuotas, run_com_circuito, run_com_alarma, run_com_v4, run_com_consultar_aprobacion, run_e2e]
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm run build
+      - run: pip install playwright openpyxl
+      - run: CHROMIUM_PATH=$(which google-chrome) python tests/e2e/${{ matrix.suite }}.py dist
