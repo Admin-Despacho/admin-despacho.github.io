@@ -88,20 +88,41 @@ export function receiptEmail({ receipt, stop, inlineLogo }) {
   const attachments = logo ? [{ filename: inlineLogo.filename, content: inlineLogo.content, content_type: inlineLogo.content_type, content_id: inlineLogo.content_id }] : undefined;
   return attachments ? { subject, html, text, attachments } : { subject, html, text };
 }
-export function customerEmail({ kind, stop }) {
+function scheduledDelivery(stop, orders, inlineLogo) {
+  const subject = 'OK Accesorios · Reparto programado' + (orders ? ' · Pedido ' + orders : '');
+  const greeting = stop.client_name ? 'Hola, ' + stop.client_name + '.' : 'Hola.';
+  const intro = 'Ya incluimos tu pedido en el reparto de Cristian Torres.';
+  const details = [
+    ['Pedido', orders], ['Hoja de reparto', stop.routes?.number],
+    ['Domicilio de entrega', stop.address], ['Bultos', stop.bultos],
+  ].filter(([, v]) => v != null && String(v).trim() !== '');
+  const next = 'Cuando se registre la entrega, te enviaremos el comprobante por correo.';
+  const thanks = 'Gracias por elegir OK Accesorios y confiar en nuestro equipo.';
+  const logo = inlineLogo?.content && inlineLogo?.content_id ? inlineLogo : null;
+  const rows = details.map(([label, value]) => '<tr><th scope="row" align="left" style="padding:10px 8px;border-bottom:1px solid #dce5e8;font-weight:normal">' + label + '</th><td style="padding:10px 8px;border-bottom:1px solid #dce5e8"><strong>' + esc(value) + '</strong></td></tr>').join('');
+  const html = '<!doctype html><html lang="es"><body style="margin:0;background:#eef2f4"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:16px 8px">' +
+    '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff;color:#17313d;text-align:left;' + F + 'font-size:16px;line-height:1.5"><tr><td style="padding:20px 24px;border-bottom:4px solid #12bfd1">' +
+    (logo ? '<img src="cid:' + esc(logo.content_id) + '" alt="OK Accesorios" width="200" style="display:block;max-width:100%;height:auto">' : '<strong>OK ACCESORIOS</strong>') +
+    '</td></tr><tr><td bgcolor="#102c3d" style="padding:20px 24px;color:white"><h1 style="font-size:24px;margin:0">Tu pedido está programado para reparto</h1></td></tr>' +
+    '<tr><td style="padding:8px 24px 24px"><p>' + esc(greeting) + '</p><p>' + intro + '</p>' +
+    (rows ? '<table width="100%" cellspacing="0" style="font-size:15px;background:#f4f8f9">' + rows + '</table>' : '') +
+    '<p>' + next + '</p><p>' + thanks + '<br><strong>Equipo de Despacho · OK Accesorios</strong></p></td></tr></table></td></tr></table></body></html>';
+  const text = [greeting, intro, ...details.map(([k,v]) => k + ': ' + v), next, thanks, 'Equipo de Despacho · OK Accesorios'].join('\n\n');
+  return { subject, html, text, customerReceiptReview: true, ...(logo ? { attachments: [logo] } : {}) };
+}
+export function customerEmail({ kind, stop, inlineLogo }) {
   const orders = (stop.order_numbers || []).filter(Boolean).join(' + ');
-  const reviewDeparture = kind === 'ON_THE_WAY' && ['CT-ALR', 'CT-ESTE'].includes(stop.routes?.carrier_id);
-  const subject = reviewDeparture ? 'OK Accesorios · Tu pedido está programado para reparto' : kind === 'ON_THE_WAY' ? 'OK Accesorios · Tu pedido está en camino' : kind === 'PARTIAL' ? 'OK Accesorios · Entregamos parte de tu pedido' : 'OK Accesorios · Tu pedido fue entregado';
+  if (kind === 'ON_THE_WAY' && ['CT-ALR', 'CT-ESTE'].includes(stop.routes?.carrier_id)) return scheduledDelivery(stop, orders, inlineLogo);
+  const subject = kind === 'ON_THE_WAY' ? 'OK Accesorios · Tu pedido está en camino' : kind === 'PARTIAL' ? 'OK Accesorios · Entregamos parte de tu pedido' : 'OK Accesorios · Tu pedido fue entregado';
   // V4.26: se envía al confirmarse la SALIDA REAL del reparto (y como máximo una vez por cliente/parada y hoja, con todos sus pedidos): no promete ser la próxima entrega
-  const body = reviewDeparture ? 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' ya está incluido en la hoja de reparto de Cristian Torres.'
-    : kind === 'ON_THE_WAY' ? 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' ya salió de nuestro depósito y está en camino. Lo vas a recibir en el transcurso de la jornada de reparto.'
+  const body = kind === 'ON_THE_WAY' ? 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' ya salió de nuestro depósito y está en camino. Lo vas a recibir en el transcurso de la jornada de reparto.'
     : kind === 'PARTIAL' ? 'Entregamos <b>parte</b> de tu pedido' + (orders ? ' ' + esc(orders) : '') + '. Nos vamos a comunicar para coordinar el resto.'
     : 'Tu pedido' + (orders ? ' ' + esc(orders) : '') + ' fue entregado. ¡Gracias por tu compra!';
   const html = '<!doctype html><html lang="es"><body style="margin:0;background:#eef2f4;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:20px 8px;">' +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff;border:1px solid #d8e1e5;border-radius:14px;">' +
     '<tr><td style="background:#07151b;border-bottom:4px solid #16d6e5;padding:18px;border-radius:14px 14px 0 0;' + F + 'font-size:20px;font-weight:bold;color:#fff;">OK ACCESORIOS</td></tr>' +
     '<tr><td style="' + F + 'padding:18px;font-size:14px;color:#111;line-height:1.6;">Hola ' + esc(stop.client_name) + ',<br>' + body + '</td></tr></table></td></tr></table></body></html>';
-  return { customerReceiptReview: reviewDeparture, subject, html, text: subject + '\n' + body.replace(/<[^>]+>/g, '') };
+  return { customerReceiptReview: false, subject, html, text: subject + '\n' + body.replace(/<[^>]+>/g, '') };
 }
 /** store: { listJobs(q), stopFor(job), updateJob(id, patch) } — idempotente por job; una falla no revierte la entrega */
 export async function sendCustomerEmails({ store, provider, onlyIds, inlineLogo }) {
@@ -109,7 +130,7 @@ export async function sendCustomerEmails({ store, provider, onlyIds, inlineLogo 
   for (const j of (await store.listJobs({ statuses: ['QUEUED', 'ERROR'], ids: onlyIds })).slice(0,provider.batchLimit?await provider.batchLimit():Infinity)) {
     const stop = await store.stopFor(j);
     let mail;
-    try { mail = j.kind === 'RECIBIDO_CONFORME' ? receiptEmail({ receipt: await store.receiptFor(j), stop, inlineLogo }) : customerEmail({ kind: j.kind, stop }); }
+    try { mail = j.kind === 'RECIBIDO_CONFORME' ? receiptEmail({ receipt: await store.receiptFor(j), stop, inlineLogo }) : customerEmail({ kind: j.kind, stop, inlineLogo }); }
     catch (e) { await store.updateJob(j.id, { status: 'ERROR', error: 'COMPROBANTE: ' + String(e.message || e), retry_count: (j.retry_count || 0) + 1 }); out.push({ id: j.id, status: 'ERROR' }); continue; }
     try { const r = await provider.send({ to: j.recipient, idempotencyKey: j.idempotency_key, ...mail }); await store.updateJob(j.id, { status: 'SENT', sent_at: new Date().toISOString(), provider_id: r && r.id, error: null }); out.push({ id: j.id, status: 'SENT' }); }
     catch (e) { await store.updateJob(j.id, { status: 'ERROR', error: String(e.message || e), retry_count: (j.retry_count || 0) + 1 }); out.push({ id: j.id, status: 'ERROR' }); }
