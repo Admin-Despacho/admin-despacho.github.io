@@ -2,8 +2,6 @@
 import { summarizeDay, renderDailyDispatch } from './daily-dispatch-report.js';
 import { buildDailyMime } from './daily-dispatch-mime.js';
 import { commercialDelivery, distributionLists } from './commercial-mail-delivery.js';
-import { digest } from './corporate-mail.js';
-const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const fail=code=>Object.assign(Error(code),{code});
 const codeOf=e=>String(e?.code||e?.message||'ERROR_DESCONOCIDO').slice(0,160);
 const transient=new Set(['SMTP_RATE_LIMIT','SMTP_NOT_ACTIVE','SMTP_BUSY','SMTP_CREDENTIAL_MISSING','SMTP_AUTH_REJECTED','SMTP_CONFIG_INVALID','SMTP_AUTH_UNSUPPORTED','SMTP_STATE_UNAVAILABLE','CONFIGURATION_CHANGED','ABORTED']);
@@ -18,6 +16,7 @@ function lists(recipients){
 export function dailyDispatchStore(sb){
  const rpc=async(name,args={})=>{const {data,error}=await sb.rpc(name,args);if(error)throw fail('INFORME_DB_'+name);return data;};
  return {
+  config:()=>rpc('daily_dispatch_config'),
   prepare:()=>rpc('daily_dispatch_prepare'),
   seal:(id,snapshot)=>rpc('daily_dispatch_seal',{p_id:id,p_snapshot:snapshot}),
   claim:()=>rpc('daily_dispatch_claim'),
@@ -48,7 +47,9 @@ async function loadAttachments(store,manifest,maxMimeBytes){
 export async function sendDailyDispatch(sb,options={}){
  const store=options.store||dailyDispatchStore(sb);
  const delivery=options.delivery||commercialDelivery(sb,{...options,namespace:'informe-diario'});
- const maxMimeBytes=options.maxMimeBytes;
+ const config=options.config||await store.config();
+ if(!config?.active)return {sent:0,held:0,retry:0,skipped:0,stop:'DISABLED'};
+ const maxMimeBytes=config.max_mime_bytes;
  const out={sent:0,held:0,retry:0,skipped:0,stop:null};
  if(!Number.isSafeInteger(maxMimeBytes)||maxMimeBytes<=0)return {...out,stop:'LIMITE_ADJUNTOS_NO_CONFIRMADO'};
  const runtime=await delivery.runtime();
@@ -91,6 +92,7 @@ export async function sendDailyDispatch(sb,options={}){
   }catch(e){
    const c=codeOf(e);
    if(ambiguous(e)||c==='RESULTADO_NO_REGISTRADO'){await finish('HELD',null,c).catch(()=>{});out.held++;continue;}
+   if(e.reason==='CONFIGURATION_CHANGED'){await finish('HELD',null,'CONFIGURATION_CHANGED').catch(()=>{});out.held++;continue;}
    if(transient.has(c)){await finish('PENDING',null,c).catch(()=>{});out.retry++;out.stop=c;break;}
    // Archivo cambiado, distribución inválida, rechazo permanente o cualquier falla desconocida: intervención administrativa.
    await finish('HELD',null,c).catch(()=>{});out.held++;
