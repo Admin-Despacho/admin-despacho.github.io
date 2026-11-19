@@ -30,7 +30,7 @@ function unifiedReceipt({ receipt, stop, inlineLogo }) {
     '<h2 '+heading+'>Datos de recepción</h2>'+table+detailRows+'</table><p style="font-size:13px;color:#526471">Si necesitás consultar por esta entrega, indicá el número de pedido o de comprobante.</p></td></tr>'+
     '<tr><td bgcolor="#102c3d" style="padding:15px 24px;color:white"><strong>OK Accesorios</strong> · Equipo de Despacho</td></tr></table></td></tr></table></body></html>';
   const text = [subject, 'Entrega confirmada', s.client_name, ...items.map(i=>[i.code,i.description,i.quantity].filter(Boolean).join(' · ')), ...details.filter(([,v])=>v!=null).map(([k,v])=>k+': '+v)].join('\n');
-  return { subject, html, text, ...(inlineLogo?.content ? {attachments:[inlineLogo]} : {}) };
+  return { customerReceiptReview: true, subject, html, text, ...(inlineLogo?.content ? {attachments:[inlineLogo]} : {}) };
 }
 export function receiptEmail({ receipt, stop, inlineLogo }) {
   if (receipt.snapshot?.customer_receipt_version === 1) return unifiedReceipt({ receipt, stop, inlineLogo });

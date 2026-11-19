@@ -38,7 +38,7 @@ export function corporateMail(sb,{connectTls,connect,startTls,transport,scope='m
  const rpc=async(name,args={})=>unwrap(await sb.rpc(name,args));
  const runtime=()=>rpc('comm_mail_runtime');
  const credentials=()=>rpc('comm_smtp_credentials');
- async function transmit({key,fingerprint,to,raw,beforeData}){
+ async function transmit({key,fingerprint,to,raw,beforeData,customerReceiptReview}){
   const c=await credentials();if(!c)throw new SmtpError('SMTP_CREDENTIAL_MISSING',{status:401});
   const claim=await rpc('comm_smtp_claim',{p_key:key,p_fingerprint:fingerprint});
   if(claim.state==='ACCEPTED')return {id:claim.provider_id,cached:true};
@@ -48,7 +48,7 @@ export function corporateMail(sb,{connectTls,connect,startTls,transport,scope='m
   try{
    const check=async()=>{const st=await runtime();if(st.provider!=='SMTP'||!st.connected||st.secret_version!==c.secret_version)throw Object.assign(new Error('MAIL_CONFIGURATION_CHANGED'),{code:'ABORTED'});if(beforeData)await beforeData();};
    await check();
-   const r=await transport.send(c,{from:c.from,to,raw},check);accepted=true;
+   const r=await transport.send(c,{from:c.from,to,raw,customerReceiptReview},check);accepted=true;
    await rpc('comm_smtp_finish',{p_key:key,p_token:claim.token,p_state:'ACCEPTED',p_provider_id:r.id});
    return r;
   }catch(e){
@@ -63,7 +63,7 @@ export function corporateMail(sb,{connectTls,connect,startTls,transport,scope='m
   runtime,
   async prior(key){const p=await rpc('comm_smtp_lookup',{p_key:scope+':'+key});if(p?.state==='ACCEPTED')return {id:p.provider_id};if(p&&['HELD','PROCESSING'].includes(p.state))throw new SmtpError('SMTP_POR_VERIFICAR',{ambiguous:true});if(p?.state==='REJECTED')throw new SmtpError('SMTP_PREVIOUSLY_REJECTED',{status:400});return null;},
   async probe(){const c=await credentials();if(!c)throw new SmtpError('SMTP_CREDENTIAL_MISSING',{status:401});try{await transport.probe(c);const verified=await rpc('comm_smtp_probe_result',{p_ok:true,p_secret_version:c.secret_version});if(!verified)throw new SmtpError('SMTP_CREDENTIAL_CHANGED');return {authenticated:true,mail_sent:false};}catch(e){await rpc('comm_smtp_probe_result',{p_ok:false,p_secret_version:c.secret_version}).catch(()=>{});throw e;}},
-  async send(m){const st=await runtime();if(st.provider!=='SMTP'||!st.connected)throw new SmtpError('SMTP_NOT_ACTIVE',{status:401});const n=normalizeMail(m),key=scope+':'+m.idempotencyKey,hash=await digest(JSON.stringify(n));return transmit({key,fingerprint:hash,to:n.to,raw:corporateMime(n,st.email,await digest(key)),beforeData:m.beforeData});},
+  async send(m){const st=await runtime();if(st.provider!=='SMTP'||!st.connected)throw new SmtpError('SMTP_NOT_ACTIVE',{status:401});const n=normalizeMail(m),key=scope+':'+m.idempotencyKey,hash=await digest(JSON.stringify(n));return transmit({key,fingerprint:hash,to:n.to,raw:corporateMime(n,st.email,await digest(key)),customerReceiptReview:m.customerReceiptReview === true,beforeData:m.beforeData});},
   // Contrato compatible con gmailProvider. Se exige identidad estable de la entrega; no se inventa una clave por intento.
   prepare:async()=>null,tokenFresh:()=>true,kind:'SMTP',
   async post(encoded,_token,{idempotencyKey,beforeData}={}){

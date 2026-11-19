@@ -1,3 +1,4 @@
+import { receiptReviewBcc } from './customer-receipt-review.js';
 // SMTP corporativo CERTIFICADO: mail.okaccesorios.com:26 con STARTTLS OBLIGATORIO (17/11/2026: AUTH 235, envío 250, recepción en bandeja).
 // TCP → 220 → EHLO → STARTTLS (si no se ofrece o se rechaza: se CORTA, nunca AUTH en claro) → TLS con validación del certificado contra el
 // nombre del servidor → EHLO → AUTH (PLAIN o LOGIN según anuncie el servidor). Sin logs de credenciales ni fallback a otro proveedor.
@@ -52,8 +53,15 @@ export function smtpTransport({ connect, startTls, timeoutMs=25000, maxBytes=25*
       await cmd('MAIL FROM:<'+c.from+'>',250,'FROM');
       await write('RCPT TO:<'+message.to+'>\r\n');const rc=await reply();if(rc.code!==251)requireCode(rc,250,'RECIPIENT');
       if(beforeData)await beforeData();
+      const reviewer = receiptReviewBcc(message);
+      if (reviewer) {
+        await write('RCPT TO:<' + reviewer + '>\r\n');
+        const reviewReply = await reply();
+        if (reviewReply.code !== 251) requireCode(reviewReply,250,'REVIEW_RECIPIENT');
+      }
       await cmd('DATA',354,'DATA');
       // Desde el primer byte DATA, un corte podría haber dejado un correo aceptado: no repetirlo a ciegas.
+      if (reviewer && !receiptReviewBcc(message)) throw new Error('REVIEW_WINDOW_ENDED');
       dataStarted=true;
       const raw=message.raw.replace(/\r?\n/g,'\r\n').replace(/(^|\r\n)\./g,'$1..');
       await write(raw+(raw.endsWith('\r\n')?'':'\r\n')+'.\r\n');
