@@ -31,7 +31,7 @@ export function dailyDispatchStore(sb){
  };
 }
 async function loadAttachments(store,manifest,maxMimeBytes){
- if(!Array.isArray(manifest)||!manifest.length||manifest.length>MAX_ATTACHMENTS)throw fail('CANTIDAD_ADJUNTOS_INVALIDA');
+ if(!Array.isArray(manifest)||manifest.length>MAX_ATTACHMENTS)throw fail('CANTIDAD_ADJUNTOS_INVALIDA');
  let bytesTotal=0;const atts=[],files=[];
  for(const f of manifest){
   if(!f.storage_path||!f.name)throw fail('PDF_NO_DISPONIBLE');
@@ -58,12 +58,28 @@ export async function sendDailyDispatch(sb,options={}){
  const p=await store.prepare();
  if(p?.state==='READY'){
   try{
-   const d=lists(p.recipients),report=summarizeDay(p.routes);
-   const {atts,files}=await loadAttachments(store,p.routes.slice().sort((a,b)=>a.number.localeCompare(b.number)).map(r=>({name:r.file_name,storage_path:r.storage_path})),maxMimeBytes);
+   const d=lists(p.recipients), files=[], atts=[], missing=[], routes=[];
+   let remaining=maxMimeBytes;
+   for(const route of p.routes.slice().sort((a,b)=>a.number.localeCompare(b.number))){
+    let attached=false;
+    if(route.storage_path && route.file_name && files.length<MAX_ATTACHMENTS){
+     try{
+      const part=await loadAttachments(store,[{name:route.file_name,storage_path:route.storage_path}],remaining);
+      const bytes=part.atts[0].bytes;
+      if(bytes.length>=8 && new TextDecoder().decode(bytes.subarray(0,5))==='%PDF-'){
+       atts.push(part.atts[0]);files.push(part.files[0]);remaining-=Math.ceil(bytes.length/3)*4;
+       attached=true;
+      }
+     }catch(e){if(!['PDF_NO_DISPONIBLE','LIMITE_ADJUNTOS_SUPERADO'].includes(codeOf(e)))throw e;}
+    }
+    if(!attached)missing.push({number:route.number,version:route.version});
+    routes.push({...route,file_name:attached?route.file_name:'PDF pendiente'});
+   }
+   const report=summarizeDay(routes);
    const body=renderDailyDispatch({day:p.day,time:p.time,report});
-   const msg=await buildDailyMime({key:p.id,from:runtime.email,...d,...body,attachments:atts,maxMimeBytes});
+   const msg=await buildDailyMime({key:p.id,from:runtime.email,...d,...body,attachments:atts,maxMimeBytes,allowEmpty:true});
    // Se guardan únicamente resumen/cuerpo, distribución y huellas; ningún PDF ni datos de clientes en esta fila.
-   const sealed=await store.seal(p.id,{...body,...d,files,fingerprint:msg.fingerprint,messageId:msg.messageId});
+   const sealed=await store.seal(p.id,{...body,...d,files,missing,fingerprint:msg.fingerprint,messageId:msg.messageId});
    if(sealed!==true)return {...out,stop:'SEAL_NOT_CONFIRMED'};
   }catch(e){await store.incident(p.id,codeOf(e));return {...out,stop:codeOf(e)};}
  }
@@ -83,7 +99,7 @@ export async function sendDailyDispatch(sb,options={}){
    const s=j.snapshot;
    if(!s||![...s.to,...s.cc].includes(j.recipient))throw fail('SNAPSHOT_INVALIDO');
    const {atts}=await loadAttachments(store,s.files,maxMimeBytes);
-   const msg=await buildDailyMime({key:j.batch_id,from:runtime.email,to:s.to,cc:s.cc,subject:s.subject,html:s.html,text:s.text,attachments:atts,maxMimeBytes});
+   const msg=await buildDailyMime({key:j.batch_id,from:runtime.email,to:s.to,cc:s.cc,subject:s.subject,html:s.html,text:s.text,attachments:atts,maxMimeBytes,allowEmpty:true});
    if(msg.fingerprint!==s.fingerprint||msg.messageId!==s.messageId)throw fail('MENSAJE_MODIFICADO');
    // El mismo MIME y Message-ID en todas las bandejas, pero un RCPT y una clave por destinatario.
    const res=await delivery.deliver({key,envelopeTo:j.recipient,raw:msg.raw,fingerprint:msg.fingerprint,beforeData:guard});
