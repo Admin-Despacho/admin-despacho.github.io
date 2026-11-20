@@ -15,3 +15,16 @@ describe('informe diario',()=>{
  it('reconcilia aceptación previa sin reenviar ni descargar PDF',async()=>{const job={state:'CLAIMED',id:'j',batch_id:'b',recipient:'a@example.com',token:'t'};const store={config:async()=>({active:true,max_mime_bytes:100000}),prepare:async()=>({state:'ALREADY_CREATED'}),claim:vi.fn().mockResolvedValueOnce(job).mockResolvedValueOnce({state:'NO_PENDING'}),finish:vi.fn(async()=>true),download:vi.fn()};const delivery={runtime:async()=>({provider:'SMTP',connected:true,email:args.from}),lookup:async()=>({state:'ACCEPTED',id:'ref'}),deliver:vi.fn()};expect((await sendDailyDispatch(null,{store,delivery})).sent).toBe(1);expect(delivery.deliver).not.toHaveBeenCalled();expect(store.download).not.toHaveBeenCalled();});
  it('retiene resultado incierto sin reenviar',async()=>{const job={state:'CLAIMED',id:'j',batch_id:'b',recipient:'a@example.com',token:'t'};const store={config:async()=>({active:true,max_mime_bytes:100000}),prepare:async()=>({state:'ALREADY_CREATED'}),claim:vi.fn().mockResolvedValueOnce(job).mockResolvedValueOnce({state:'NO_PENDING'}),finish:vi.fn(async()=>true)};const delivery={runtime:async()=>({provider:'SMTP',connected:true,email:args.from}),lookup:async()=>({state:'HELD'}),deliver:vi.fn()};expect((await sendDailyDispatch(null,{store,delivery})).held).toBe(1);expect(delivery.deliver).not.toHaveBeenCalled();});
 });
+
+describe('continuidad del informe al cierre',()=>{
+ it.each([[],[{...route,storage_path:null,file_name:null}],[route,{...route,number:'02-000001',storage_path:null,file_name:null}]])('sella todos los movimientos con los adjuntos disponibles',async(...input)=>{
+   const routes=input.filter(r=>r && typeof r==='object' && 'number' in r);
+   const seal=vi.fn(async()=>true);
+   const store={config:async()=>({active:true,max_mime_bytes:100000}),prepare:async()=>({state:'READY',id:'batch1',day:'2026-11-20',time:'17:30',recipients:args.to,routes}),download:async()=>pdf,seal,claim:async()=>({state:'NO_PENDING'})};
+   await sendDailyDispatch(null,{store,delivery:{runtime:async()=>({provider:'SMTP',connected:true,email:args.from})}});
+   const snapshot=seal.mock.calls[0][1];
+   expect(snapshot.files.length).toBe(routes.filter(r=>r.storage_path).length);
+   expect(snapshot.missing.length).toBe(routes.filter(r=>!r.storage_path).length);
+   expect(snapshot.text).toContain(routes.length?'PDF pendientes':'no hubo hojas');
+ });
+});
