@@ -6,12 +6,12 @@ const base64=bytes=>{let s='';for(let i=0;i<bytes.length;i+=32768)s+=String.from
 const fold=s=>(s.match(/.{1,76}/g)||[]).join('\r\n')+'\r\n';
 const word=s=>'=?UTF-8?B?'+base64(enc.encode(s))+'?=';
 const addresses=(key,ls)=>ls.length?key+': '+ls.map(a=>'<'+a+'>').join(',\r\n ')+'\r\n':'';
-export async function buildDailyMime({key,from,to,cc,subject,html,text,attachments,maxMimeBytes}){
+export async function buildDailyMime({key,from,to,cc,subject,html,text,attachments,maxMimeBytes,allowEmpty=false}){
  if(from!=='fgutierrez@okaccesorios.com')throw Error('REMITENTE_INVALIDO');
  if(!/^[a-zA-Z0-9:_-]{1,160}$/.test(key)||!subject||/[\r\n\0]/.test(subject))throw Error('MENSAJE_INVALIDO');
  if(!Number.isSafeInteger(maxMimeBytes)||maxMimeBytes<=0)throw Error('LIMITE_ADJUNTOS_NO_CONFIRMADO');
  const d=distributionLists(to,cc);if(!d.to.length)throw Error('SIN_DESTINATARIO_PRINCIPAL');
- if(!Array.isArray(attachments)||!attachments.length)throw Error('SIN_ADJUNTOS');
+ if(!Array.isArray(attachments)||(!attachments.length&&!allowEmpty))throw Error('SIN_ADJUNTOS');
  const names=new Set();let estimated=0;
  for(const a of attachments){
   if(!a||typeof a.name!=='string'||!/^[a-zA-Z0-9_.-]+\.pdf$/i.test(a.name)||names.has(a.name.toLowerCase()))throw Error('NOMBRE_PDF_INVALIDO');
